@@ -1,0 +1,10 @@
+name: Release
+on:
+  release:
+    types: [created]
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release pipeline placeholder."

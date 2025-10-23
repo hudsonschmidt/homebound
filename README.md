@@ -54,8 +54,3 @@ Create a trip plan with start time and ETA, share one-tap SMS/web links for chec
 - **tokens**: id, plan_id, purpose (checkin|checkout), nonce, exp, hmac
 - **events**: id, plan_id, kind (created|checkin|checkout|overdue|notify), at, meta
 - **jobs**: id, plan_id, run_at, kind (overdue), canceled_at
-
----
-
-## API (sketch)
-**Owner endpoints**

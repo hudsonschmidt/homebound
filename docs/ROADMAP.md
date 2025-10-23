@@ -1,0 +1,5 @@
+- PDF safety card v1
+- SMS webhooks (Twilio)
+- Per-participant check-ins
+- GPX upload
+- i18n

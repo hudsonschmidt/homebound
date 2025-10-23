@@ -1,0 +1,6 @@
+# Data Model (MVP)
+plans(id, title, start_at, eta_at, grace_minutes, location_text, notes, status)
+contacts(id, plan_id, name, phone, email, notify_on_overdue)
+events(id, plan_id, kind, at, meta)
+tokens(id, plan_id, purpose, nonce, exp, hmac)
+jobs(id, plan_id, run_at, kind, canceled_at)
