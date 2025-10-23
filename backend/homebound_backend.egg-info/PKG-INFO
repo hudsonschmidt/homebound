@@ -9,6 +9,7 @@ Requires-Dist: uvicorn[standard]>=0.29
 Requires-Dist: pydantic>=2.6
 Requires-Dist: pydantic-settings>=2.2
 Requires-Dist: SQLAlchemy>=2.0
+Requires-Dist: greenlet>=3.0
 Requires-Dist: aiosqlite>=0.19
 Requires-Dist: alembic>=1.13
 Requires-Dist: jinja2>=3.1

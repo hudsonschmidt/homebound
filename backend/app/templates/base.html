@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Homebound</title>
+    <style>
+      :root{--bg:#0b1220;--card:#121a2a;--text:#e9eefb;--muted:#a5b1d8;--accent:#5cc8ff;}
+      html,body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;}
+      a{color:var(--accent);text-decoration:none}
+      .wrap{max-width:880px;margin:32px auto;padding:0 16px}
+      .card{background:var(--card);border-radius:14px;padding:20px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+      .row{display:flex;gap:16px;flex-wrap:wrap}
+      .field{display:flex;flex-direction:column;gap:6px;flex:1;min-width:220px}
+      label{font-size:.9rem;color:var(--muted)}
+      input,textarea,select{padding:10px 12px;border-radius:8px;border:1px solid #2a3550;background:#0e1626;color:var(--text)}
+      button{background:var(--accent);color:#00111d;border:0;padding:10px 16px;border-radius:10px;font-weight:600;cursor:pointer}
+      table{width:100%;border-collapse:collapse}
+      th,td{padding:8px 10px;border-bottom:1px solid #23314d}
+      .muted{color:var(--muted)}
+      .spacer{height:16px}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>🏕️ Homebound</h1>
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>
