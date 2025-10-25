@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from . import models  # noqa: F401
 from .core.config import settings
 from .core.db import Base, engine
-from .routes import devices, owner, public, web, well_known
+from .routes import auth, devices, owner, public, web, well_known
 
 
 @asynccontextmanager
@@ -36,6 +36,9 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health():
         return JSONResponse({"ok": True})
+
+    # 🔐 mount auth first so /api/v1/auth/* exists
+    app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 
     app.include_router(owner.router, prefix="/api/v1", tags=["owner"])
     app.include_router(devices.router, prefix="/api/v1", tags=["devices"])

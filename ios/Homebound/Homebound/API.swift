@@ -1,0 +1,56 @@
+import Foundation
+
+struct API {
+    let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .iso8601)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        e.dateEncodingStrategy = .formatted(f)
+        return e
+    }()
+
+    let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .iso8601)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        d.dateDecodingStrategy = .formatted(f)
+        return d
+    }()
+
+    func get<T: Decodable>(_ url: URL, bearer: String?) async throws -> T {
+        var req = URLRequest(url: url); req.httpMethod = "GET"
+        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try check(resp: resp, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
+    func post<T: Decodable, B: Encodable>(_ url: URL, body: B, bearer: String?) async throws -> T {
+        var req = URLRequest(url: url); req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try encoder.encode(body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try check(resp: resp, data: data)
+        if T.self == Empty.self { return Empty() as! T }
+        return try decoder.decode(T.self, from: data)
+    }
+
+    func post<B: Encodable>(_ url: URL, body: B, bearer: String?) async throws {
+        let _: Empty = try await post(url, body: body, bearer: bearer)
+    }
+
+    private func check(resp: URLResponse, data: Data) throws {
+        guard let http = resp as? HTTPURLResponse else { throw APIError.badResponse }
+        if (200..<300).contains(http.statusCode) { return }
+        let msg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+        throw APIError.server(msg)
+    }
+
+    struct Empty: Decodable {}
+    enum APIError: Error { case badResponse, server(String) }
+}

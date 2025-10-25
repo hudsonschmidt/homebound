@@ -1,83 +1,93 @@
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+import jwt
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.db import get_session
-from ..services.auth import create_jwt_pair, create_magic_link, verify_jwt, verify_magic_code
+from ..core.config import settings
 
 router = APIRouter()
 
+# In-memory dev store for magic codes (OK for local dev only)
+_MAGIC: dict[str, tuple[str, datetime]] = {}
 
-class RequestMagicLinkIn(BaseModel):
+
+class MagicReq(BaseModel):
     email: EmailStr
 
 
-class VerifyIn(BaseModel):
+class VerifyReq(BaseModel):
     email: EmailStr
     code: str
 
 
-class TokenOut(BaseModel):
-    token_type: str = "bearer"
-    access_token: str
-    refresh_token: str
-    expires_in: int  # seconds
+def _canon_email(email: str) -> str:
+    # be forgiving: strip spaces and lowercase
+    return email.strip().lower()
+
+
+def _issue_code(email: str) -> str:
+    email_key = _canon_email(email)
+    code = f"{__import__('secrets').randbelow(1_000_000):06d}"
+    _MAGIC[email_key] = (code, datetime.utcnow() + timedelta(minutes=10))
+    print(f"[DEV MAGIC LINK] email={email_key} code={code}")
+    return code
+
+
+def _verify_code(email: str, code: str) -> SimpleNamespace:
+    email_key = _canon_email(email)
+    code = code.strip()
+    item = _MAGIC.get(email_key)
+    if not item:
+        raise HTTPException(status_code=400, detail="no code for email")
+    saved, exp = item
+    if datetime.utcnow() > exp:
+        raise HTTPException(status_code=400, detail="code expired")
+    if code != saved:
+        raise HTTPException(status_code=400, detail="invalid code")
+    # Stable pseudo user id derived from email (dev-only)
+    uid = int.from_bytes(__import__("hashlib").sha256(email_key.encode()).digest()[:6], "big")
+    return SimpleNamespace(id=uid, email=email_key)
+
+
+def _jwt(payload: dict, seconds: int) -> str:
+    payload = dict(payload)
+    payload["exp"] = datetime.utcnow() + timedelta(seconds=seconds)
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
 
 @router.post("/auth/request-magic-link")
-async def request_magic_link(
-    payload: RequestMagicLinkIn, session: AsyncSession = Depends(get_session)
-):
-    link = await create_magic_link(session, payload.email)
-    return {"ok": True, "dev_link": link}
+async def request_magic_link(body: MagicReq):
+    _issue_code(body.email)
+    # In prod you’d email a link; for dev we just log the code.
+    return {"ok": True}
 
 
-@router.post("/auth/verify", response_model=TokenOut)
-async def verify(
-    payload: VerifyIn, session: AsyncSession = Depends(get_session)
-):
-    try:
-        user = await verify_magic_code(session, payload.email, payload.code)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    access, refresh = create_jwt_pair(user)
-    return TokenOut(access_token=access, refresh_token=refresh, expires_in=3600)
-
-
-@router.get("/auth/verify", response_model=TokenOut)
-async def verify_get(
-    email: EmailStr = Query(...),
-    code: str = Query(...),
-    session: AsyncSession = Depends(get_session),
-):
-    # Dev convenience GET (same as POST)
-    try:
-        user = await verify_magic_code(session, email, code)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    access, refresh = create_jwt_pair(user)
-    return TokenOut(access_token=access, refresh_token=refresh, expires_in=3600)
+@router.post("/auth/verify")
+async def verify(body: VerifyReq):
+    user = _verify_code(body.email, body.code)
+    access = _jwt(
+        {"sub": str(user.id), "email": user.email},
+        getattr(settings, "JWT_ACCESS_EXPIRES_SECONDS", 3600),
+    )
+    refresh = _jwt(
+        {"sub": str(user.id), "type": "refresh"},
+        getattr(settings, "JWT_REFRESH_EXPIRES_SECONDS", 30 * 24 * 3600),
+    )
+    return {"access": access, "refresh": refresh}
 
 
-class RefreshIn(BaseModel):
-    refresh_token: str
-
-
-@router.post("/auth/refresh", response_model=TokenOut)
-async def refresh(payload: RefreshIn):
-    try:
-        _ = verify_jwt(payload.refresh_token, expected_type="refresh")
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-    # Issue a new access, keep/cycle refresh as-is (simple variant)
-    # For stricter control, validate jti/rotation server-side.
-    decoded = verify_jwt(payload.refresh_token, expected_type="refresh")
-    access = create_jwt_pair(type("User", (), {"id": int(decoded["sub"]), "email": decoded["email"]}))[
-        0
-    ]
-    return TokenOut(access_token=access, refresh_token=payload.refresh_token, expires_in=3600)
+# ---- DEV ONLY helper: peek current code for an email ----
+@router.get("/auth/_dev/peek-code")
+async def dev_peek_code(email: str = Query(..., description="email to look up")):
+    if settings.APP_ENV != "dev":
+        raise HTTPException(status_code=404, detail="not found")
+    key = _canon_email(email)
+    item = _MAGIC.get(key)
+    if not item:
+        return {"email": key, "code": None}
+    code, exp = item
+    return {"email": key, "code": code, "expires_at": exp.isoformat()}

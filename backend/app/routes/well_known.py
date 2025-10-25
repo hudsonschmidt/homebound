@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-
+from fastapi import APIRouter, Response
 from ..core.config import settings
 
 router = APIRouter()
 
-
 @router.get("/.well-known/apple-app-site-association")
-async def apple_app_site_association() -> JSONResponse:
+async def aasa() -> Response:
     """
-    iOS fetches this from your HTTPS domain root.
-    Keep it JSON (no .json extension) and serve as application/json.
+    Apple requires this JSON over HTTPS, no redirects, `Content-Type: application/json`.
     """
     payload = {
         "applinks": {
@@ -20,9 +16,12 @@ async def apple_app_site_association() -> JSONResponse:
             "details": [
                 {
                     "appID": f"{settings.IOS_TEAM_ID}.{settings.IOS_BUNDLE_ID}",
-                    "paths": settings.UNIVERSAL_LINK_PATHS_LIST,
+                    "paths": settings.UNIVERSAL_LINK_PATHS_LIST,  # e.g., ["/t/*"]
                 }
             ],
         }
     }
-    return JSONResponse(payload, media_type="application/json")
+    return Response(
+        content=__import__("json").dumps(payload, separators=(",", ":")),
+        media_type="application/json",
+    )

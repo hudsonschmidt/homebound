@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Public base for links
     PUBLIC_BASE_URL: str = "http://127.0.0.1:8000"
 
+    JWT_ACCESS_EXPIRES_SECONDS: int = 3600
+    JWT_REFRESH_EXPIRES_SECONDS: int = 2592000  # 30 days
+
     # iOS / Universal Links
     IOS_TEAM_ID: str = "YOUR_TEAM_ID"
     IOS_BUNDLE_ID: str = "com.example.homebound"
