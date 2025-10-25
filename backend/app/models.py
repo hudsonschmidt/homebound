@@ -49,3 +49,16 @@ class Event(Base):
     meta: Mapped[Optional[str]] = mapped_column(Text, default=None)
 
     plan: Mapped[Plan] = relationship(back_populates="events")
+
+
+class Device(Base):
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    platform: Mapped[str] = mapped_column(String(16), default="ios")  # 'ios'
+    token: Mapped[str] = mapped_column(String(256), unique=True)
+    bundle_id: Mapped[str] = mapped_column(String(256))
+    env: Mapped[str] = mapped_column(String(16), default="sandbox")  # 'sandbox' | 'prod'
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)

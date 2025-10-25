@@ -2,7 +2,7 @@
 name = "homebound-backend"
 version = "0.1.0"
 description = "Homebound FastAPI backend"
-readme = "README.md"                     # ← stays inside backend/
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
@@ -16,7 +16,10 @@ dependencies = [
   "jinja2>=3.1",
   "python-multipart>=0.0.9",
   "itsdangerous>=2.2",
-  "email-validator>=2.1"
+  "email-validator>=2.1",
+  "PyJWT>=2.9",
+  "httpx>=0.28",
+  "cryptography>=42.0.0"
 ]
 
 [project.optional-dependencies]
@@ -32,11 +35,9 @@ dev = [
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
-# Tell setuptools to package the `app` package.
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
 
-# Include non-Python assets (templates/static/etc) if/when you add them
 [tool.setuptools.package-data]
 app = ["templates/**/*", "static/**/*", "pdf/**/*"]

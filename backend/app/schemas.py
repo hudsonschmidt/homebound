@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
 
+# ---- Contacts / Plans ----
 class ContactIn(BaseModel):
     name: str
     phone: Optional[str] = None
@@ -34,6 +35,25 @@ class PlanOut(BaseModel):
     status: str
     checkin_token: str
     checkout_token: str
+
+    class Config:
+        from_attributes = True
+
+
+# ---- Devices ----
+class DeviceRegisterIn(BaseModel):
+    token: str
+    platform: str = "ios"
+    bundle_id: Optional[str] = None
+    env: str = "sandbox"  # 'sandbox' | 'prod'
+
+
+class DeviceOut(BaseModel):
+    id: int
+    platform: str
+    token: str
+    bundle_id: str
+    env: str
 
     class Config:
         from_attributes = True

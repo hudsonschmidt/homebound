@@ -23,3 +23,10 @@ backend/.env
 
 # Node (if you add a frontend)
 node_modules/
+
+# iOS
+ios/**/DerivedData/
+ios/**/build/
+ios/**/.DS_Store
+ios/**/*.xcuserdata/
+ios/**/*.xcuserstate
