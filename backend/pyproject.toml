@@ -1,25 +1,26 @@
 [project]
 name = "homebound-backend"
 version = "0.1.0"
-description = "Homebound FastAPI backend"
+description = "Homebound API (FastAPI + SQLAlchemy)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
+authors = [{name="Homebound"}]
+
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.29",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
   "SQLAlchemy>=2.0",
-  "greenlet>=3.0",
-  "aiosqlite>=0.19",
+  "aiosqlite>=0.19",            # local dev sqlite
+  "asyncpg>=0.29",              # ← Postgres driver for Supabase/Render
   "alembic>=1.13",
   "jinja2>=3.1",
   "python-multipart>=0.0.9",
   "itsdangerous>=2.2",
   "email-validator>=2.1",
   "PyJWT>=2.9",
-  "httpx>=0.28",
-  "cryptography>=42.0.0"
+  "httpx>=0.27"
 ]
 
 [project.optional-dependencies]
@@ -28,16 +29,13 @@ dev = [
   "mypy>=1.11",
   "pytest>=8",
   "pytest-asyncio>=0.23",
-  "httpx>=0.27"
+  "types-email-validator",
 ]
 
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
-
-[tool.setuptools.package-data]
-app = ["templates/**/*", "static/**/*", "pdf/**/*"]
