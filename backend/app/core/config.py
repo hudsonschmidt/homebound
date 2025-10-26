@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     # Resend Configuration
     RESEND_API_KEY: str = ""
-    RESEND_FROM_EMAIL: str = "noreply@homebound.app"
+    RESEND_FROM_EMAIL: str = "noreply@homeboundapp.com"
 
     # Public base for links
     PUBLIC_BASE_URL: str = "http://127.0.0.1:8000"
