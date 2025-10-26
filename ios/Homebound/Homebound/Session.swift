@@ -9,7 +9,7 @@ final class Session: ObservableObject {
     }
 
     // TEMP for Debug: hardcode the Mac IP that worked in Safari
-    @Published var baseURL: URL = URL(string: "http://192.168.1.103:8000")!
+    @Published var baseURL: URL = URL(string: "https://homebound.onrender.com")!
 
     @Published var notice: String?
 
