@@ -12,8 +12,8 @@ dependencies = [
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
   "SQLAlchemy>=2.0",
-  "aiosqlite>=0.19",            # local dev sqlite
-  "asyncpg>=0.29",              # ← Postgres driver for Supabase/Render
+  "aiosqlite>=0.19",
+  "asyncpg>=0.29",
   "alembic>=1.13",
   "jinja2>=3.1",
   "python-multipart>=0.0.9",
@@ -21,6 +21,7 @@ dependencies = [
   "email-validator>=2.1",
   "PyJWT>=2.9",
   "httpx>=0.27"
+  "certifi>=2024.0.0"
 ]
 
 [project.optional-dependencies]
