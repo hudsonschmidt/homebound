@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     APNS_PRIVATE_KEY_PATH: str = ""  # path to .p8 (preferred)
     APNS_PRIVATE_KEY: str = ""  # or inline full .p8 contents
 
-    model_config = SettingsConfigDict(env_file="backend/.env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     # ---- Derived list properties ----
     @property
