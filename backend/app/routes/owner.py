@@ -1,9 +1,10 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.db import get_session
+from ..core.security import get_current_user_id
 from ..models import Plan
 from ..schemas import PlanCreate, PlanOut
 from ..services.plans import create_plan, list_events
@@ -14,12 +15,15 @@ router = APIRouter()
 
 @router.post("/plans", response_model=PlanOut)
 async def create_plan_route(
-    payload: PlanCreate, session: AsyncSession = Depends(get_session)
+    request: Request,
+    payload: PlanCreate,
+    session: AsyncSession = Depends(get_session),
 ):
+    user_id = get_current_user_id(request)  # Require authentication
     if payload.eta_at <= payload.start_at:
         raise HTTPException(status_code=400, detail="eta_at must be after start_at")
 
-    plan = await create_plan(session, payload)
+    plan = await create_plan(session, payload, user_id)
 
     exp = payload.eta_at + timedelta(days=1, minutes=payload.grace_minutes)
     checkin = sign_token(plan.id, "checkin", exp)
@@ -40,7 +44,12 @@ async def create_plan_route(
 
 
 @router.get("/plans/{plan_id}")
-async def get_plan(plan_id: int, session: AsyncSession = Depends(get_session)):
+async def get_plan(
+    plan_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    user_id = get_current_user_id(request)  # Require authentication
     plan = await session.get(Plan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="plan not found")
@@ -48,7 +57,12 @@ async def get_plan(plan_id: int, session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/plans/{plan_id}/timeline")
-async def timeline(plan_id: int, session: AsyncSession = Depends(get_session)):
+async def timeline(
+    plan_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    user_id = get_current_user_id(request)  # Require authentication
     events = await list_events(session, plan_id)
     return {
         "plan_id": plan_id,

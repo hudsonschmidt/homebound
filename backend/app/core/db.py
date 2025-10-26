@@ -46,10 +46,9 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     future=True,
-    connect_args=connect_args,
-    pool_pre_ping=True,
-    pool_recycle=300,  # seconds
-    pool_size=5,
+    pool_pre_ping=True,          # validate dead connections
+    pool_recycle=1800,           # recycle every 30m
+    pool_size=5,                 # Render free tier: keep it modest
     max_overflow=5,
 )
 

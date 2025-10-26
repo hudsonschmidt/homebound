@@ -10,8 +10,9 @@ from ..models import Contact, Event, Plan
 from ..schemas import ContactIn, PlanCreate
 
 
-async def create_plan(session: AsyncSession, data: PlanCreate) -> Plan:
+async def create_plan(session: AsyncSession, data: PlanCreate, user_id: int) -> Plan:
     plan = Plan(
+        user_id=user_id,
         title=data.title,
         start_at=data.start_at,
         eta_at=data.eta_at,

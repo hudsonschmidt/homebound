@@ -13,11 +13,35 @@ struct API {
 
     let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .iso8601)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        d.dateDecodingStrategy = .formatted(f)
+        // Use custom decoding to handle both ISO8601 and backend format
+        d.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+
+            // Try ISO8601 first (backend .isoformat() format)
+            let iso8601Formatter = ISO8601DateFormatter()
+            iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = iso8601Formatter.date(from: dateString) {
+                return date
+            }
+
+            // Fallback to ISO8601 without fractional seconds
+            iso8601Formatter.formatOptions = [.withInternetDateTime]
+            if let date = iso8601Formatter.date(from: dateString) {
+                return date
+            }
+
+            // Fallback to custom format
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .iso8601)
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            if let date = f.date(from: dateString) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date string: \(dateString)")
+        }
         return d
     }()
 

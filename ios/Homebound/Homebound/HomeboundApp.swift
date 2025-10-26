@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Combine
 import UserNotifications
 
 @main
@@ -16,25 +15,22 @@ struct HomeboundApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            ContentView()
                 .environmentObject(session)
-                .onOpenURL { url in
-                    Task { await session.handleUniversalLink(url) }
-                }
+                .task { await requestPush() }
+        }
+    }
+
+    private func requestPush() async {
+        let center = UNUserNotificationCenter.current()
+        _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
+        await MainActor.run {
+            UIApplication.shared.registerForRemoteNotifications()
         }
     }
 }
 
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    func application(
-        _ application: UIApplication,
-        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
-    ) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
-        Task { await requestPush() }
-        return true
-    }
-
+final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
@@ -48,14 +44,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         print("APNs registration failed:", error)
-    }
-
-    private func requestPush() async {
-        let center = UNUserNotificationCenter.current()
-        _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
-        await MainActor.run {
-            UIApplication.shared.registerForRemoteNotifications()
-        }
     }
 }
 

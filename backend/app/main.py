@@ -18,7 +18,15 @@ async def lifespan(_: FastAPI):
     # Auto-create tables in dev (no Alembic yet)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Start scheduler
+    from .services.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+
     yield
+
+    # Stop scheduler on shutdown
+    stop_scheduler()
 
 
 def create_app() -> FastAPI:

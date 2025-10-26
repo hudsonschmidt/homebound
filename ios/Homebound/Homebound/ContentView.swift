@@ -8,17 +8,15 @@
 import SwiftUI
 
 struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}
+    @EnvironmentObject var session: Session
 
-#Preview {
-    ContentView()
+    var body: some View {
+        Group {
+            if session.isAuthenticated {
+                LandingView()
+            } else {
+                SignInView()
+            }
+        }
+    }
 }

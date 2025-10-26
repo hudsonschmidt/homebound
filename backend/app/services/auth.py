@@ -41,12 +41,12 @@ async def upsert_user_by_email(session: AsyncSession, email: EmailStr) -> User:
     res = await session.execute(select(User).where(User.email == str(email)))
     user = res.scalar_one_or_none()
     if user is None:
-        user = User(email=str(email), last_login=_now())
+        user = User(email=str(email), last_login_at=_now())
         session.add(user)
         await session.flush()
     else:
         await session.execute(
-            update(User).where(User.id == user.id).values(last_login=_now())
+            update(User).where(User.id == user.id).values(last_login_at=_now())
         )
     await session.commit()
     await session.refresh(user)
@@ -54,9 +54,19 @@ async def upsert_user_by_email(session: AsyncSession, email: EmailStr) -> User:
 
 
 async def create_magic_link(session: AsyncSession, email: EmailStr) -> str:
-    code = secrets.token_urlsafe(8)  # short, human-pasteable
+    # Get or create user
+    user = await upsert_user_by_email(session, email)
+
+    # Generate 6-digit code
+    code = f"{secrets.randbelow(1_000_000):06d}"
+
     expires = _now() + timedelta(minutes=settings.MAGIC_LINK_EXPIRES_MINUTES)
-    token = LoginToken(email=str(email), code=code, expires_at=expires)
+    token = LoginToken(
+        user_id=user.id,
+        email=str(email),
+        token=code,
+        expires_at=expires
+    )
     session.add(token)
     await session.commit()
 
@@ -66,14 +76,14 @@ async def create_magic_link(session: AsyncSession, email: EmailStr) -> str:
 
     log.info("Magic link (dev): %s", link_get)
     log.info("Or POST JSON: {\"email\":\"%s\",\"code\":\"%s\"} to /api/v1/auth/verify", email, code)
-    return link_get
+    return code  # Return the code for dev purposes
 
 
 async def verify_magic_code(session: AsyncSession, email: EmailStr, code: str) -> User:
     res = await session.execute(
         select(LoginToken)
         .where(LoginToken.email == str(email))
-        .where(LoginToken.code == code)
+        .where(LoginToken.token == code)
         .order_by(LoginToken.created_at.desc())
         .limit(1)
     )
@@ -84,7 +94,14 @@ async def verify_magic_code(session: AsyncSession, email: EmailStr, code: str) -
     lt.used_at = _now()
     await session.commit()
 
-    user = await upsert_user_by_email(session, email)
+    # Get the user from the token relationship
+    await session.refresh(lt, ["user"])
+    user = lt.user
+
+    # Update user's last login
+    user.last_login_at = _now()
+    await session.commit()
+
     return user
 
 

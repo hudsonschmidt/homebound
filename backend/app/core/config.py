@@ -29,16 +29,29 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./homebound.db"
 
     # Messaging (dev-safe)
-    EMAIL_BACKEND: str = "console"
+    EMAIL_BACKEND: str = "console"  # 'console' | 'resend'
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 1025
-    SMS_BACKEND: str = "dummy"
+    SMS_BACKEND: str = "dummy"  # 'dummy' | 'twilio'
+
+    # Twilio Configuration
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""  # e.g., +1234567890
+    TWILIO_MESSAGING_SERVICE_SID: str = ""  # Optional: use messaging service instead of from_number
+
+    # Resend Configuration
+    RESEND_API_KEY: str = ""
+    RESEND_FROM_EMAIL: str = "noreply@homebound.app"
 
     # Public base for links
     PUBLIC_BASE_URL: str = "http://127.0.0.1:8000"
 
     JWT_ACCESS_EXPIRES_SECONDS: int = 3600
     JWT_REFRESH_EXPIRES_SECONDS: int = 2592000  # 30 days
+    JWT_REFRESH_EXPIRES_DAYS: int = 30
+    JWT_ISSUER: str = "homebound"
+    MAGIC_LINK_EXPIRES_MINUTES: int = 10
 
     # iOS / Universal Links
     IOS_TEAM_ID: str = "YOUR_TEAM_ID"

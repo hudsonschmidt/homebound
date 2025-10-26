@@ -1,110 +1,203 @@
 import Foundation
-import SwiftUI
 import Combine
 
-@MainActor
-final class Session: ObservableObject {
-    @Published var accessToken: String? {
-        didSet { if accessToken != nil { Task { await registerPendingDeviceTokenIfAny() } } }
+/// Routes: adjust these to match your backend if different.
+private enum Routes {
+    static let sendCode  = "/api/v1/auth/request-magic-link"
+    static let verify    = "/api/v1/auth/verify"
+    // add more here as you build out
+}
+
+// MARK: - DTOs (keep fields optional to be decoding-tolerant)
+
+private struct SendCodeRequest: Encodable {
+    let email: String
+}
+
+private struct SendCodeResponse: Decodable {
+    let ok: Bool?
+    let message: String?
+}
+
+private struct VerifyRequest: Encodable {
+    let email: String
+    let code: String
+}
+
+private struct VerifyResponse: Decodable {
+    let access: String?
+    let refresh: String?
+    let access_token: String?  // Fallback for compatibility
+    let token: String?         // Fallback for compatibility
+    let user: UserSummary?
+    let message: String?
+    struct UserSummary: Decodable {
+        let id: String?
+        let email: String?
+        let name: String?
     }
+}
 
-    // TEMP for Debug: hardcode the Mac IP that worked in Safari
-    @Published var baseURL: URL = URL(string: "https://homebound.onrender.com")!
+final class Session: ObservableObject {
 
-    @Published var notice: String?
+    // MARK: API & Base URL
 
-    private var pendingAPNsToken: String?
+    static let baseURL = URL(string: "https://homebound.onrender.com")!
+    var baseURL: URL { Self.baseURL }
+
+    /// Use your real API client from `API.swift`
     let api = API()
 
-    // --- URL join helper (prevents / being %2F-encoded) ---
+    // MARK: Auth/UI State
+
+    @Published var email: String = ""
+    @Published var code: String = ""
+    @Published var showCodeSheet: Bool = false
+
+    @Published var isRequesting: Bool = false
+    @Published var isVerifying: Bool = false
+    @Published var isAuthenticated: Bool = false
+
+    @Published var error: String?
+    @Published var notice: String = ""
+    @Published var apnsToken: String? = nil
+
+    private var token: String?
+    var accessToken: String? { token }
+
+    // MARK: URL helper
+
     func url(_ path: String) -> URL {
-        var base = baseURL.absoluteString
-        if base.hasSuffix("/") { base.removeLast() }
-        let suffix = path.hasPrefix("/") ? path : "/\(path)"
-        // Force-unwrap is fine here during dev; crash surfaces misconfig early.
-        return URL(string: base + suffix)!
+        if let u = URL(string: path), u.scheme != nil { return u }
+        return Self.baseURL.appending(path: path)
     }
 
-    // MARK: - Auth (dev)
-    func requestMagicLink(email: String) async throws {
-        try await api.post(url("/api/v1/auth/request-magic-link"),
-                           body: ["email": email], bearer: Optional<String>.none)
-        notice = "Link requested (see server log for 6-digit code)"
-    }
-
-    func verifyMagic(code: String, email: String) async throws {
-        struct VerifyResp: Decodable { let access: String; let refresh: String }
-        let r: VerifyResp = try await api.post(
-            url("/api/v1/auth/verify"),
-            body: ["email": email, "code": code],
-            bearer: Optional<String>.none
-        )
-        accessToken = r.access
-        notice = "Logged in ✅"
-    }
-
-    // Dev helper: peek current code (server must be APP_ENV=dev)
-    func devPeekCode(email: String) async -> String? {
-        struct Peek: Decodable { let code: String? }
-        do {
-            var comps = URLComponents(url: url("/api/v1/auth/_dev/peek-code"), resolvingAgainstBaseURL: false)!
-            comps.queryItems = [URLQueryItem(name: "email", value: email)]
-            let peek: Peek = try await api.get(comps.url!, bearer: Optional<String>.none)
-            return peek.code
-        } catch { return nil }
-    }
-
-    // MARK: - Device registration
+    // MARK: Auth flows
+    @MainActor
     func handleAPNsToken(_ token: String) {
-        if accessToken == nil { pendingAPNsToken = token; return }
-        Task { await registerDevice(token: token) }
-    }
+        self.apnsToken = token
 
-    private func registerPendingDeviceTokenIfAny() async {
-        guard let t = pendingAPNsToken else { return }
-        pendingAPNsToken = nil
-        await registerDevice(token: t)
-    }
-
-    private func registerDevice(token: String) async {
-        guard let bearer = accessToken else { return }
-        struct In: Encodable { let token: String; let platform: String; let bundle_id: String; let env: String }
-        let payload = In(
-            token: token,
-            platform: "ios",
-            bundle_id: Bundle.main.bundleIdentifier ?? "com.example.homebound",
-            env: _isDebugAssertConfiguration() ? "sandbox" : "prod"
-        )
-        do {
-            try await api.post(url("/api/v1/devices"), body: payload, bearer: bearer)
-            notice = "Device registered"
-        } catch {
-            notice = "Device register failed: \(error.localizedDescription)"
+        // Optional: register device token with your backend once signed-in.
+        guard let bearer = self.accessToken else { return }
+        struct RegisterReq: Encodable { let apns_token: String }
+        Task {
+            do {
+                try await api.post(
+                    url("/api/v1/devices/apns"),
+                    body: RegisterReq(apns_token: token),
+                    bearer: bearer
+                )
+            } catch {
+                // Non-fatal; just surface a notice in your dev UI.
+                await MainActor.run { self.notice = "APNs register failed: \(error.localizedDescription)" }
+            }
         }
     }
 
-    // MARK: - Universal Links (/t/<token>/checkin|checkout)
-    func handleUniversalLink(_ urlIn: URL) async {
-        let comps = urlIn.pathComponents.filter { $0 != "/" }
-        guard comps.count >= 3, comps[0] == "t" else { return }
-        let token = comps[1], action = comps[2]
+    /// Step 1: ask backend to send a code / magic link
+    @MainActor
+    func requestMagicLink(email: String) async {
+        self.error = nil
+        let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !e.isEmpty else { self.error = "Enter your email."; return }
+
+        isRequesting = true
+        defer { isRequesting = false }
+
         do {
-            struct Resp: Decodable { let ok: Bool }
-            let _: Resp = try await api.get(url("/t/\(token)/\(action)"), bearer: Optional<String>.none)
-            notice = "Action \(action) OK"
+            let _: SendCodeResponse = try await api.post(url(Routes.sendCode),
+                                                        body: SendCodeRequest(email: e),
+                                                        bearer: nil)
+            showCodeSheet = true
+        } catch let API.APIError.server(msg) {
+            self.error = msg
         } catch {
-            notice = "UL action failed: \(error.localizedDescription)"
+            self.error = "Couldn’t send code. Check your connection and try again."
         }
     }
 
-    // MARK: - Debug ping
-    struct Health: Decodable { let ok: Bool }
+    @MainActor
+    func verify() async {
+        self.error = nil
+        let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let c = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard c.count >= 6 else { self.error = "Enter the 6-digit code."; return }
+
+        isVerifying = true
+        defer { isVerifying = false }
+
+        do {
+            let resp: VerifyResponse = try await api.post(url(Routes.verify),
+                                                        body: VerifyRequest(email: e, code: c),
+                                                        bearer: nil)
+            // Try all possible token field names for compatibility
+            if let t = resp.access ?? resp.access_token ?? resp.token {
+                token = t
+            }
+            isAuthenticated = true
+            showCodeSheet = false
+        } catch let API.APIError.server(msg) {
+            self.error = msg
+        } catch {
+            self.error = "Verification failed. Please try again."
+        }
+    }
+
+
+    /// Compatibility helper for older call sites
+    func verifyMagic(code: String, email: String) async {
+        await MainActor.run {
+            self.email = email
+            self.code = code
+        }
+        await MainActor.run { self.error = nil }
+        await MainActor.run { self.isVerifying = true }
+        defer { Task { await MainActor.run { self.isVerifying = false } } }
+        await verify()
+    }
+
+    // MARK: - Dev helpers
+
+    /// Dev-only: peek the current magic code for an email
+    @MainActor
+    func devPeekCode(email: String) async -> String? {
+        struct PeekResponse: Decodable {
+            let email: String?
+            let code: String?
+            let expires_at: String?
+        }
+
+        do {
+            let response: PeekResponse = try await api.get(
+                url("/api/v1/auth/_dev/peek-code?email=\(email)"),
+                bearer: nil
+            )
+            return response.code
+        } catch {
+            await MainActor.run { self.notice = "Peek failed: \(error.localizedDescription)" }
+            return nil
+        }
+    }
+
+    /// Ping the /health endpoint
+    @MainActor
     func ping() async {
+        struct HealthResponse: Decodable {
+            let ok: Bool
+        }
+
         do {
-            let h: Health = try await api.get(url("/health"), bearer: Optional<String>.none)
-            notice = "Ping ok=\(h.ok)"
+            let response: HealthResponse = try await api.get(
+                url("/health"),
+                bearer: nil
+            )
+            await MainActor.run {
+                self.notice = response.ok ? "✅ Health check OK" : "⚠️ Health check failed"
+            }
         } catch {
-            notice = "Ping error: \(error.localizedDescription)"
+            await MainActor.run {
+                self.notice = "❌ Health check failed: \(error.localizedDescription)"
+            }
         }
     }
 }

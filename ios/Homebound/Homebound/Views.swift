@@ -10,22 +10,18 @@ struct RootView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Auth (dev)") {
+                Section {
                     TextField("Email", text: $email)
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
 
                     Button("Request Link") {
                         Task {
-                            do {
-                                try await session.requestMagicLink(email: emailTrimmed)
-                                if let latest = await session.devPeekCode(email: emailTrimmed) {
-                                    await MainActor.run { code = latest }
-                                }
-                            } catch {
-                                await MainActor.run { session.notice = "Request failed: \(error.localizedDescription)" }
+                            await session.requestMagicLink(email: emailTrimmed)
+                            if let latest = await session.devPeekCode(email: emailTrimmed) {
+                                await MainActor.run { code = latest }
                             }
                         }
                     }
@@ -35,36 +31,36 @@ struct RootView: View {
                     TextField("6-digit code", text: $code)
                         .keyboardType(.numberPad)
                         .textContentType(.oneTimeCode)
-                        .autocorrectionDisabled()
+                        .autocorrectionDisabled(true)
 
                     Button("Verify Code") {
-                        Task {
-                            do {
-                                try await session.verifyMagic(code: codeTrimmed, email: emailTrimmed)
-                            } catch {
-                                await MainActor.run { session.notice = "Verify failed: \(error.localizedDescription)" }
-                            }
-                        }
+                        Task { await session.verifyMagic(code: codeTrimmed, email: emailTrimmed) }
                     }
                     .buttonStyle(.bordered)
                     .disabled(!isValidEmail(emailTrimmed) || !isValidCode(codeTrimmed))
+                } header: {
+                    Text("Auth (dev)")
                 }
 
-                Section("Create Plan") {
+                Section {
                     Button("Create quick plan") { Task { await createQuickPlan() } }
                         .disabled(session.accessToken == nil)
                     if let p = plan {
                         NavigationLink("Open \(p.title)", destination: PlanDetail(plan: p, timeline: $timeline))
                     }
+                } header: {
+                    Text("Create Plan")
                 }
 
-                Section("Debug") {
+                Section {
                     Text("Base URL: \(session.baseURL.absoluteString)")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     Button("Ping /health") { Task { await session.ping() } }
-                    if let msg = session.notice {
-                        Text(msg).font(.caption).foregroundStyle(.secondary)
+                    if !session.notice.isEmpty {
+                        Text(session.notice).font(.caption).foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("Debug")
                 }
             }
             .navigationTitle("Homebound")
@@ -117,17 +113,21 @@ struct PlanDetail: View {
 
     var body: some View {
         List {
-            Section("Plan") {
+            Section {
                 Text(plan.title)
                 Text("Start \(plan.start_at.formatted(date: .abbreviated, time: .shortened))")
                 Text("ETA \(plan.eta_at.formatted(date: .abbreviated, time: .shortened))")
                 Text("Status \(plan.status)")
+            } header: {
+                Text("Plan")
             }
-            Section("Actions") {
+            Section {
                 Button("Check-In") { Task { await hitToken(plan.checkin_token, action: "checkin") } }
                 Button("Check-Out") { Task { await hitToken(plan.checkout_token, action: "checkout") } }
+            } header: {
+                Text("Actions")
             }
-            Section("Timeline") {
+            Section {
                 Button("Reload timeline") { Task { await refresh() } }
                 ForEach(timeline) { e in
                     VStack(alignment: .leading) {
@@ -136,6 +136,8 @@ struct PlanDetail: View {
                             .foregroundStyle(.secondary).font(.caption)
                     }
                 }
+            } header: {
+                Text("Timeline")
             }
         }
         .navigationTitle("Plan")
