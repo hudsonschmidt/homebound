@@ -17,15 +17,19 @@ class Base(DeclarativeBase):
 
 # ---- Supabase / PgBouncer-safe engine config ----
 # - Port 6543 = Session Pooler. Disable asyncpg statement cache.
-# - pool_pre_ping=True: drop/reconnect stale or killed connections automatically.
-# - pool_recycle: proactively recycle connections to avoid server timeouts.
-# - pool_size / max_overflow: conservative defaults (adjust as you scale).
+# - pool_pre_ping=True: drop/reconnect stale connections automatically.
+# - pool_recycle: proactively recycle connections to avoid timeouts.
+# - Explicit SSL for asyncpg when using Supabase.
 is_pooler = ":6543/" in settings.DATABASE_URL
 
 connect_args: dict[str, Any] = {}
 if is_pooler:
-    # asyncpg param to avoid server-side named prepared statements with PgBouncer
     connect_args["statement_cache_size"] = 0
+
+# Force TLS for Supabase hosts (asyncpg uses `ssl`, not `sslmode`)
+if "supabase.com" in settings.DATABASE_URL or "supabase.co" in settings.DATABASE_URL:
+    # If URL already has ?ssl=true, passing this again is harmless.
+    connect_args.setdefault("ssl", True)
 
 engine = create_async_engine(
     settings.DATABASE_URL,
