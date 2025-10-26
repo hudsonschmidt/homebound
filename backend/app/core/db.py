@@ -1,11 +1,12 @@
 # backend/app/core/db.py
 from __future__ import annotations
 
+import os
+import ssl
 from collections.abc import AsyncGenerator
 from typing import Any
-import ssl
-import certifi
 
+import certifi
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -16,19 +17,27 @@ class Base(DeclarativeBase):
     pass
 
 
-# Supabase / PgBouncer-safe engine config
+# ---- Supabase / PgBouncer-safe engine config ----
 is_pooler = ":6543/" in settings.DATABASE_URL
 
 connect_args: dict[str, Any] = {}
 if is_pooler:
-    connect_args["statement_cache_size"] = 0  # asyncpg: disable prepared stmt cache for PgBouncer
+    # asyncpg setting: disable prepared statement cache (PgBouncer-friendly)
+    connect_args["statement_cache_size"] = 0
 
-# Build a verified SSL context using certifi for Supabase hosts
+# TLS setup
+# If PG_SSL_INSECURE=true (staging-only), skip certificate verification to unblock.
+# Otherwise, use a verified trust store (certifi).
 if "supabase.com" in settings.DATABASE_URL or "supabase.co" in settings.DATABASE_URL:
-    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    ssl_ctx.check_hostname = True
-    ssl_ctx.verify_mode = ssl.CERT_REQUIRED
-    connect_args["ssl"] = ssl_ctx  # asyncpg expects an SSLContext or True/False
+    if os.getenv("PG_SSL_INSECURE", "").lower() == "true":
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+    else:
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        ssl_ctx.check_hostname = True
+        ssl_ctx.verify_mode = ssl.CERT_REQUIRED
+    connect_args["ssl"] = ssl_ctx
 
 engine = create_async_engine(
     settings.DATABASE_URL,
