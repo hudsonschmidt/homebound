@@ -77,7 +77,7 @@ struct HomeView: View {
                 }
             }
             .sheet(isPresented: $showingCreatePlan) {
-                CreatePlanView()
+                OldCreatePlanView()
             }
             .sheet(isPresented: $showingAuth) {
                 AuthView()
@@ -93,7 +93,7 @@ struct HomeView: View {
     }
 
     func checkoutActive() async {
-        guard let plan = activePlan else { return }
+        guard activePlan != nil else { return }
         // TODO: Call checkout endpoint
     }
 }
@@ -207,8 +207,8 @@ struct ActivePlanCard: View {
     }
 }
 
-// MARK: - Create Plan View
-struct CreatePlanView: View {
+// MARK: - Create Plan View (Old Version - Deprecated)
+struct OldCreatePlanView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var session: Session
 
@@ -326,7 +326,7 @@ struct CreatePlanView: View {
 
     func createPlan() {
         Task {
-            let plan = PlanCreate(
+            _ = PlanCreate(
                 title: title,
                 activity_type: selectedActivity.rawValue,
                 start_at: departureTime,

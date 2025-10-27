@@ -6,7 +6,7 @@ struct ImprovedHomeView: View {
     @EnvironmentObject var session: Session
     @State private var showingCreatePlan = false
     @State private var showingProfile = false
-    @State private var activePlan: PlanOut?
+    @State private var showingHistory = false
     @State private var recentPlans: [PlanOut] = []
     @State private var timeline: [TimelineEvent] = []
     @State private var greeting = "Good morning"
@@ -32,29 +32,28 @@ struct ImprovedHomeView: View {
                             .padding(.horizontal)
                             .padding(.top, 8)
 
-                        // Active Plan Card (if exists)
-                        if let plan = activePlan {
+                        // Active Plan Card (if exists) - Takes up significant space
+                        if let plan = session.activePlan {
                             ImprovedActivePlanCard(plan: plan, timeline: $timeline)
+                                .frame(minHeight: UIScreen.main.bounds.height * 0.5)
                                 .transition(.asymmetric(
                                     insertion: .move(edge: .top).combined(with: .opacity),
                                     removal: .scale.combined(with: .opacity)
                                 ))
+                                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: session.activePlan)
                         }
 
                         // Quick Actions Grid
                         QuickActionsGrid(
-                            hasActivePlan: activePlan != nil,
+                            hasActivePlan: session.activePlan != nil,
                             showingCreatePlan: $showingCreatePlan,
-                            onHomeSafe: { Task { await checkoutActive() } }
+                            showingHistory: $showingHistory,
+                            onHomeSafe: { Task { await session.completePlan() } }
                         )
                         .padding(.horizontal)
 
-                        // Statistics Cards
-                        StatsSection()
-                            .padding(.horizontal)
-
-                        // Recent Activities
-                        if !recentPlans.isEmpty {
+                        // Recent Activities (only show if no active plan)
+                        if session.activePlan == nil && !recentPlans.isEmpty {
                             RecentActivitiesSection(plans: recentPlans)
                         }
                     }
@@ -64,16 +63,22 @@ struct ImprovedHomeView: View {
             .navigationBarHidden(true)
             .sheet(isPresented: $showingCreatePlan) {
                 CreatePlanView()
+                    .environmentObject(session)
             }
             .sheet(isPresented: $showingProfile) {
                 ProfileView()
+                    .environmentObject(session)
+            }
+            .sheet(isPresented: $showingHistory) {
+                HistoryView()
+                    .environmentObject(session)
             }
             .task {
                 updateGreeting()
-                await loadActivePlan()
+                await session.loadActivePlan()
             }
             .refreshable {
-                await loadActivePlan()
+                await session.loadActivePlan()
             }
         }
     }
@@ -81,15 +86,6 @@ struct ImprovedHomeView: View {
     func updateGreeting() {
         let hour = Calendar.current.component(.hour, from: Date())
         greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
-    }
-
-    func loadActivePlan() async {
-        // TODO: Fetch active plan from API
-    }
-
-    func checkoutActive() async {
-        guard let plan = activePlan else { return }
-        // TODO: Call checkout endpoint
     }
 }
 
@@ -102,7 +98,7 @@ struct HeaderSection: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(greeting)
+                Text("\(greeting)\(session.userName != nil ? ", \(session.userName!)" : "")")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundStyle(
@@ -143,9 +139,11 @@ struct HeaderSection: View {
 struct ImprovedActivePlanCard: View {
     let plan: PlanOut
     @Binding var timeline: [TimelineEvent]
+    @EnvironmentObject var session: Session
     @State private var timeRemaining = ""
     @State private var isOverdue = false
     @State private var progress: CGFloat = 0.5
+    @State private var isPerformingAction = false
 
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -240,21 +238,42 @@ struct ImprovedActivePlanCard: View {
                     title: "Check In",
                     icon: "checkmark.circle.fill",
                     color: activity.primaryColor,
-                    action: { Task { await performCheckin() } }
+                    isLoading: isPerformingAction,
+                    action: {
+                        Task {
+                            isPerformingAction = true
+                            _ = await session.checkIn()
+                            isPerformingAction = false
+                        }
+                    }
+                )
+
+                ActionButton(
+                    title: "I'm Safe",
+                    icon: "house.fill",
+                    color: .green,
+                    isLoading: isPerformingAction,
+                    action: {
+                        Task {
+                            isPerformingAction = true
+                            _ = await session.completePlan()
+                            isPerformingAction = false
+                        }
+                    }
                 )
 
                 ActionButton(
                     title: "Extend",
-                    icon: "clock.badge.plus",
+                    icon: "plus.circle.fill",
                     color: .orange,
-                    action: { Task { await extendTrip() } }
-                )
-
-                ActionButton(
-                    title: "SOS",
-                    icon: "exclamationmark.triangle.fill",
-                    color: .red,
-                    action: { }
+                    isLoading: isPerformingAction,
+                    action: {
+                        Task {
+                            isPerformingAction = true
+                            _ = await session.extendPlan()
+                            isPerformingAction = false
+                        }
+                    }
                 )
             }
 
@@ -300,19 +319,13 @@ struct ImprovedActivePlanCard: View {
         }
     }
 
-    func performCheckin() async {
-        // TODO: Implement
-    }
-
-    func extendTrip() async {
-        // TODO: Implement
-    }
 }
 
 // MARK: - Quick Actions Grid
 struct QuickActionsGrid: View {
     let hasActivePlan: Bool
     @Binding var showingCreatePlan: Bool
+    @Binding var showingHistory: Bool
     let onHomeSafe: () -> Void
 
     var body: some View {
@@ -339,7 +352,7 @@ struct QuickActionsGrid: View {
                     title: "History",
                     subtitle: "Past trips",
                     gradient: [Color(hex: "#FC466B") ?? .pink, Color(hex: "#3F5EFB") ?? .blue],
-                    action: { }
+                    action: { showingHistory = true }
                 )
             }
         }
@@ -390,67 +403,6 @@ struct QuickActionCard: View {
             )
             .cornerRadius(20)
         }
-    }
-}
-
-// MARK: - Stats Section
-struct StatsSection: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Your Stats")
-                .font(.headline)
-
-            HStack(spacing: 12) {
-                ImprovedStatCard(
-                    value: "28",
-                    label: "Total Trips",
-                    icon: "map.fill",
-                    color: Color(hex: "#6C63FF") ?? .purple
-                )
-                ImprovedStatCard(
-                    value: "100%",
-                    label: "Safe Returns",
-                    icon: "checkmark.shield.fill",
-                    color: Color(hex: "#4ECDC4") ?? .teal
-                )
-                ImprovedStatCard(
-                    value: "7",
-                    label: "This Week",
-                    icon: "calendar.badge.clock",
-                    color: Color(hex: "#FF6B6B") ?? .red
-                )
-            }
-        }
-    }
-}
-
-// MARK: - Improved Stat Card
-struct ImprovedStatCard: View {
-    let value: String
-    let label: String
-    let icon: String
-    let color: Color
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(color)
-
-            Text(value)
-                .font(.title3)
-                .fontWeight(.bold)
-
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(color.opacity(0.1))
-        )
     }
 }
 
@@ -524,13 +476,20 @@ struct ActionButton: View {
     let title: String
     let icon: String
     let color: Color
+    var isLoading: Bool = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.title3)
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: icon)
+                        .font(.title3)
+                }
                 Text(title)
                     .font(.caption2)
                     .fontWeight(.medium)
@@ -540,76 +499,11 @@ struct ActionButton: View {
             .padding(.vertical, 12)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(color)
+                    .fill(isLoading ? color.opacity(0.7) : color)
             )
         }
+        .disabled(isLoading)
     }
 }
 
-// MARK: - Profile View
-struct ProfileView: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var session: Session
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 60, height: 60)
-                            .overlay(
-                                Image(systemName: "person.fill")
-                                    .foregroundStyle(.white)
-                                    .font(.title2)
-                            )
-
-                        VStack(alignment: .leading) {
-                            Text("Adventure Enthusiast")
-                                .font(.headline)
-                            Text("Member since 2024")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.leading, 8)
-                    }
-                    .padding(.vertical, 8)
-                }
-
-                Section("Settings") {
-                    Label("Emergency Contacts", systemImage: "person.2.fill")
-                    Label("Notification Preferences", systemImage: "bell.fill")
-                    Label("Privacy & Security", systemImage: "lock.fill")
-                }
-
-                Section("Support") {
-                    Label("Help Center", systemImage: "questionmark.circle.fill")
-                    Label("Contact Us", systemImage: "envelope.fill")
-                    Label("About", systemImage: "info.circle.fill")
-                }
-
-                Section {
-                    Button("Sign Out") {
-                        session.signOut()
-                        dismiss()
-                    }
-                    .foregroundStyle(.red)
-                }
-            }
-            .navigationTitle("Profile")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-}
+// ProfileView is now in its own file (ProfileView.swift)

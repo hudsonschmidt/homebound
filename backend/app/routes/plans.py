@@ -63,7 +63,7 @@ async def get_active_plan(
         select(Plan)
         .where(
             Plan.user_id == user_id,
-            Plan.status == "active"
+            Plan.status.in_(["active", "overdue", "overdue_notified"])
         )
         .order_by(Plan.created_at.desc())
         .limit(1)
@@ -189,26 +189,36 @@ async def get_plan_stats(
     }
 
 
+from pydantic import BaseModel
+
+class ExtendRequest(BaseModel):
+    minutes: int = 30
+
 @router.post("/plans/{plan_id}/extend")
 async def extend_plan(
     plan_id: int,
     request: Request,
-    minutes: int = 30,
+    extend_request: ExtendRequest = ExtendRequest(),
     session: AsyncSession = Depends(get_session),
 ):
     """Extend a plan's ETA."""
     user_id = get_current_user_id(request)
+    minutes = extend_request.minutes
 
     plan = await session.get(Plan, plan_id)
     if not plan or plan.user_id != user_id:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    if plan.status != "active":
+    if plan.status not in ["active", "overdue", "overdue_notified"]:
         raise HTTPException(status_code=400, detail="Can only extend active plans")
 
     # Update ETA
     plan.eta_at = plan.eta_at + timedelta(minutes=minutes)
     plan.extended_count += 1
+
+    # Reset status to active if it was overdue
+    if plan.status in ["overdue", "overdue_notified"]:
+        plan.status = "active"
 
     # Add event
     event = Event(
@@ -228,10 +238,14 @@ async def extend_plan(
     }
 
 
+class EmptyRequest(BaseModel):
+    pass
+
 @router.post("/plans/{plan_id}/checkin")
 async def checkin_plan(
     plan_id: int,
     request: Request,
+    _: EmptyRequest = EmptyRequest(),
     session: AsyncSession = Depends(get_session),
 ):
     """Check in to a plan."""
@@ -241,7 +255,7 @@ async def checkin_plan(
     if not plan or plan.user_id != user_id:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    if plan.status != "active":
+    if plan.status not in ["active", "overdue", "overdue_notified"]:
         raise HTTPException(status_code=400, detail="Plan is not active")
 
     # Update last checkin time
@@ -263,6 +277,7 @@ async def checkin_plan(
 async def complete_plan(
     plan_id: int,
     request: Request,
+    _: EmptyRequest = EmptyRequest(),
     session: AsyncSession = Depends(get_session),
 ):
     """Mark a plan as completed (safe return)."""

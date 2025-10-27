@@ -7,6 +7,12 @@ struct ContactIn: Codable {
     var notify_on_overdue: Bool = true
 }
 
+struct ContactCreate: Codable {
+    var name: String
+    var phone: String
+    var email: String?
+}
+
 struct PlanCreate: Codable {
     var title: String
     var activity_type: String = "other"
@@ -18,7 +24,7 @@ struct PlanCreate: Codable {
     var contacts: [ContactIn] = []
 }
 
-struct PlanOut: Codable, Identifiable {
+struct PlanOut: Codable, Identifiable, Equatable {
     var id: Int
     var title: String
     var activity_type: String

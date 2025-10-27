@@ -41,6 +41,13 @@ private struct VerifyResponse: Decodable {
     }
 }
 
+private struct GenericResponse: Decodable {
+    let ok: Bool?
+    let message: String?
+}
+
+private struct EmptyBody: Encodable {}
+
 final class Session: ObservableObject {
 
     // MARK: API & Base URL
@@ -50,6 +57,7 @@ final class Session: ObservableObject {
 
     /// Use your real API client from `API.swift`
     let api = API()
+    let keychain = KeychainHelper.shared
 
     // MARK: Auth/UI State
 
@@ -65,13 +73,67 @@ final class Session: ObservableObject {
     @Published var notice: String = ""
     @Published var lastError: String = ""
     @Published var apnsToken: String? = nil
-    @Published var accessToken: String? = nil
+    @Published var accessToken: String? = nil {
+        didSet {
+            // Save to keychain when set
+            if let token = accessToken {
+                keychain.saveAccessToken(token)
+            }
+        }
+    }
 
     // User profile
-    @Published var userName: String? = nil
-    @Published var userAge: Int? = nil
-    @Published var userEmail: String? = nil
-    @Published var profileCompleted: Bool = false
+    @Published var userName: String? = nil {
+        didSet {
+            saveUserDataToKeychain()
+        }
+    }
+    @Published var userAge: Int? = nil {
+        didSet {
+            saveUserDataToKeychain()
+        }
+    }
+    @Published var userEmail: String? = nil {
+        didSet {
+            saveUserDataToKeychain()
+        }
+    }
+    @Published var profileCompleted: Bool = false {
+        didSet {
+            saveUserDataToKeychain()
+        }
+    }
+
+    // Active plan
+    @Published var activePlan: PlanOut? = nil
+    @Published var isLoadingPlan: Bool = false
+
+    init() {
+        // Load saved tokens and user data on init
+        loadFromKeychain()
+    }
+
+    private func loadFromKeychain() {
+        accessToken = keychain.getAccessToken()
+        userName = keychain.getUserName()
+        userEmail = keychain.getUserEmail()
+        userAge = keychain.getUserAge()
+        profileCompleted = keychain.getProfileCompleted()
+
+        // If we have a token, we're authenticated
+        if accessToken != nil {
+            isAuthenticated = true
+        }
+    }
+
+    private func saveUserDataToKeychain() {
+        keychain.saveUserData(
+            name: userName,
+            email: userEmail,
+            age: userAge,
+            profileCompleted: profileCompleted
+        )
+    }
 
     // MARK: URL helper
 
@@ -250,12 +312,121 @@ final class Session: ObservableObject {
                 body: plan,
                 bearer: bearer
             )
+
+            // After creating a plan, immediately set it as active
+            await MainActor.run {
+                self.activePlan = response
+            }
+
             return response
         } catch {
             await MainActor.run {
                 self.lastError = "Failed to create plan: \(error.localizedDescription)"
             }
             return nil
+        }
+    }
+
+    func loadActivePlan() async {
+        guard let bearer = accessToken else { return }
+
+        await MainActor.run {
+            self.isLoadingPlan = true
+        }
+
+        do {
+            let response: PlanOut? = try await api.get(
+                url("/api/v1/plans/active"),
+                bearer: bearer
+            )
+
+            await MainActor.run {
+                self.activePlan = response
+                self.isLoadingPlan = false
+            }
+        } catch {
+            await MainActor.run {
+                self.activePlan = nil
+                self.isLoadingPlan = false
+            }
+        }
+    }
+
+    func checkIn() async -> Bool {
+        guard let bearer = accessToken, let plan = activePlan else { return false }
+
+        do {
+            let _: GenericResponse = try await api.post(
+                url("/api/v1/plans/\(plan.id)/checkin"),
+                body: EmptyBody(),
+                bearer: bearer
+            )
+
+            await MainActor.run {
+                self.notice = "Checked in successfully!"
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to check in: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    func completePlan() async -> Bool {
+        guard let bearer = accessToken, let plan = activePlan else { return false }
+
+        do {
+            let _: GenericResponse = try await api.post(
+                url("/api/v1/plans/\(plan.id)/complete"),
+                body: EmptyBody(),
+                bearer: bearer
+            )
+
+            await MainActor.run {
+                self.activePlan = nil
+                self.notice = "Welcome back! Trip completed safely."
+            }
+
+            // Reload to check for any other active plans
+            await loadActivePlan()
+
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to complete plan: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    func extendPlan(minutes: Int = 30) async -> Bool {
+        guard let bearer = accessToken, let plan = activePlan else { return false }
+
+        struct ExtendRequest: Encodable {
+            let minutes: Int
+        }
+
+        do {
+            let response: GenericResponse = try await api.post(
+                url("/api/v1/plans/\(plan.id)/extend"),
+                body: ExtendRequest(minutes: minutes),
+                bearer: bearer
+            )
+
+            // Reload the plan to get updated ETA
+            await loadActivePlan()
+
+            await MainActor.run {
+                self.notice = "Extended by \(minutes) minutes"
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to extend plan: \(error.localizedDescription)"
+            }
+            return false
         }
     }
 
@@ -323,6 +494,10 @@ final class Session: ObservableObject {
     // MARK: - Sign Out
     @MainActor
     func signOut() {
+        // Clear keychain
+        keychain.clearAll()
+
+        // Clear session state
         accessToken = nil
         email = ""
         code = ""
@@ -335,5 +510,6 @@ final class Session: ObservableObject {
         userAge = nil
         userEmail = nil
         profileCompleted = false
+        activePlan = nil
     }
 }
