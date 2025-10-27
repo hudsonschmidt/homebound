@@ -15,18 +15,30 @@ struct HomeboundApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if session.accessToken != nil {
-                ImprovedHomeView()  // Show improved home if authenticated
-                    .environmentObject(session)
-                    .task { await requestPush() }
-                    .onOpenURL { url in
-                        // Handle universal links for check-in/out
-                        handleUniversalLink(url)
-                    }
-            } else {
-                AuthenticationView()  // Show login if not authenticated
-                    .environmentObject(session)
+            Group {
+                if session.accessToken == nil {
+                    // Not authenticated - show login
+                    AuthenticationView()
+                        .environmentObject(session)
+                } else if !session.profileCompleted {
+                    // Authenticated but profile not complete - show onboarding
+                    OnboardingView()
+                        .environmentObject(session)
+                        .transition(.move(edge: .trailing))
+                } else {
+                    // Authenticated with complete profile - show home
+                    ImprovedHomeView()
+                        .environmentObject(session)
+                        .task { await requestPush() }
+                        .onOpenURL { url in
+                            // Handle universal links for check-in/out
+                            handleUniversalLink(url)
+                        }
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.3), value: session.accessToken)
+            .animation(.easeInOut(duration: 0.3), value: session.profileCompleted)
         }
     }
 

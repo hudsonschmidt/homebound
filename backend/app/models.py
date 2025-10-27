@@ -16,6 +16,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), default=None)
     phone: Mapped[Optional[str]] = mapped_column(String(32), default=None)
+    age: Mapped[Optional[int]] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False), default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Optional
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
 from ..core.db import get_session
-from ..services.auth import create_magic_link, verify_magic_code, create_jwt_pair
+from ..models import User
+from ..services.auth import create_magic_link, verify_magic_code, create_jwt_pair, get_current_user_id
 
 router = APIRouter()
 
@@ -52,7 +55,18 @@ async def verify(
     try:
         user = await verify_magic_code(session, body.email, body.code)
         access, refresh = create_jwt_pair(user)
-        return {"access": access, "refresh": refresh}
+        return {
+            "access": access,
+            "refresh": refresh,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "age": getattr(user, 'age', None),
+                "phone": user.phone,
+                "profile_completed": bool(user.name)
+            }
+        }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -121,3 +135,57 @@ async def dev_peek_code(
         return {"email": email, "code": None}
 
     return {"email": email, "code": token.token, "expires_at": token.expires_at.isoformat()}
+
+
+class ProfileUpdateReq(BaseModel):
+    name: Optional[str] = None
+    age: Optional[int] = None
+    phone: Optional[str] = None
+
+
+@router.put("/auth/profile")
+async def update_profile(
+    request: Request,
+    body: ProfileUpdateReq,
+    session: AsyncSession = Depends(get_session),
+):
+    """Update user profile information."""
+    user_id = get_current_user_id(request)
+
+    # Build update values
+    update_values = {}
+    if body.name is not None:
+        update_values["name"] = body.name
+    if body.age is not None:
+        update_values["age"] = body.age
+    if body.phone is not None:
+        update_values["phone"] = body.phone
+
+    if not update_values:
+        return {"ok": False, "message": "No fields to update"}
+
+    # Update user
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(**update_values)
+    )
+    await session.commit()
+
+    # Get updated user
+    result = await session.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = result.scalar_one()
+
+    return {
+        "ok": True,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "age": getattr(user, 'age', None),
+            "phone": user.phone,
+            "profile_completed": bool(user.name)
+        }
+    }

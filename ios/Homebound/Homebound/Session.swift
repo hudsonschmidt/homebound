@@ -32,9 +32,12 @@ private struct VerifyResponse: Decodable {
     let user: UserSummary?
     let message: String?
     struct UserSummary: Decodable {
-        let id: String?
+        let id: Int?
         let email: String?
         let name: String?
+        let age: Int?
+        let phone: String?
+        let profile_completed: Bool?
     }
 }
 
@@ -63,6 +66,12 @@ final class Session: ObservableObject {
     @Published var lastError: String = ""
     @Published var apnsToken: String? = nil
     @Published var accessToken: String? = nil
+
+    // User profile
+    @Published var userName: String? = nil
+    @Published var userAge: Int? = nil
+    @Published var userEmail: String? = nil
+    @Published var profileCompleted: Bool = false
 
     // MARK: URL helper
 
@@ -133,6 +142,18 @@ final class Session: ObservableObject {
             if let t = resp.access ?? resp.access_token ?? resp.token {
                 accessToken = t
             }
+
+            // Store user profile data
+            if let user = resp.user {
+                userName = user.name
+                userAge = user.age
+                userEmail = user.email ?? email
+                profileCompleted = user.profile_completed ?? false
+            } else {
+                userEmail = email
+                profileCompleted = false
+            }
+
             isAuthenticated = true
             showCodeSheet = false
         } catch let API.APIError.server(msg) {
@@ -255,6 +276,50 @@ final class Session: ObservableObject {
         }
     }
 
+    // MARK: - Profile Management
+    func updateProfile(name: String, age: Int) async -> Bool {
+        guard let bearer = accessToken else { return false }
+
+        struct ProfileUpdateRequest: Encodable {
+            let name: String
+            let age: Int
+        }
+
+        struct ProfileUpdateResponse: Decodable {
+            let ok: Bool
+            let user: UserInfo?
+
+            struct UserInfo: Decodable {
+                let name: String?
+                let age: Int?
+                let profile_completed: Bool?
+            }
+        }
+
+        do {
+            let response: ProfileUpdateResponse = try await api.put(
+                url("/api/v1/auth/profile"),
+                body: ProfileUpdateRequest(name: name, age: age),
+                bearer: bearer
+            )
+
+            if response.ok, let user = response.user {
+                await MainActor.run {
+                    self.userName = user.name
+                    self.userAge = user.age
+                    self.profileCompleted = user.profile_completed ?? true
+                }
+                return true
+            }
+            return false
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to update profile: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
     // MARK: - Sign Out
     @MainActor
     func signOut() {
@@ -266,5 +331,9 @@ final class Session: ObservableObject {
         error = nil
         notice = ""
         lastError = ""
+        userName = nil
+        userAge = nil
+        userEmail = nil
+        profileCompleted = false
     }
 }
