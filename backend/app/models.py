@@ -53,6 +53,9 @@ class Plan(Base):
     location_text: Mapped[Optional[str]] = mapped_column(Text, default=None)
     notes: Mapped[Optional[str]] = mapped_column(Text, default=None)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False), default=None)
+    extended_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_checkin_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
 
     user: Mapped[User] = relationship(back_populates="plans")
