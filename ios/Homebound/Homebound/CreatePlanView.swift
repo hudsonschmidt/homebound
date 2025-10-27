@@ -4,13 +4,19 @@ struct CreatePlanView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
 
+    // Current step tracking
+    @State private var currentStep = 1
+    let totalSteps = 4
+
     // Form fields
     @State private var planTitle = ""
     @State private var selectedActivity = "other"
     @State private var location = ""
     @State private var startTime = Date()
-    @State private var duration: Double = 2 // hours
+    @State private var etaTime = Date().addingTimeInterval(7200) // 2 hours from now
+    @State private var isManualETA = false
     @State private var graceMinutes: Double = 30
+    @State private var showZeroGraceWarning = false
     @State private var notes = ""
 
     // Contact management
@@ -27,247 +33,105 @@ struct CreatePlanView: View {
     // Activities array for the selector
     let activities = ActivityType.allCases
 
-    var etaTime: Date {
-        let hoursInSeconds = duration * 3600
-        return startTime.addingTimeInterval(hoursInSeconds)
-    }
-
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background - adapts to dark mode
+                // Background
                 Color(.systemBackground)
                     .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Plan Details Card
-                        VStack(alignment: .leading, spacing: 20) {
-                            SectionHeader(title: "Trip Details", icon: "map.fill")
+                VStack(spacing: 0) {
+                    // Progress Bar
+                    ProgressIndicator(currentStep: currentStep, totalSteps: totalSteps)
+                        .padding(.horizontal)
+                        .padding(.top, 20)
 
-                            // Title
-                            FloatingLabelTextField(
-                                placeholder: "What's your adventure?",
-                                text: $planTitle,
-                                icon: "pencil"
-                            )
-
-                            // Activity Type
-                            VStack(alignment: .leading, spacing: 8) {
-                                Label("Activity Type", systemImage: "figure.walk")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 12) {
-                                        ForEach(activities, id: \.self) { activity in
-                                            ActivityChip(
-                                                activity: activity,
-                                                isSelected: selectedActivity == activity.rawValue,
-                                                action: { selectedActivity = activity.rawValue }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Location
-                            FloatingLabelTextField(
-                                placeholder: "Where are you going?",
-                                text: $location,
-                                icon: "location.fill"
-                            )
-                        }
-                        .padding(20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color(.secondarySystemBackground))
-                                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
+                    // Content
+                    TabView(selection: $currentStep) {
+                        Step1TripDetails(
+                            planTitle: $planTitle,
+                            selectedActivity: $selectedActivity,
+                            location: $location,
+                            activities: activities
                         )
+                        .tag(1)
 
-                        // Time Settings Card
-                        VStack(alignment: .leading, spacing: 20) {
-                            SectionHeader(title: "Time Settings", icon: "clock.fill")
-
-                            // Start Time
-                            VStack(alignment: .leading, spacing: 8) {
-                                Label("Departure Time", systemImage: "calendar.badge.clock")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                DatePicker(
-                                    "",
-                                    selection: $startTime,
-                                    in: Date()...,
-                                    displayedComponents: [.date, .hourAndMinute]
-                                )
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
-                            }
-
-                            // Duration Slider
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Label("Expected Duration", systemImage: "timer")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text("\(Int(duration)) hours")
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
-                                }
-
-                                Slider(value: $duration, in: 0.5...24, step: 0.5)
-                                    .tint(Color(hex: "#6C63FF") ?? .purple)
-                            }
-
-                            // ETA Display
-                            HStack {
-                                Label("Expected Return", systemImage: "house.arrival")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(etaTime, style: .date)
-                                    .fontWeight(.medium)
-                                +
-                                Text(" at ")
-                                    .fontWeight(.medium)
-                                +
-                                Text(etaTime, style: .time)
-                                    .fontWeight(.medium)
-                            }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.tertiarySystemFill))
-                            )
-
-                            // Grace Period
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Label("Grace Period", systemImage: "hourglass")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text("\(Int(graceMinutes)) minutes")
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(.orange)
-                                }
-
-                                Slider(value: $graceMinutes, in: 15...120, step: 15)
-                                    .tint(.orange)
-
-                                Text("We'll notify your contacts if you don't check in by \(Int(graceMinutes)) minutes after your ETA")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color(.secondarySystemBackground))
-                                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
+                        Step2TimeSettings(
+                            startTime: $startTime,
+                            etaTime: $etaTime,
+                            isManualETA: $isManualETA,
+                            graceMinutes: $graceMinutes,
+                            showZeroGraceWarning: $showZeroGraceWarning
                         )
+                        .tag(2)
 
-                        // Emergency Contacts Card
-                        VStack(alignment: .leading, spacing: 20) {
-                            HStack {
-                                SectionHeader(title: "Emergency Contacts", icon: "person.2.fill")
-                                Spacer()
-                                Button(action: { showAddContact = true }) {
-                                    Image(systemName: "plus.circle.fill")
-                                        .font(.title2)
-                                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
-                                }
-                            }
+                        Step3EmergencyContacts(
+                            contacts: $contacts,
+                            showAddContact: $showAddContact,
+                            newContactName: $newContactName,
+                            newContactPhone: $newContactPhone
+                        )
+                        .tag(3)
 
-                            if contacts.isEmpty {
+                        Step4AdditionalNotes(
+                            notes: $notes,
+                            isCreating: $isCreating,
+                            onSubmit: createPlan
+                        )
+                        .tag(4)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .animation(.easeInOut, value: currentStep)
+
+                    // Navigation Buttons
+                    HStack(spacing: 16) {
+                        if currentStep > 1 {
+                            Button(action: { currentStep -= 1 }) {
                                 HStack {
-                                    Image(systemName: "person.crop.circle.badge.exclamationmark")
-                                        .font(.title3)
-                                        .foregroundStyle(.orange)
-                                    Text("Add at least one emergency contact")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                    Image(systemName: "chevron.left")
+                                    Text("Back")
                                 }
                                 .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.orange.opacity(0.1))
-                                )
-                            } else {
-                                ForEach(contacts) { contact in
-                                    ContactRow(contact: contact) {
-                                        contacts.removeAll { $0.id == contact.id }
-                                    }
-                                }
+                                .frame(height: 50)
+                                .background(Color(.tertiarySystemFill))
+                                .foregroundStyle(.primary)
+                                .cornerRadius(12)
                             }
                         }
-                        .padding(20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color(.secondarySystemBackground))
-                                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
-                        )
 
-                        // Notes Card
-                        VStack(alignment: .leading, spacing: 12) {
-                            SectionHeader(title: "Additional Notes", icon: "note.text")
-
-                            TextField("Any additional details...", text: $notes, axis: .vertical)
-                                .textFieldStyle(.plain)
-                                .lineLimit(3...6)
-                                .padding(12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.gray.opacity(0.1))
-                                )
-                        }
-                        .padding(20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color(.secondarySystemBackground))
-                                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
-                        )
-
-                        // Create Button
-                        Button(action: createPlan) {
-                            HStack {
-                                if isCreating {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.9)
-                                } else {
-                                    Image(systemName: "checkmark.circle.fill")
-                                    Text("Start Adventure")
-                                        .fontWeight(.semibold)
+                        if currentStep < totalSteps {
+                            Button(action: {
+                                if validateCurrentStep() {
+                                    currentStep += 1
                                 }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(
-                                LinearGradient(
-                                    colors: canCreatePlan ?
-                                        [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal] :
-                                        [Color.gray, Color.gray.opacity(0.8)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                            }) {
+                                HStack {
+                                    Text("Next")
+                                    Image(systemName: "chevron.right")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                                .background(
+                                    LinearGradient(
+                                        colors: canProceedFromCurrentStep() ?
+                                            [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal] :
+                                            [Color.gray, Color.gray.opacity(0.8)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
                                 )
-                            )
-                            .foregroundStyle(.white)
-                            .cornerRadius(16)
+                                .foregroundStyle(.white)
+                                .cornerRadius(12)
+                            }
+                            .disabled(!canProceedFromCurrentStep())
                         }
-                        .disabled(!canCreatePlan || isCreating)
-                        .padding(.top, 10)
                     }
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.bottom, 30)
                 }
             }
             .navigationTitle("New Adventure")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
@@ -296,17 +160,51 @@ struct CreatePlanView: View {
             } message: {
                 Text(errorMessage)
             }
+            .alert("Zero Grace Period Warning", isPresented: $showZeroGraceWarning) {
+                Button("I Understand", role: .destructive) {
+                    showZeroGraceWarning = false
+                }
+                Button("Set to 15 minutes", role: .cancel) {
+                    graceMinutes = 15
+                    showZeroGraceWarning = false
+                }
+            } message: {
+                Text("Setting a zero grace period means your emergency contacts will be notified immediately if you don't check out on time. Are you sure?")
+            }
         }
     }
 
-    private var canCreatePlan: Bool {
-        !planTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !contacts.isEmpty
+    private func canProceedFromCurrentStep() -> Bool {
+        switch currentStep {
+        case 1:
+            return !planTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                   !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case 2:
+            return etaTime > startTime
+        case 3:
+            return !contacts.isEmpty
+        case 4:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func validateCurrentStep() -> Bool {
+        switch currentStep {
+        case 2:
+            if graceMinutes == 0 && !showZeroGraceWarning {
+                showZeroGraceWarning = true
+                return false
+            }
+            return true
+        default:
+            return true
+        }
     }
 
     private func createPlan() {
-        guard canCreatePlan else { return }
+        guard canProceedFromCurrentStep() else { return }
 
         isCreating = true
 
@@ -337,85 +235,480 @@ struct CreatePlanView: View {
     }
 }
 
-// MARK: - Supporting Views
-struct SectionHeader: View {
-    let title: String
-    let icon: String
+// MARK: - Progress Indicator
+struct ProgressIndicator: View {
+    let currentStep: Int
+    let totalSteps: Int
 
     var body: some View {
-        Label(title, systemImage: icon)
-            .font(.headline)
-            .foregroundStyle(.primary)
-    }
-}
-
-struct FloatingLabelTextField: View {
-    let placeholder: String
-    @Binding var text: String
-    let icon: String
-
-    var body: some View {
-        HStack {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
-
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
+        HStack(spacing: 8) {
+            ForEach(1...totalSteps, id: \.self) { step in
+                Circle()
+                    .fill(step <= currentStep ?
+                        LinearGradient(
+                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ) :
+                        LinearGradient(
+                            colors: [Color(.systemGray4), Color(.systemGray4)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 8, height: 8)
+                    .animation(.easeInOut, value: currentStep)
+            }
         }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.tertiarySystemFill))
-        )
+        .padding(.vertical, 8)
     }
 }
 
-struct ActivityChip: View {
+// MARK: - Step 1: Trip Details
+struct Step1TripDetails: View {
+    @Binding var planTitle: String
+    @Binding var selectedActivity: String
+    @Binding var location: String
+    let activities: [ActivityType]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Trip Details")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    Text("Let's start with the basics")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 20)
+
+                // Title Input
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Adventure Name", systemImage: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextField("e.g., Morning hike at Bear Mountain", text: $planTitle)
+                        .textFieldStyle(.plain)
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+                }
+
+                // Activity Type Selection
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Activity Type", systemImage: "figure.walk")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 12) {
+                        ForEach(activities, id: \.self) { activity in
+                            ActivityTypeButton(
+                                activity: activity,
+                                isSelected: selectedActivity == activity.rawValue,
+                                action: { selectedActivity = activity.rawValue }
+                            )
+                        }
+                    }
+                }
+
+                // Location Input
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Location", systemImage: "location.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextField("e.g., Yosemite National Park", text: $location)
+                        .textFieldStyle(.plain)
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+                }
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal)
+        }
+    }
+}
+
+// MARK: - Step 2: Time Settings
+struct Step2TimeSettings: View {
+    @Binding var startTime: Date
+    @Binding var etaTime: Date
+    @Binding var isManualETA: Bool
+    @Binding var graceMinutes: Double
+    @Binding var showZeroGraceWarning: Bool
+
+    @State private var duration: Double = 2
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Time Settings")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    Text("When are you leaving and returning?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 20)
+
+                // Start Time
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Departure Time", systemImage: "calendar.badge.clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    DatePicker(
+                        "",
+                        selection: $startTime,
+                        in: Date()...,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    .datePickerStyle(.graphical)
+                    .padding()
+                    .background(Color(.secondarySystemFill))
+                    .cornerRadius(12)
+                }
+
+                // Expected Return
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label("Expected Return", systemImage: "house.arrival")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Toggle("Manual", isOn: $isManualETA)
+                            .toggleStyle(.button)
+                            .tint(Color(hex: "#6C63FF") ?? .purple)
+                            .font(.caption)
+                    }
+
+                    if isManualETA {
+                        DatePicker(
+                            "",
+                            selection: $etaTime,
+                            in: startTime...,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        .datePickerStyle(.graphical)
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+                    } else {
+                        VStack(spacing: 12) {
+                            HStack {
+                                Text("Duration")
+                                    .font(.subheadline)
+                                Spacer()
+                                Text("\(Int(duration)) hours")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            }
+
+                            Slider(value: $duration, in: 0.5...24, step: 0.5)
+                                .tint(Color(hex: "#6C63FF") ?? .purple)
+                                .onChange(of: duration) { newValue in
+                                    etaTime = startTime.addingTimeInterval(newValue * 3600)
+                                }
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+                    }
+
+                    // ETA Display
+                    HStack {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Return Time")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(etaTime, format: .dateTime.weekday().month().day().hour().minute())
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+                        Spacer()
+                    }
+                    .padding()
+                    .background(Color(.tertiarySystemFill))
+                    .cornerRadius(12)
+                }
+
+                // Grace Period
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Grace Period", systemImage: "hourglass")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 12) {
+                        HStack {
+                            Text("Alert delay after ETA")
+                                .font(.subheadline)
+                            Spacer()
+                            Text("\(Int(graceMinutes)) minutes")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(graceMinutes == 0 ? .red : .orange)
+                        }
+
+                        Slider(value: $graceMinutes, in: 0...120, step: 15)
+                            .tint(graceMinutes == 0 ? .red : .orange)
+                    }
+                    .padding()
+                    .background(Color(.secondarySystemFill))
+                    .cornerRadius(12)
+
+                    Text("Contacts will be notified \(Int(graceMinutes)) minutes after your ETA if you haven't checked in")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal)
+        }
+        .onAppear {
+            duration = etaTime.timeIntervalSince(startTime) / 3600
+        }
+    }
+}
+
+// MARK: - Step 3: Emergency Contacts
+struct Step3EmergencyContacts: View {
+    @Binding var contacts: [EmergencyContact]
+    @Binding var showAddContact: Bool
+    @Binding var newContactName: String
+    @Binding var newContactPhone: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Emergency Contacts")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    Text("Who should we notify if needed?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 20)
+
+                // Add Contact Button
+                Button(action: { showAddContact = true }) {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                        Text("Add Emergency Contact")
+                            .fontWeight(.medium)
+                        Spacer()
+                    }
+                    .padding()
+                    .background(
+                        LinearGradient(
+                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .foregroundStyle(.white)
+                    .cornerRadius(12)
+                }
+
+                if contacts.isEmpty {
+                    // Empty State
+                    VStack(spacing: 16) {
+                        Image(systemName: "person.crop.circle.badge.exclamationmark")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.orange)
+
+                        Text("No contacts added")
+                            .font(.headline)
+
+                        Text("Add at least one emergency contact who will be notified if you don't check in on time")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                } else {
+                    // Contact List
+                    VStack(spacing: 12) {
+                        ForEach(contacts) { contact in
+                            ContactCard(contact: contact) {
+                                contacts.removeAll { $0.id == contact.id }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal)
+        }
+    }
+}
+
+// MARK: - Step 4: Additional Notes
+struct Step4AdditionalNotes: View {
+    @Binding var notes: String
+    @Binding var isCreating: Bool
+    let onSubmit: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Additional Notes")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    Text("Any extra details? (Optional)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 20)
+
+                // Notes Input
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Notes", systemImage: "note.text")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 150)
+                        .padding(8)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+
+                    Text("Add any additional information that might be helpful")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Ready to Go Section
+                VStack(spacing: 16) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 48))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
+                    Text("Ready to start your adventure?")
+                        .font(.headline)
+
+                    Text("We'll keep track of your journey and notify your contacts if needed")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+
+                // Start Adventure Button
+                Button(action: onSubmit) {
+                    HStack {
+                        if isCreating {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.9)
+                        } else {
+                            Image(systemName: "flag.checkered")
+                            Text("Start Adventure")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .foregroundStyle(.white)
+                    .cornerRadius(16)
+                }
+                .disabled(isCreating)
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal)
+        }
+    }
+}
+
+// MARK: - Supporting Views
+struct ActivityTypeButton: View {
     let activity: ActivityType
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            VStack(spacing: 4) {
                 Text(activity.icon)
-                    .font(.system(size: 18))
+                    .font(.title2)
                 Text(activity.displayName)
-                    .font(.subheadline)
+                    .font(.caption2)
                     .fontWeight(.medium)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 12)
                     .fill(isSelected ?
-                        LinearGradient(
-                            colors: [activity.primaryColor, activity.secondaryColor],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ) :
-                        LinearGradient(
-                            colors: [Color(.tertiarySystemFill), Color(.tertiarySystemFill)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
+                        activity.primaryColor.opacity(0.15) :
+                        Color(.secondarySystemFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? activity.primaryColor : Color.clear, lineWidth: 2)
                     )
             )
-            .foregroundStyle(isSelected ? .white : .primary)
+            .foregroundStyle(isSelected ? activity.primaryColor : .primary)
         }
     }
 }
 
-struct ContactRow: View {
+struct ContactCard: View {
     let contact: EmergencyContact
     let onDelete: () -> Void
 
     var body: some View {
         HStack {
-            Image(systemName: "person.circle.fill")
-                .font(.title2)
-                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 44, height: 44)
+                .overlay(
+                    Text(contact.name.prefix(1).uppercased())
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(contact.name)
@@ -429,16 +722,14 @@ struct ContactRow: View {
             Spacer()
 
             Button(action: onDelete) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title3)
+                Image(systemName: "trash")
+                    .font(.callout)
                     .foregroundStyle(.red)
             }
         }
         .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.quaternarySystemFill))
-        )
+        .background(Color(.secondarySystemFill))
+        .cornerRadius(12)
     }
 }
 

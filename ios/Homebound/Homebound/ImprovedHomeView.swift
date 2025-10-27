@@ -137,8 +137,11 @@ struct ImprovedActivePlanCard: View {
     @EnvironmentObject var session: Session
     @State private var timeRemaining = ""
     @State private var isOverdue = false
+    @State private var notificationCountdown = ""
     @State private var progress: CGFloat = 0.5
     @State private var isPerformingAction = false
+    @State private var showingSafetyTips = true  // Show by default
+    @State private var currentSafetyTipIndex = 0
 
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -151,11 +154,20 @@ struct ImprovedActivePlanCard: View {
             // Activity Header
             HStack {
                 Circle()
-                    .fill(activity.primaryColor.opacity(0.2))
+                    .fill(isOverdue ? Color.red.opacity(0.2) : activity.primaryColor.opacity(0.2))
                     .frame(width: 60, height: 60)
                     .overlay(
                         Text(activity.icon)
                             .font(.system(size: 32))
+                    )
+                    .overlay(
+                        isOverdue ?
+                        Circle()
+                            .stroke(Color.red, lineWidth: 3)
+                            .scaleEffect(1.2)
+                            .opacity(0.7)
+                            .animation(.easeInOut(duration: 1).repeatForever(), value: isOverdue)
+                        : nil
                     )
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -180,15 +192,62 @@ struct ImprovedActivePlanCard: View {
                 }
             }
 
+            // Overdue Warning Section (if overdue)
+            if isOverdue {
+                VStack(spacing: 12) {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.title)
+                            .foregroundStyle(.red)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("YOU ARE OVERDUE")
+                                .font(.headline)
+                                .foregroundStyle(.red)
+                            Text("Check in immediately to avoid alerting contacts")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding()
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(12)
+
+                    // Notification Countdown
+                    if !notificationCountdown.isEmpty {
+                        HStack {
+                            Image(systemName: "bell.badge.fill")
+                                .foregroundStyle(.orange)
+                            Text("Notifying contacts in:")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Spacer()
+                            Text(notificationCountdown)
+                                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.orange)
+                        }
+                        .padding()
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(12)
+                    }
+                }
+            }
+
             // Progress Ring
             ZStack {
                 Circle()
-                    .stroke(activity.primaryColor.opacity(0.2), lineWidth: 8)
+                    .stroke(isOverdue ? Color.red.opacity(0.2) : activity.primaryColor.opacity(0.2), lineWidth: 8)
                     .frame(width: 140, height: 140)
 
                 Circle()
-                    .trim(from: 0, to: progress)
+                    .trim(from: 0, to: isOverdue ? 1 : progress)
                     .stroke(
+                        isOverdue ?
+                        LinearGradient(
+                            colors: [.red, .orange],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ) :
                         LinearGradient(
                             colors: [activity.primaryColor, activity.accentColor],
                             startPoint: .topLeading,
@@ -222,32 +281,35 @@ struct ImprovedActivePlanCard: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(activity.primaryColor.opacity(0.1))
-                .foregroundStyle(activity.primaryColor)
+                .background(isOverdue ? Color.red.opacity(0.1) : activity.primaryColor.opacity(0.1))
+                .foregroundStyle(isOverdue ? .red : activity.primaryColor)
                 .cornerRadius(20)
             }
 
-            // Action Buttons
+            // Action Buttons - Emphasize "I'm Safe" when overdue
             HStack(spacing: 12) {
-                ActionButton(
-                    title: "Check In",
-                    icon: "checkmark.circle.fill",
-                    color: activity.primaryColor,
-                    isLoading: isPerformingAction,
-                    action: {
-                        Task {
-                            isPerformingAction = true
-                            _ = await session.checkIn()
-                            isPerformingAction = false
+                if !isOverdue {
+                    ActionButton(
+                        title: "Check In",
+                        icon: "checkmark.circle.fill",
+                        color: activity.primaryColor,
+                        isLoading: isPerformingAction,
+                        action: {
+                            Task {
+                                isPerformingAction = true
+                                _ = await session.checkIn()
+                                isPerformingAction = false
+                            }
                         }
-                    }
-                )
+                    )
+                }
 
                 ActionButton(
                     title: "I'm Safe",
                     icon: "house.fill",
-                    color: .green,
+                    color: isOverdue ? .red : .green,
                     isLoading: isPerformingAction,
+                    isEmergency: isOverdue,
                     action: {
                         Task {
                             isPerformingAction = true
@@ -272,18 +334,78 @@ struct ImprovedActivePlanCard: View {
                 )
             }
 
-            // Encouragement Message
-            Text(activity.encouragementMessages.randomElement() ?? "Stay safe!")
+            // Encouragement Message or Urgent Message
+            Text(isOverdue ? "⚠️ Please check in immediately to avoid worrying your contacts!" :
+                 activity.encouragementMessages.randomElement() ?? "Stay safe!")
                 .font(.footnote)
                 .italic()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isOverdue ? .red : .secondary)
                 .padding(.horizontal)
+
+            // Safety Tips Section
+            VStack(alignment: .leading, spacing: 8) {
+                Button(action: { withAnimation(.easeInOut(duration: 0.3)) { showingSafetyTips.toggle() } }) {
+                    HStack {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.caption)
+                        Text("Safety Tips")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Image(systemName: showingSafetyTips ? "chevron.up" : "chevron.down")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(isOverdue ? .red : activity.primaryColor)
+                    .padding(.horizontal, 4)
+                }
+
+                if showingSafetyTips {
+                    // Display tips in a 2-column grid for better space usage
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 8),
+                        GridItem(.flexible(), spacing: 8)
+                    ], spacing: 8) {
+                        ForEach(activity.safetyTips, id: \.self) { tip in
+                            HStack(alignment: .top, spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(isOverdue ? .red.opacity(0.7) : activity.primaryColor.opacity(0.7))
+                                Text(tip)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.9)
+                                Spacer(minLength: 0)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(isOverdue ? Color.red.opacity(0.05) : activity.primaryColor.opacity(0.05))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isOverdue ? Color.red.opacity(0.1) : activity.primaryColor.opacity(0.1), lineWidth: 1)
+                    )
+                }
+            }
+            .padding(.horizontal)
+            .transition(.asymmetric(insertion: .scale.combined(with: .opacity), removal: .scale.combined(with: .opacity)))
         }
         .padding(24)
         .background(
             RoundedRectangle(cornerRadius: 24)
                 .fill(Color(.secondarySystemBackground))
-                .shadow(color: activity.primaryColor.opacity(0.15), radius: 20, x: 0, y: 10)
+                .overlay(
+                    isOverdue ?
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(Color.red.opacity(0.3), lineWidth: 2)
+                    : nil
+                )
+                .shadow(color: isOverdue ? .red.opacity(0.2) : activity.primaryColor.opacity(0.15),
+                        radius: 20, x: 0, y: 10)
         )
         .padding(.horizontal)
         .onReceive(timer) { _ in
@@ -305,12 +427,28 @@ struct ImprovedActivePlanCard: View {
             let overdueInterval = abs(interval)
             let hours = Int(overdueInterval) / 3600
             let minutes = Int(overdueInterval) % 3600 / 60
-            timeRemaining = String(format: "%02d:%02d", hours, minutes)
+            let seconds = Int(overdueInterval) % 60
+            timeRemaining = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+
+            // Calculate time until notification (grace period after ETA)
+            let graceEndTime = eta.addingTimeInterval(Double(plan.grace_minutes * 60))
+            let timeUntilNotification = graceEndTime.timeIntervalSince(now)
+
+            if timeUntilNotification > 0 {
+                let notifyHours = Int(timeUntilNotification) / 3600
+                let notifyMinutes = Int(timeUntilNotification) % 3600 / 60
+                let notifySeconds = Int(timeUntilNotification) % 60
+                notificationCountdown = String(format: "%02d:%02d:%02d", notifyHours, notifyMinutes, notifySeconds)
+            } else {
+                notificationCountdown = "NOTIFIED"
+            }
         } else {
             isOverdue = false
+            notificationCountdown = ""
             let hours = Int(interval) / 3600
             let minutes = Int(interval) % 3600 / 60
-            timeRemaining = String(format: "%02d:%02d", hours, minutes)
+            let seconds = Int(interval) % 60
+            timeRemaining = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
         }
     }
 
@@ -466,6 +604,7 @@ struct ActionButton: View {
     let icon: String
     let color: Color
     var isLoading: Bool = false
+    var isEmergency: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -489,6 +628,15 @@ struct ActionButton: View {
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(isLoading ? color.opacity(0.7) : color)
+                    .overlay(
+                        isEmergency && !isLoading ?
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white, lineWidth: 2)
+                            .scaleEffect(1.05)
+                            .opacity(0.8)
+                            .animation(.easeInOut(duration: 0.8).repeatForever(), value: isEmergency)
+                        : nil
+                    )
             )
         }
         .disabled(isLoading)

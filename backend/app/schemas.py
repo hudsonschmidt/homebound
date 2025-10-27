@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, validator
+
+
+# Valid activity types
+ACTIVITY_TYPES = [
+    'hiking', 'biking', 'running', 'climbing', 'camping', 'backpacking',
+    'skiing', 'snowboarding', 'kayaking', 'sailing', 'fishing', 'surfing',
+    'scuba_diving', 'free_diving', 'snorkeling', 'horseback_riding',
+    'driving', 'flying', 'other'
+]
 
 
 # ---- Contacts / Plans ----
@@ -16,13 +25,19 @@ class ContactIn(BaseModel):
 
 class PlanCreate(BaseModel):
     title: str
-    activity_type: str = "other"  # hiking, biking, running, climbing, driving, flying, camping, other
+    activity_type: str = "other"
     start_at: datetime
     eta_at: datetime
-    grace_minutes: int = Field(default=30, ge=0)
+    grace_minutes: int = Field(default=30, ge=0)  # Allow 0 for immediate notifications
     location_text: Optional[str] = None
     notes: Optional[str] = None
     contacts: List[ContactIn] = Field(default_factory=list)
+
+    @validator('activity_type')
+    def validate_activity_type(cls, v):
+        if v not in ACTIVITY_TYPES:
+            raise ValueError(f'Invalid activity type. Must be one of: {", ".join(ACTIVITY_TYPES)}')
+        return v
 
 
 class PlanOut(BaseModel):
