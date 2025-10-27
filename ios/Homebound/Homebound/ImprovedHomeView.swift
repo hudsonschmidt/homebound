@@ -14,16 +14,9 @@ struct ImprovedHomeView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background Gradient
-                LinearGradient(
-                    colors: [
-                        Color(hex: "#F0F2F5") ?? .gray,
-                        Color(hex: "#FFFFFF") ?? .white
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                // Background - adapts to dark mode
+                Color(.systemBackground)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -76,6 +69,8 @@ struct ImprovedHomeView: View {
             .task {
                 updateGreeting()
                 await session.loadActivePlan()
+                // Load user profile to ensure we have the latest data
+                await session.loadUserProfile()
             }
             .refreshable {
                 await session.loadActivePlan()
@@ -338,23 +333,13 @@ struct QuickActionsGrid: View {
                 action: { showingCreatePlan = true }
             )
 
-            if hasActivePlan {
-                QuickActionCard(
-                    icon: "house.fill",
-                    title: "I'm Safe",
-                    subtitle: "End trip",
-                    gradient: [Color(hex: "#11998E") ?? .green, Color(hex: "#38EF7D") ?? .green],
-                    action: onHomeSafe
-                )
-            } else {
-                QuickActionCard(
-                    icon: "clock.arrow.circlepath",
-                    title: "History",
-                    subtitle: "Past trips",
-                    gradient: [Color(hex: "#FC466B") ?? .pink, Color(hex: "#3F5EFB") ?? .blue],
-                    action: { showingHistory = true }
-                )
-            }
+            QuickActionCard(
+                icon: "clock.arrow.circlepath",
+                title: "History",
+                subtitle: "Past trips",
+                gradient: [Color(hex: "#FC466B") ?? .pink, Color(hex: "#3F5EFB") ?? .blue],
+                action: { showingHistory = true }
+            )
         }
     }
 }

@@ -118,7 +118,14 @@ final class Session: ObservableObject {
         userName = keychain.getUserName()
         userEmail = keychain.getUserEmail()
         userAge = keychain.getUserAge()
-        profileCompleted = keychain.getProfileCompleted()
+
+        // Profile is completed if we have a name stored
+        // This ensures existing users don't see onboarding again
+        if userName != nil && !userName!.isEmpty {
+            profileCompleted = true
+        } else {
+            profileCompleted = keychain.getProfileCompleted()
+        }
 
         // If we have a token, we're authenticated
         if accessToken != nil {
@@ -488,6 +495,45 @@ final class Session: ObservableObject {
                 self.lastError = "Failed to update profile: \(error.localizedDescription)"
             }
             return false
+        }
+    }
+
+    // MARK: - Load User Profile
+    func loadUserProfile() async {
+        guard let bearer = accessToken else { return }
+
+        struct UserProfileResponse: Decodable {
+            let id: Int?
+            let email: String?
+            let name: String?
+            let age: Int?
+            let profile_completed: Bool?
+        }
+
+        do {
+            let response: UserProfileResponse = try await api.get(
+                url("/api/v1/auth/profile"),
+                bearer: bearer
+            )
+
+            await MainActor.run {
+                if let name = response.name {
+                    self.userName = name
+                }
+                if let age = response.age {
+                    self.userAge = age
+                }
+                if let email = response.email {
+                    self.userEmail = email
+                }
+                self.profileCompleted = response.profile_completed ?? (response.name != nil)
+
+                // Save to keychain
+                self.saveUserDataToKeychain()
+            }
+        } catch {
+            // If profile endpoint fails, keep existing cached data
+            print("Failed to load user profile: \(error.localizedDescription)")
         }
     }
 

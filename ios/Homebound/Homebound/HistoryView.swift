@@ -57,38 +57,38 @@ struct HistoryView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    VStack(spacing: 0) {
-                        // Search Bar
-                        HStack {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.secondary)
-                            TextField("Search trips...", text: $searchText)
-                                .textFieldStyle(.plain)
-                        }
-                        .padding(12)
-                        .background(Color.white)
-                        .cornerRadius(12)
-                        .padding(.horizontal)
-                        .padding(.top)
-
-                        // Filter Pills
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(filters, id: \.self) { filter in
-                                    FilterPill(
-                                        title: filter.capitalized,
-                                        isSelected: selectedFilter == filter,
-                                        count: countForFilter(filter),
-                                        action: { selectedFilter = filter }
-                                    )
-                                }
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            // Search Bar
+                            HStack {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                TextField("Search trips...", text: $searchText)
+                                    .textFieldStyle(.plain)
                             }
+                            .padding(12)
+                            .background(Color.white)
+                            .cornerRadius(12)
                             .padding(.horizontal)
-                            .padding(.vertical, 10)
-                        }
+                            .padding(.top)
 
-                        // Trip List
-                        ScrollView {
+                            // Filter Pills
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(filters, id: \.self) { filter in
+                                        FilterPill(
+                                            title: filter.capitalized,
+                                            isSelected: selectedFilter == filter,
+                                            count: countForFilter(filter),
+                                            action: { selectedFilter = filter }
+                                        )
+                                    }
+                                }
+                                .padding(.horizontal)
+                                .padding(.vertical, 10)
+                            }
+
+                            // Trip List
                             LazyVStack(spacing: 12) {
                                 ForEach(filteredPlans) { plan in
                                     TripHistoryCard(plan: plan)
@@ -101,7 +101,7 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("Trip History")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
@@ -128,8 +128,12 @@ struct HistoryView: View {
 
         isLoading = true
         do {
+            // Create URL with proper query parameters
+            var urlComponents = URLComponents(url: session.url("/api/v1/plans/recent"), resolvingAgainstBaseURL: false)!
+            urlComponents.queryItems = [URLQueryItem(name: "limit", value: "100")]
+
             let plans: [PlanOut] = try await session.api.get(
-                session.url("/api/v1/plans/recent?limit=100"),
+                urlComponents.url!,
                 bearer: bearer
             )
 

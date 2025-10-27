@@ -143,6 +143,32 @@ class ProfileUpdateReq(BaseModel):
     phone: Optional[str] = None
 
 
+@router.get("/auth/profile")
+async def get_profile(
+    request: Request,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get current user profile."""
+    user_id = get_current_user_id(request)
+
+    result = await session.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = result.scalar()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "age": getattr(user, 'age', None),
+        "phone": user.phone,
+        "profile_completed": bool(user.name)
+    }
+
+
 @router.put("/auth/profile")
 async def update_profile(
     request: Request,

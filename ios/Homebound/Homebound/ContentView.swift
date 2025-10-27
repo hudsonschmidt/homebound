@@ -13,7 +13,12 @@ struct ContentView: View {
     var body: some View {
         Group {
             if session.isAuthenticated {
-                LandingView()
+                // Check if profile is completed
+                if !session.profileCompleted {
+                    OnboardingView()
+                } else {
+                    ImprovedHomeView()
+                }
             } else {
                 SignInView()
             }
