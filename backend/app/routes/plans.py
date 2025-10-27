@@ -373,3 +373,24 @@ async def get_plans_by_activity(
             for p in plans
         ]
     }
+
+
+@router.delete("/plans/{plan_id}")
+async def delete_plan(
+    plan_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete a plan and all associated data."""
+    user_id = get_current_user_id(request)
+
+    # Get the plan first to verify ownership
+    plan = await session.get(Plan, plan_id)
+    if not plan or plan.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    # Delete the plan (cascading will handle related data)
+    await session.delete(plan)
+    await session.commit()
+
+    return {"ok": True, "message": "Plan deleted successfully"}

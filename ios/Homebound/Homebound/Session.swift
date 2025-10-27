@@ -98,6 +98,11 @@ final class Session: ObservableObject {
             saveUserDataToKeychain()
         }
     }
+    @Published var userPhone: String? = nil {
+        didSet {
+            saveUserDataToKeychain()
+        }
+    }
     @Published var profileCompleted: Bool = false {
         didSet {
             saveUserDataToKeychain()
@@ -493,6 +498,89 @@ final class Session: ObservableObject {
         } catch {
             await MainActor.run {
                 self.lastError = "Failed to update profile: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    // MARK: - Update Profile
+    func updateProfile(name: String? = nil, age: Int? = nil, phone: String? = nil) async -> Bool {
+        guard let bearer = accessToken else { return false }
+
+        struct UpdateProfileRequest: Encodable {
+            let name: String?
+            let age: Int?
+            let phone: String?
+        }
+
+        do {
+            let _: GenericResponse = try await api.patch(
+                url("/api/v1/auth/profile"),
+                body: UpdateProfileRequest(name: name, age: age, phone: phone),
+                bearer: bearer
+            )
+
+            await MainActor.run {
+                if let name = name {
+                    self.userName = name
+                }
+                if let age = age {
+                    self.userAge = age
+                }
+                if let phone = phone {
+                    self.userPhone = phone
+                }
+                self.notice = "Profile updated successfully"
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to update profile: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    // MARK: - Delete Account
+    func deleteAccount() async -> Bool {
+        guard let bearer = accessToken else { return false }
+
+        do {
+            let _: GenericResponse = try await api.delete(
+                url("/api/v1/auth/account"),
+                bearer: bearer
+            )
+
+            await MainActor.run {
+                // Clear all data and sign out
+                self.signOut()
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to delete account: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    // MARK: - Delete Plan
+    func deletePlan(_ planId: Int) async -> Bool {
+        guard let bearer = accessToken else { return false }
+
+        do {
+            let _: GenericResponse = try await api.delete(
+                url("/api/v1/plans/\(planId)"),
+                bearer: bearer
+            )
+
+            await MainActor.run {
+                self.notice = "Trip deleted successfully"
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to delete trip: \(error.localizedDescription)"
             }
             return false
         }

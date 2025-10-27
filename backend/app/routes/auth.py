@@ -6,7 +6,7 @@ from typing import Optional
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
@@ -215,3 +215,30 @@ async def update_profile(
             "profile_completed": bool(user.name)
         }
     }
+
+
+@router.patch("/auth/profile")
+async def patch_profile(
+    request: Request,
+    body: ProfileUpdateReq,
+    session: AsyncSession = Depends(get_session),
+):
+    """Partially update user profile information (same as PUT but for PATCH compatibility)."""
+    return await update_profile(request, body, session)
+
+
+@router.delete("/auth/account")
+async def delete_account(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete user account and all associated data."""
+    user_id = get_current_user_id(request)
+
+    # Delete the user (cascading will handle related data)
+    await session.execute(
+        delete(User).where(User.id == user_id)
+    )
+    await session.commit()
+
+    return {"ok": True, "message": "Account deleted successfully"}

@@ -79,6 +79,26 @@ struct API {
         return try decoder.decode(T.self, from: data)
     }
 
+    func patch<T: Decodable, B: Encodable>(_ url: URL, body: B, bearer: String?) async throws -> T {
+        var req = URLRequest(url: url); req.httpMethod = "PATCH"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try encoder.encode(body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try check(resp: resp, data: data)
+        if T.self == Empty.self { return Empty() as! T }
+        return try decoder.decode(T.self, from: data)
+    }
+
+    func delete<T: Decodable>(_ url: URL, bearer: String?) async throws -> T {
+        var req = URLRequest(url: url); req.httpMethod = "DELETE"
+        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try check(resp: resp, data: data)
+        if T.self == Empty.self { return Empty() as! T }
+        return try decoder.decode(T.self, from: data)
+    }
+
     private func check(resp: URLResponse, data: Data) throws {
         guard let http = resp as? HTTPURLResponse else { throw APIError.badResponse }
         if (200..<300).contains(http.statusCode) { return }

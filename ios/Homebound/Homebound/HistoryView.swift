@@ -85,6 +85,15 @@ struct HistoryView: View {
                             LazyVStack(spacing: 12) {
                                 ForEach(filteredPlans) { plan in
                                     TripHistoryCard(plan: plan)
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button(role: .destructive) {
+                                                Task {
+                                                    await deletePlan(plan)
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                        }
                                 }
                             }
                             .padding(.horizontal)
@@ -137,6 +146,16 @@ struct HistoryView: View {
         } catch {
             await MainActor.run {
                 self.isLoading = false
+            }
+        }
+    }
+
+    func deletePlan(_ plan: PlanOut) async {
+        let success = await session.deletePlan(plan.id)
+        if success {
+            await MainActor.run {
+                // Remove the plan from the list
+                self.allPlans.removeAll { $0.id == plan.id }
             }
         }
     }

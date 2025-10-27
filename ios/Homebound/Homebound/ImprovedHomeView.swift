@@ -72,9 +72,7 @@ struct ImprovedHomeView: View {
                 // Load user profile to ensure we have the latest data
                 await session.loadUserProfile()
             }
-            .refreshable {
-                await session.loadActivePlan()
-            }
+            // Removed refreshable to prevent accidental plan completion
         }
     }
 
@@ -185,7 +183,7 @@ struct ImprovedActivePlanCard: View {
                     Image(systemName: isOverdue ? "exclamationmark.triangle.fill" : "clock.fill")
                         .font(.caption)
                         .foregroundStyle(isOverdue ? .red : activity.primaryColor)
-                    Text(plan.status.uppercased())
+                    Text(isOverdue ? "OVERDUE" : "ACTIVE")
                         .font(.caption2)
                         .fontWeight(.semibold)
                         .foregroundStyle(isOverdue ? .red : activity.primaryColor)
@@ -410,6 +408,9 @@ struct ImprovedActivePlanCard: View {
         .padding(.horizontal)
         .onReceive(timer) { _ in
             updateTimer()
+        }
+        .onAppear {
+            updateTimer()  // Calculate initial state immediately
         }
     }
 
