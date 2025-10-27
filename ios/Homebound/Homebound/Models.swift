@@ -9,6 +9,7 @@ struct ContactIn: Codable {
 
 struct PlanCreate: Codable {
     var title: String
+    var activity_type: String = "other"
     var start_at: Date
     var eta_at: Date
     var grace_minutes: Int = 30
@@ -20,6 +21,7 @@ struct PlanCreate: Codable {
 struct PlanOut: Codable, Identifiable {
     var id: Int
     var title: String
+    var activity_type: String
     var start_at: Date
     var eta_at: Date
     var grace_minutes: Int

@@ -32,6 +32,7 @@ async def create_plan_route(
     return PlanOut(
         id=plan.id,
         title=plan.title,
+        activity_type=plan.activity_type,
         start_at=plan.start_at,
         eta_at=plan.eta_at,
         grace_minutes=plan.grace_minutes,

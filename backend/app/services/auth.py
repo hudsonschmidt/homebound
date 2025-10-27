@@ -113,3 +113,17 @@ def verify_jwt(token: str, expected_type: str = "access") -> Dict[str, Any]:
     if payload.get("typ") != expected_type:
         raise ValueError("wrong token type")
     return payload
+
+
+async def clean_expired_tokens(session: AsyncSession) -> int:
+    """Clean up expired login tokens."""
+    from sqlalchemy import delete
+
+    result = await session.execute(
+        delete(LoginToken).where(
+            (LoginToken.expires_at < _now()) |
+            (LoginToken.used_at.isnot(None))
+        )
+    )
+    await session.commit()
+    return result.rowcount

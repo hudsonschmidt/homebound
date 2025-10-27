@@ -14,6 +14,7 @@ async def create_plan(session: AsyncSession, data: PlanCreate, user_id: int) -> 
     plan = Plan(
         user_id=user_id,
         title=data.title,
+        activity_type=data.activity_type,
         start_at=data.start_at,
         eta_at=data.eta_at,
         grace_minutes=data.grace_minutes,

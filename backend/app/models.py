@@ -46,6 +46,7 @@ class Plan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(200))
+    activity_type: Mapped[str] = mapped_column(String(50), default="other")
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=False))
     eta_at: Mapped[datetime] = mapped_column(DateTime(timezone=False))
     grace_minutes: Mapped[int] = mapped_column(Integer, default=30)

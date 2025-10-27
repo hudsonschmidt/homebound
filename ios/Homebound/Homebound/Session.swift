@@ -60,10 +60,9 @@ final class Session: ObservableObject {
 
     @Published var error: String?
     @Published var notice: String = ""
+    @Published var lastError: String = ""
     @Published var apnsToken: String? = nil
-
-    private var token: String?
-    var accessToken: String? { token }
+    @Published var accessToken: String? = nil
 
     // MARK: URL helper
 
@@ -132,7 +131,7 @@ final class Session: ObservableObject {
                                                         bearer: nil)
             // Try all possible token field names for compatibility
             if let t = resp.access ?? resp.access_token ?? resp.token {
-                token = t
+                accessToken = t
             }
             isAuthenticated = true
             showCodeSheet = false
@@ -199,5 +198,73 @@ final class Session: ObservableObject {
                 self.notice = "❌ Health check failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    // MARK: - Token Actions
+    func performTokenAction(_ token: String, action: String) async {
+        struct TokenResponse: Decodable { let ok: Bool }
+
+        do {
+            let _: TokenResponse = try await api.get(
+                url("/t/\(token)/\(action)"),
+                bearer: nil
+            )
+            await MainActor.run {
+                self.notice = "✅ \(action.capitalized) successful"
+            }
+        } catch {
+            await MainActor.run {
+                self.notice = "❌ \(action.capitalized) failed"
+            }
+        }
+    }
+
+    // MARK: - Plan Management
+    func createPlan(_ plan: PlanCreate) async -> PlanOut? {
+        guard let bearer = accessToken else { return nil }
+
+        do {
+            let response: PlanOut = try await api.post(
+                url("/api/v1/plans"),
+                body: plan,
+                bearer: bearer
+            )
+            return response
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to create plan: \(error.localizedDescription)"
+            }
+            return nil
+        }
+    }
+
+    func loadTimeline(planId: Int) async -> [TimelineEvent] {
+        guard let bearer = accessToken else { return [] }
+
+        do {
+            let response: TimelineResponse = try await api.get(
+                url("/api/v1/plans/\(planId)/timeline"),
+                bearer: bearer
+            )
+            return response.events
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to load timeline: \(error.localizedDescription)"
+            }
+            return []
+        }
+    }
+
+    // MARK: - Sign Out
+    @MainActor
+    func signOut() {
+        accessToken = nil
+        email = ""
+        code = ""
+        showCodeSheet = false
+        isAuthenticated = false
+        error = nil
+        notice = ""
+        lastError = ""
     }
 }

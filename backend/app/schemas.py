@@ -16,6 +16,7 @@ class ContactIn(BaseModel):
 
 class PlanCreate(BaseModel):
     title: str
+    activity_type: str = "other"  # hiking, biking, running, climbing, driving, flying, camping, other
     start_at: datetime
     eta_at: datetime
     grace_minutes: int = Field(default=30, ge=0)
@@ -27,6 +28,7 @@ class PlanCreate(BaseModel):
 class PlanOut(BaseModel):
     id: int
     title: str
+    activity_type: str
     start_at: datetime
     eta_at: datetime
     grace_minutes: int

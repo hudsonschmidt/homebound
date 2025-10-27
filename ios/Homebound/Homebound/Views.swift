@@ -80,7 +80,7 @@ struct RootView: View {
         guard let bearer = session.accessToken else { return }
         let now = Date()
         let eta = now.addingTimeInterval(3 * 3600)
-        let payload = PlanCreate(title: "iOS Demo Plan", start_at: now, eta_at: eta,
+        let payload = PlanCreate(title: "iOS Demo Plan", activity_type: "hiking", start_at: now, eta_at: eta,
                                  grace_minutes: 30, location_text: "Trailhead", notes: "Blue trail")
         do {
             let p: PlanOut = try await session.api.post(

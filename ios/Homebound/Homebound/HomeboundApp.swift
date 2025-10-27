@@ -15,9 +15,18 @@ struct HomeboundApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(session)
-                .task { await requestPush() }
+            if session.accessToken != nil {
+                ImprovedHomeView()  // Show improved home if authenticated
+                    .environmentObject(session)
+                    .task { await requestPush() }
+                    .onOpenURL { url in
+                        // Handle universal links for check-in/out
+                        handleUniversalLink(url)
+                    }
+            } else {
+                AuthenticationView()  // Show login if not authenticated
+                    .environmentObject(session)
+            }
         }
     }
 
@@ -26,6 +35,18 @@ struct HomeboundApp: App {
         _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
         await MainActor.run {
             UIApplication.shared.registerForRemoteNotifications()
+        }
+    }
+
+    private func handleUniversalLink(_ url: URL) {
+        // Handle /t/{token}/checkin or /t/{token}/checkout
+        if url.pathComponents.count >= 3 && url.pathComponents[1] == "t" {
+            let token = url.pathComponents[2]
+            let action = url.pathComponents.count > 3 ? url.pathComponents[3] : ""
+
+            Task {
+                await session.performTokenAction(token, action: action)
+            }
         }
     }
 }
