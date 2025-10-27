@@ -27,16 +27,9 @@ struct HistoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background
-                LinearGradient(
-                    colors: [
-                        Color(hex: "#F5F7FA") ?? .gray,
-                        Color.white
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                // Background - adapts to dark mode
+                Color(.systemBackground)
+                    .ignoresSafeArea()
 
                 if isLoading {
                     ProgressView("Loading trips...")
@@ -67,7 +60,7 @@ struct HistoryView: View {
                                     .textFieldStyle(.plain)
                             }
                             .padding(12)
-                            .background(Color.white)
+                            .background(Color(.secondarySystemBackground))
                             .cornerRadius(12)
                             .padding(.horizontal)
                             .padding(.top)
@@ -237,7 +230,7 @@ struct TripHistoryCard: View {
             }
         }
         .padding(16)
-        .background(Color.white)
+        .background(Color(.secondarySystemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
@@ -276,7 +269,7 @@ struct FilterPill: View {
                         .padding(.vertical, 2)
                         .background(
                             Capsule()
-                                .fill(isSelected ? .white : Color(hex: "#6C63FF") ?? .purple)
+                                .fill(isSelected ? Color(.systemBackground) : Color(hex: "#6C63FF") ?? .purple)
                         )
                 }
             }
@@ -291,13 +284,13 @@ struct FilterPill: View {
                             endPoint: .trailing
                         ) :
                         LinearGradient(
-                            colors: [Color.gray.opacity(0.1), Color.gray.opacity(0.1)],
+                            colors: [Color(.tertiarySystemBackground), Color(.tertiarySystemBackground)],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
                     )
             )
-            .foregroundStyle(isSelected ? .white : .primary)
+            .foregroundStyle(isSelected ? .white : Color(.label))
         }
     }
 }

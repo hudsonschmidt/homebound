@@ -282,7 +282,7 @@ struct ImprovedActivePlanCard: View {
         .padding(24)
         .background(
             RoundedRectangle(cornerRadius: 24)
-                .fill(.white)
+                .fill(Color(.secondarySystemBackground))
                 .shadow(color: activity.primaryColor.opacity(0.15), radius: 20, x: 0, y: 10)
         )
         .padding(.horizontal)
@@ -451,7 +451,11 @@ struct RecentActivityCard: View {
         .frame(width: 140)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(activity.primaryColor.opacity(0.1))
+                .fill(Color(.tertiarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(activity.primaryColor.opacity(0.3), lineWidth: 1)
         )
     }
 }

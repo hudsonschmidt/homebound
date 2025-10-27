@@ -35,16 +35,9 @@ struct CreatePlanView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background
-                LinearGradient(
-                    colors: [
-                        Color(hex: "#F5F5F7") ?? .gray,
-                        Color.white
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                // Background - adapts to dark mode
+                Color(.systemBackground)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 20) {
@@ -88,7 +81,7 @@ struct CreatePlanView: View {
                         .padding(20)
                         .background(
                             RoundedRectangle(cornerRadius: 20)
-                                .fill(.white)
+                                .fill(Color(.secondarySystemBackground))
                                 .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
                         )
 
@@ -147,7 +140,7 @@ struct CreatePlanView: View {
                             .padding()
                             .background(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(hex: "#6C63FF")?.opacity(0.1) ?? Color.purple.opacity(0.1))
+                                    .fill(Color(.tertiarySystemFill))
                             )
 
                             // Grace Period
@@ -174,7 +167,7 @@ struct CreatePlanView: View {
                         .padding(20)
                         .background(
                             RoundedRectangle(cornerRadius: 20)
-                                .fill(.white)
+                                .fill(Color(.secondarySystemBackground))
                                 .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
                         )
 
@@ -216,7 +209,7 @@ struct CreatePlanView: View {
                         .padding(20)
                         .background(
                             RoundedRectangle(cornerRadius: 20)
-                                .fill(.white)
+                                .fill(Color(.secondarySystemBackground))
                                 .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
                         )
 
@@ -236,7 +229,7 @@ struct CreatePlanView: View {
                         .padding(20)
                         .background(
                             RoundedRectangle(cornerRadius: 20)
-                                .fill(.white)
+                                .fill(Color(.secondarySystemBackground))
                                 .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 2)
                         )
 
@@ -373,7 +366,7 @@ struct FloatingLabelTextField: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.gray.opacity(0.1))
+                .fill(Color(.tertiarySystemFill))
         )
     }
 }
@@ -403,7 +396,7 @@ struct ActivityChip: View {
                             endPoint: .trailing
                         ) :
                         LinearGradient(
-                            colors: [Color.gray.opacity(0.1), Color.gray.opacity(0.1)],
+                            colors: [Color(.tertiarySystemFill), Color(.tertiarySystemFill)],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -444,7 +437,7 @@ struct ContactRow: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.gray.opacity(0.05))
+                .fill(Color(.quaternarySystemFill))
         )
     }
 }
