@@ -39,10 +39,6 @@ struct SettingsView: View {
                             }
 
                             Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 8)
                     }
@@ -437,9 +433,8 @@ struct AccountView: View {
                 }
             }
 
-            // Account Actions
+            // Log Out
             Section {
-                // Log Out
                 Button(action: {
                     showingLogoutAlert = true
                 }) {
@@ -450,8 +445,10 @@ struct AccountView: View {
                         Spacer()
                     }
                 }
+            }
 
-                // Delete Account
+            // Delete Account
+            Section {
                 Button(action: {
                     showingDeleteAlert = true
                 }) {
