@@ -93,6 +93,44 @@ async def get_active_plan(
     )
 
 
+@router.get("/plans", response_model=List[PlanOut])
+async def get_all_plans(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get all plans for the user."""
+    user_id = get_current_user_id(request)
+
+    result = await session.execute(
+        select(Plan)
+        .where(Plan.user_id == user_id)
+        .order_by(Plan.created_at.desc())
+    )
+    plans = result.scalars().all()
+
+    plan_outs = []
+    for plan in plans:
+        exp = plan.eta_at + timedelta(days=1, minutes=plan.grace_minutes)
+        checkin = sign_token(plan.id, "checkin", exp)
+        checkout = sign_token(plan.id, "checkout", exp)
+
+        plan_outs.append(PlanOut(
+            id=plan.id,
+            title=plan.title,
+            activity_type=plan.activity_type,
+            start_at=plan.start_at,
+            eta_at=plan.eta_at,
+            grace_minutes=plan.grace_minutes,
+            location_text=plan.location_text,
+            notes=plan.notes,
+            status=plan.status,
+            checkin_token=checkin,
+            checkout_token=checkout,
+        ))
+
+    return plan_outs
+
+
 @router.get("/plans/recent", response_model=List[PlanOut])
 async def get_recent_plans(
     request: Request,

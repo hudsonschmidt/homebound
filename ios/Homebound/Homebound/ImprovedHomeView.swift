@@ -28,7 +28,7 @@ struct ImprovedHomeView: View {
                         // Active Plan Card (if exists) - Takes up significant space
                         if let plan = session.activePlan {
                             ImprovedActivePlanCard(plan: plan, timeline: $timeline)
-                                .frame(minHeight: UIScreen.main.bounds.height * 0.5)
+                                .frame(minHeight: 400)
                                 .transition(.asymmetric(
                                     insertion: .move(edge: .top).combined(with: .opacity),
                                     removal: .scale.combined(with: .opacity)

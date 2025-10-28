@@ -421,7 +421,7 @@ final class Session: ObservableObject {
         }
 
         do {
-            let response: GenericResponse = try await api.post(
+            let _: GenericResponse = try await api.post(
                 url("/api/v1/plans/\(plan.id)/extend"),
                 body: ExtendRequest(minutes: minutes),
                 bearer: bearer

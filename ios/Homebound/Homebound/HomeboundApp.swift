@@ -26,8 +26,8 @@ struct HomeboundApp: App {
                         .environmentObject(session)
                         .transition(.move(edge: .trailing))
                 } else {
-                    // Authenticated with complete profile - show home
-                    ImprovedHomeView()
+                    // Authenticated with complete profile - show main tab view
+                    MainTabView()
                         .environmentObject(session)
                         .task { await requestPush() }
                         .onOpenURL { url in
