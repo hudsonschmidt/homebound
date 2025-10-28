@@ -68,8 +68,8 @@ async def add_saved_contact(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Get existing contacts
-    saved_contacts = getattr(user, 'saved_contacts', {})
+    # Get existing contacts (handle NULL values)
+    saved_contacts = user.saved_contacts or {}
     contacts_list = saved_contacts.get('contacts', [])
 
     # Check limit (10 max saved contacts)
@@ -114,8 +114,8 @@ async def delete_saved_contact(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Get existing contacts
-    saved_contacts = getattr(user, 'saved_contacts', {})
+    # Get existing contacts (handle NULL values)
+    saved_contacts = user.saved_contacts or {}
     contacts_list = saved_contacts.get('contacts', [])
 
     # Find and remove the contact
