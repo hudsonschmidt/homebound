@@ -353,7 +353,7 @@ struct ActivePlanCardCompact: View {
                                 Button(action: {
                                     Task {
                                         isPerformingAction = true
-                                        await session.extendPlan(plan, by: minutes)
+                                        _ = await session.extendPlan(minutes: minutes)
                                         showingExtendOptions = false
                                         isPerformingAction = false
                                     }
