@@ -76,6 +76,7 @@ struct CreatePlanView: View {
                             newContactName: $newContactName,
                             newContactPhone: $newContactPhone
                         )
+                        .environmentObject(session)
                         .tag(3)
 
                         Step4AdditionalNotes(
@@ -1146,10 +1147,15 @@ struct RoundedCorner: Shape {
 
 // MARK: - Step 3: Emergency Contacts
 struct Step3EmergencyContacts: View {
+    @EnvironmentObject var session: Session
     @Binding var contacts: [EmergencyContact]
     @Binding var showAddContact: Bool
     @Binding var newContactName: String
     @Binding var newContactPhone: String
+
+    @State private var savedContacts: [SavedContact] = []
+    @State private var isLoadingSaved = false
+    @State private var showingSavedContacts = false
 
     var body: some View {
         ScrollView {
@@ -1165,25 +1171,45 @@ struct Step3EmergencyContacts: View {
                 }
                 .padding(.top, 20)
 
-                // Add Contact Button
-                Button(action: { showAddContact = true }) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                        Text("Add Emergency Contact")
-                            .fontWeight(.medium)
-                        Spacer()
+                // Action Buttons
+                HStack(spacing: 12) {
+                    // Select from Saved Contacts
+                    Button(action: {
+                        showingSavedContacts = true
+                    }) {
+                        HStack {
+                            Image(systemName: "person.crop.circle.badge.checkmark")
+                                .font(.title3)
+                            Text("Choose Saved")
+                                .fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .cornerRadius(12)
                     }
-                    .padding()
-                    .background(
-                        LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                            startPoint: .leading,
-                            endPoint: .trailing
+
+                    // Add New Contact
+                    Button(action: { showAddContact = true }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                            Text("Add New")
+                                .fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(
+                            LinearGradient(
+                                colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
-                    )
-                    .foregroundStyle(.white)
-                    .cornerRadius(12)
+                        .foregroundStyle(.white)
+                        .cornerRadius(12)
+                    }
                 }
 
                 if contacts.isEmpty {
@@ -1193,10 +1219,10 @@ struct Step3EmergencyContacts: View {
                             .font(.system(size: 48))
                             .foregroundStyle(.orange)
 
-                        Text("No contacts added")
+                        Text("No contacts selected")
                             .font(.headline)
 
-                        Text("Add at least one emergency contact who will be notified if you don't check in on time")
+                        Text("Choose from your saved contacts or add new ones. At least one emergency contact is required.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -1204,19 +1230,55 @@ struct Step3EmergencyContacts: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
                 } else {
-                    // Contact List
-                    VStack(spacing: 12) {
+                    // Selected Contacts
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Selected Contacts (\(contacts.count)/3)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
                         ForEach(contacts) { contact in
                             ContactCard(contact: contact) {
                                 contacts.removeAll { $0.id == contact.id }
                             }
                         }
                     }
+
+                    if contacts.count >= 3 {
+                        HStack {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(Color.orange)
+                            Text("Maximum of 3 contacts reached")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.tertiarySystemFill))
+                        .cornerRadius(8)
+                    }
                 }
 
                 Spacer(minLength: 100)
             }
             .padding(.horizontal)
+        }
+        .task {
+            await loadSavedContacts()
+        }
+        .sheet(isPresented: $showingSavedContacts) {
+            SavedContactsSelectionSheet(
+                savedContacts: savedContacts,
+                selectedContacts: $contacts,
+                isPresented: $showingSavedContacts
+            )
+        }
+    }
+
+    private func loadSavedContacts() async {
+        isLoadingSaved = true
+        let loaded = await session.loadSavedContacts()
+        await MainActor.run {
+            self.savedContacts = loaded
+            self.isLoadingSaved = false
         }
     }
 }
@@ -1431,6 +1493,175 @@ struct AddContactSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Saved Contacts Selection Sheet
+struct SavedContactsSelectionSheet: View {
+    let savedContacts: [SavedContact]
+    @Binding var selectedContacts: [EmergencyContact]
+    @Binding var isPresented: Bool
+    @State private var tempSelection: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            VStack {
+                if savedContacts.isEmpty {
+                    // Empty state
+                    VStack(spacing: 16) {
+                        Image(systemName: "person.crop.circle.badge.questionmark")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+
+                        Text("No Saved Contacts")
+                            .font(.headline)
+
+                        Text("You haven't saved any emergency contacts yet. Add contacts in Settings to quickly select them here.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(savedContacts) { contact in
+                            SavedContactSelectionRow(
+                                contact: contact,
+                                isSelected: tempSelection.contains(contact.id),
+                                canSelect: tempSelection.count < 3 || tempSelection.contains(contact.id)
+                            ) { selected in
+                                if selected {
+                                    tempSelection.insert(contact.id)
+                                } else {
+                                    tempSelection.remove(contact.id)
+                                }
+                            }
+                        }
+
+                        if tempSelection.count >= 3 {
+                            Section {
+                                HStack {
+                                    Image(systemName: "info.circle.fill")
+                                        .foregroundStyle(Color.orange)
+                                    Text("Maximum of 3 contacts can be selected")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .listRowBackground(Color(.tertiarySystemFill))
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("Choose Contacts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        isPresented = false
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add Selected") {
+                        // Convert saved contacts to emergency contacts
+                        let newContacts = savedContacts
+                            .filter { tempSelection.contains($0.id) }
+                            .filter { saved in
+                                // Don't add duplicates
+                                !selectedContacts.contains(where: { $0.phone == saved.phone })
+                            }
+                            .map { saved in
+                                EmergencyContact(
+                                    name: saved.name,
+                                    phone: saved.phone
+                                )
+                            }
+
+                        // Add to selected contacts (up to 3 total)
+                        for contact in newContacts {
+                            if selectedContacts.count < 3 {
+                                selectedContacts.append(contact)
+                            }
+                        }
+
+                        isPresented = false
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(tempSelection.isEmpty)
+                }
+            }
+        }
+        .onAppear {
+            // Pre-select contacts that are already selected
+            tempSelection = Set(
+                selectedContacts.compactMap { selected in
+                    savedContacts.first(where: { $0.phone == selected.phone })?.id
+                }
+            )
+        }
+    }
+}
+
+struct SavedContactSelectionRow: View {
+    let contact: SavedContact
+    let isSelected: Bool
+    let canSelect: Bool
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        Button(action: {
+            if canSelect || isSelected {
+                onToggle(!isSelected)
+            }
+        }) {
+            HStack {
+                // Contact Icon
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+                    .overlay(
+                        Text(contact.name.prefix(1).uppercased())
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(contact.name)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+
+                    Text(contact.phone)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let email = contact.email, !email.isEmpty {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isSelected ? (Color(hex: "#6C63FF") ?? .purple) : Color(.tertiaryLabel))
+                    .opacity(canSelect ? 1.0 : 0.5)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSelect && !isSelected)
     }
 }
 

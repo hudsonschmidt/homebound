@@ -7,6 +7,14 @@ struct ContactIn: Codable {
     var notify_on_overdue: Bool = true
 }
 
+// MARK: - Saved Contact Model (for user's saved contacts)
+struct SavedContact: Identifiable, Codable {
+    let id: String
+    let name: String
+    let phone: String
+    let email: String?
+}
+
 struct ContactCreate: Codable {
     var name: String
     var phone: String

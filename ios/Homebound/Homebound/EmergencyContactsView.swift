@@ -268,14 +268,6 @@ struct AddEmergencyContactSheet: View {
     }
 }
 
-// MARK: - Saved Contact Model
-struct SavedContact: Identifiable, Codable {
-    let id: String
-    let name: String
-    let phone: String
-    let email: String?
-}
-
 #Preview {
     NavigationStack {
         EmergencyContactsView()

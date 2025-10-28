@@ -47,8 +47,8 @@ async def get_saved_contacts(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Get contacts from user's saved_contacts JSON field
-    saved_contacts = getattr(user, 'saved_contacts', {})
+    # Get contacts from user's saved_contacts JSON field (handle NULL values)
+    saved_contacts = user.saved_contacts or {}
     contacts_list = saved_contacts.get('contacts', [])
 
     return [SavedContactOut(**contact) for contact in contacts_list]
