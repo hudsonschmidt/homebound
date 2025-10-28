@@ -4,6 +4,7 @@ Emergency contacts management endpoints
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import attributes
 from pydantic import BaseModel
 
 from ..core.db import get_session
@@ -93,6 +94,9 @@ async def add_saved_contact(
     # Update user's saved_contacts field
     user.saved_contacts = {'contacts': contacts_list}
 
+    # Mark the JSON field as modified so SQLAlchemy knows to update it
+    attributes.flag_modified(user, 'saved_contacts')
+
     await session.commit()
     await session.refresh(user)
 
@@ -126,6 +130,9 @@ async def delete_saved_contact(
 
     # Update user's saved_contacts field
     user.saved_contacts = {'contacts': contacts_list}
+
+    # Mark the JSON field as modified so SQLAlchemy knows to update it
+    attributes.flag_modified(user, 'saved_contacts')
 
     await session.commit()
 
