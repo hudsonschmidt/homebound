@@ -19,6 +19,8 @@ async def create_plan(session: AsyncSession, data: PlanCreate, user_id: int) -> 
         eta_at=data.eta_at,
         grace_minutes=data.grace_minutes,
         location_text=data.location_text,
+        location_lat=data.location_lat,
+        location_lng=data.location_lng,
         notes=data.notes,
         status="active",
     )

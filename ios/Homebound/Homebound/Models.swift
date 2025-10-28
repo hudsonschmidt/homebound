@@ -20,6 +20,8 @@ struct PlanCreate: Codable {
     var eta_at: Date
     var grace_minutes: Int = 30
     var location_text: String?
+    var location_lat: Double?
+    var location_lng: Double?
     var notes: String?
     var contacts: [ContactIn] = []
 }

@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from . import models  # noqa: F401
 from .core.config import settings
 from .core.db import Base, engine
-from .routes import activities, auth, devices, owner, plans, public, web, well_known
+from .routes import activities, auth, contacts, devices, owner, plans, public, web, well_known
 
 
 @asynccontextmanager
@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
     # app.include_router(owner.router, prefix="/api/v1", tags=["owner"])
     app.include_router(plans.router, tags=["plans"])
     app.include_router(activities.router, tags=["activities"])
+    app.include_router(contacts.router, tags=["contacts"])
     app.include_router(devices.router, prefix="/api/v1", tags=["devices"])
     app.include_router(public.router, prefix="/t", tags=["public"])
     app.include_router(web.router, prefix="/web", tags=["web"])

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .core.db import Base
@@ -20,6 +20,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False), default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    saved_contacts: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, default=dict)
 
     # Relationships
     plans: Mapped[List["Plan"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -52,6 +53,8 @@ class Plan(Base):
     eta_at: Mapped[datetime] = mapped_column(DateTime(timezone=False))
     grace_minutes: Mapped[int] = mapped_column(Integer, default=30)
     location_text: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    location_lat: Mapped[Optional[float]] = mapped_column(default=None)
+    location_lng: Mapped[Optional[float]] = mapped_column(default=None)
     notes: Mapped[Optional[str]] = mapped_column(Text, default=None)
     status: Mapped[str] = mapped_column(String(20), default="draft")
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False), default=None)

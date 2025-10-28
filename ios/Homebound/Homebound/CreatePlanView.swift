@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 struct CreatePlanView: View {
     @EnvironmentObject var session: Session
@@ -12,6 +13,8 @@ struct CreatePlanView: View {
     @State private var planTitle = ""
     @State private var selectedActivity = "other"
     @State private var location = ""
+    @State private var locationCoordinates: CLLocationCoordinate2D?
+    @State private var showingLocationSearch = false
     @State private var startTime = Date()
     @State private var etaTime = Date().addingTimeInterval(7200) // 2 hours from now
     @State private var isManualETA = false
@@ -52,6 +55,8 @@ struct CreatePlanView: View {
                             planTitle: $planTitle,
                             selectedActivity: $selectedActivity,
                             location: $location,
+                            locationCoordinates: $locationCoordinates,
+                            showingLocationSearch: $showingLocationSearch,
                             activities: activities
                         )
                         .tag(1)
@@ -216,6 +221,8 @@ struct CreatePlanView: View {
                 eta_at: etaTime,
                 grace_minutes: Int(graceMinutes),
                 location_text: location.trimmingCharacters(in: .whitespacesAndNewlines),
+                location_lat: locationCoordinates?.latitude,
+                location_lng: locationCoordinates?.longitude,
                 notes: notes.isEmpty ? nil : notes,
                 contacts: contacts.map { ContactIn(name: $0.name, phone: $0.phone, email: nil, notify_on_overdue: true) }
             )
@@ -269,6 +276,8 @@ struct Step1TripDetails: View {
     @Binding var planTitle: String
     @Binding var selectedActivity: String
     @Binding var location: String
+    @Binding var locationCoordinates: CLLocationCoordinate2D?
+    @Binding var showingLocationSearch: Bool
     let activities: [ActivityType]
 
     var body: some View {
@@ -315,22 +324,54 @@ struct Step1TripDetails: View {
                     }
                 }
 
-                // Location Input
+                // Location Selection
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Location", systemImage: "location.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    TextField("e.g., Yosemite National Park", text: $location)
-                        .textFieldStyle(.plain)
+                    Button(action: {
+                        showingLocationSearch = true
+                    }) {
+                        HStack {
+                            if location.isEmpty {
+                                Text("Search for a place...")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(location)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+
+                                    if locationCoordinates != nil {
+                                        Text("Location saved")
+                                            .font(.caption2)
+                                            .foregroundStyle(.green)
+                                    }
+                                }
+                            }
+
+                            Spacer()
+
+                            Image(systemName: location.isEmpty ? "magnifyingglass" : "checkmark.circle.fill")
+                                .foregroundStyle(location.isEmpty ? Color.secondary : Color.green)
+                        }
                         .padding()
                         .background(Color(.secondarySystemFill))
                         .cornerRadius(12)
+                    }
                 }
 
                 Spacer(minLength: 100)
             }
             .padding(.horizontal)
+        }
+        .sheet(isPresented: $showingLocationSearch) {
+            LocationSearchView(
+                selectedLocation: $location,
+                selectedCoordinates: $locationCoordinates,
+                isPresented: $showingLocationSearch
+            )
         }
     }
 }

@@ -5,7 +5,7 @@ import Combine
 struct ImprovedHomeView: View {
     @EnvironmentObject var session: Session
     @State private var showingCreatePlan = false
-    @State private var showingProfile = false
+    @State private var showingSettings = false
     @State private var showingHistory = false
     @State private var recentPlans: [PlanOut] = []
     @State private var timeline: [TimelineEvent] = []
@@ -21,7 +21,7 @@ struct ImprovedHomeView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         // Header Section
-                        HeaderSection(greeting: greeting, showingProfile: $showingProfile)
+                        HeaderSection(greeting: greeting, showingSettings: $showingSettings)
                             .padding(.horizontal)
                             .padding(.top, 8)
 
@@ -58,8 +58,8 @@ struct ImprovedHomeView: View {
                 CreatePlanView()
                     .environmentObject(session)
             }
-            .sheet(isPresented: $showingProfile) {
-                ProfileView()
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
                     .environmentObject(session)
             }
             .sheet(isPresented: $showingHistory) {
@@ -85,7 +85,7 @@ struct ImprovedHomeView: View {
 // MARK: - Header Section
 struct HeaderSection: View {
     let greeting: String
-    @Binding var showingProfile: Bool
+    @Binding var showingSettings: Bool
     @EnvironmentObject var session: Session
 
     var body: some View {
@@ -108,7 +108,7 @@ struct HeaderSection: View {
 
             Spacer()
 
-            Button(action: { showingProfile = true }) {
+            Button(action: { showingSettings = true }) {
                 Circle()
                     .fill(
                         LinearGradient(
@@ -119,7 +119,7 @@ struct HeaderSection: View {
                     )
                     .frame(width: 44, height: 44)
                     .overlay(
-                        Image(systemName: "person.fill")
+                        Image(systemName: "gearshape.fill")
                             .foregroundStyle(.white)
                             .font(.system(size: 20))
                     )

@@ -30,6 +30,8 @@ class PlanCreate(BaseModel):
     eta_at: datetime
     grace_minutes: int = Field(default=30, ge=0)  # Allow 0 for immediate notifications
     location_text: Optional[str] = None
+    location_lat: Optional[float] = None
+    location_lng: Optional[float] = None
     notes: Optional[str] = None
     contacts: List[ContactIn] = Field(default_factory=list)
 
@@ -48,6 +50,8 @@ class PlanOut(BaseModel):
     eta_at: datetime
     grace_minutes: int
     location_text: Optional[str] = None
+    location_lat: Optional[float] = None
+    location_lng: Optional[float] = None
     notes: Optional[str] = None
     status: str
     checkin_token: str

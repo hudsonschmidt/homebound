@@ -625,6 +625,67 @@ final class Session: ObservableObject {
         }
     }
 
+    // MARK: - Saved Contacts Management
+    func loadSavedContacts() async -> [SavedContact] {
+        guard let bearer = accessToken else { return [] }
+
+        do {
+            let contacts: [SavedContact] = try await api.get(
+                url("/api/v1/contacts"),
+                bearer: bearer
+            )
+            return contacts
+        } catch {
+            print("Failed to load saved contacts: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func addSavedContact(_ contact: SavedContact) async -> Bool {
+        guard let bearer = accessToken else { return false }
+
+        struct AddContactRequest: Encodable {
+            let name: String
+            let phone: String
+            let email: String?
+        }
+
+        do {
+            let _: SavedContact = try await api.post(
+                url("/api/v1/contacts"),
+                body: AddContactRequest(
+                    name: contact.name,
+                    phone: contact.phone,
+                    email: contact.email
+                ),
+                bearer: bearer
+            )
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to add contact: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    func deleteSavedContact(_ contactId: String) async -> Bool {
+        guard let bearer = accessToken else { return false }
+
+        do {
+            let _: GenericResponse = try await api.delete(
+                url("/api/v1/contacts/\(contactId)"),
+                bearer: bearer
+            )
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to delete contact: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
     // MARK: - Sign Out
     @MainActor
     func signOut() {
@@ -643,6 +704,7 @@ final class Session: ObservableObject {
         userName = nil
         userAge = nil
         userEmail = nil
+        userPhone = nil
         profileCompleted = false
         activePlan = nil
     }
