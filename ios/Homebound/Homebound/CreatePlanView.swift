@@ -343,7 +343,39 @@ struct Step2TimeSettings: View {
     @Binding var graceMinutes: Double
     @Binding var showZeroGraceWarning: Bool
 
-    @State private var duration: Double = 2
+    @State private var selectedStartDate = Date()
+    @State private var selectedEndDate = Date()
+    @State private var showingTimeSelection = false
+    @State private var departureHour = 9
+    @State private var departureMinute = 0
+    @State private var departureAMPM = 0 // 0 = AM, 1 = PM
+    @State private var returnHour = 5
+    @State private var returnMinute = 0
+    @State private var returnAMPM = 1 // 0 = AM, 1 = PM
+
+    // For the date range visualization
+    var dateRangeString: String {
+        if Calendar.current.isDate(selectedStartDate, inSameDayAs: selectedEndDate) {
+            return selectedStartDate.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        } else {
+            let start = selectedStartDate.formatted(.dateTime.month(.abbreviated).day())
+            let end = selectedEndDate.formatted(.dateTime.month(.abbreviated).day())
+            return "\(start) - \(end)"
+        }
+    }
+
+    var tripDurationString: String {
+        let duration = selectedEndDate.timeIntervalSince(selectedStartDate)
+        let days = Int(duration / 86400)
+
+        if days == 0 {
+            return "Same day trip"
+        } else if days == 1 {
+            return "Overnight trip"
+        } else {
+            return "\(days + 1) day trip"
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -353,125 +385,303 @@ struct Step2TimeSettings: View {
                     Text("Time Settings")
                         .font(.largeTitle)
                         .fontWeight(.bold)
-                    Text("When are you leaving and returning?")
+                    Text(!showingTimeSelection ? "Select your trip dates" : "Set departure and return times")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .padding(.top, 20)
 
-                // Start Time
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Departure Time", systemImage: "calendar.badge.clock")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    DatePicker(
-                        "",
-                        selection: $startTime,
-                        in: Date()...,
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
-                    .datePickerStyle(.graphical)
-                    .padding()
-                    .background(Color(.secondarySystemFill))
-                    .cornerRadius(12)
-                }
-
-                // Expected Return
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Label("Expected Return", systemImage: "house.arrival")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        Toggle("Manual", isOn: $isManualETA)
-                            .toggleStyle(.button)
-                            .tint(Color(hex: "#6C63FF") ?? .purple)
-                            .font(.caption)
-                    }
-
-                    if isManualETA {
-                        DatePicker(
-                            "",
-                            selection: $etaTime,
-                            in: startTime...,
-                            displayedComponents: [.date, .hourAndMinute]
-                        )
-                        .datePickerStyle(.graphical)
+                if !showingTimeSelection {
+                    // PHASE 1: Date Selection
+                    VStack(spacing: 20) {
+                        // Instructions
+                        HStack {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            Text("Tap departure date, then tap return date")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                         .padding()
-                        .background(Color(.secondarySystemFill))
+                        .background(Color(.tertiarySystemFill))
                         .cornerRadius(12)
-                    } else {
-                        VStack(spacing: 12) {
+
+                        // Single Calendar for Date Range
+                        VStack(spacing: 0) {
+                            // Custom date range display
                             HStack {
-                                Text("Duration")
-                                    .font(.subheadline)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Departure")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(selectedStartDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                }
+
+                                Image(systemName: "arrow.right")
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Return")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(selectedEndDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                }
+
                                 Spacer()
-                                Text("\(Int(duration)) hours")
+                            }
+                            .padding()
+                            .background(Color(.secondarySystemFill))
+                            .cornerRadius(12, corners: [.topLeft, .topRight])
+
+                            // Multi-date picker using DatePicker
+                            MultiDatePicker(
+                                startDate: $selectedStartDate,
+                                endDate: $selectedEndDate
+                            )
+                            .padding()
+                            .background(Color(.secondarySystemFill))
+                            .cornerRadius(12, corners: [.bottomLeft, .bottomRight])
+                        }
+
+                        // Selected dates summary
+                        HStack {
+                            Image(systemName: "calendar.badge.checkmark")
+                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(dateRangeString)
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
-                                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                Text(tripDurationString)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+
+                            Button("Set Times") {
+                                showingTimeSelection = true
+                            }
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(.white)
+                            .cornerRadius(8)
+                        }
+                        .padding()
+                        .background(Color(.tertiarySystemFill))
+                        .cornerRadius(12)
+                    }
+                } else {
+                    // PHASE 2: Time Selection
+                    VStack(spacing: 20) {
+                        // Date Range Summary with Edit Button
+                        HStack {
+                            Image(systemName: "calendar.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(dateRangeString)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                Text(tripDurationString)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
 
-                            Slider(value: $duration, in: 0.5...24, step: 0.5)
-                                .tint(Color(hex: "#6C63FF") ?? .purple)
-                                .onChange(of: duration) { newValue in
-                                    etaTime = startTime.addingTimeInterval(newValue * 3600)
+                            Spacer()
+
+                            Button("Change Dates") {
+                                showingTimeSelection = false
+                            }
+                            .font(.caption)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color(.tertiarySystemFill))
+                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            .cornerRadius(6)
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+
+                        // Departure Time
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Departure Time", systemImage: "airplane.departure")
+                                .font(.headline)
+                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+
+                            HStack(spacing: 4) {
+                                // Hour Picker (12-hour format)
+                                Picker("Hour", selection: $departureHour) {
+                                    ForEach(1...12, id: \.self) { hour in
+                                        Text("\(hour)")
+                                            .tag(hour)
+                                    }
                                 }
+                                .pickerStyle(.wheel)
+                                .frame(width: 50, height: 100)
+                                .clipped()
+
+                                Text(":")
+                                    .font(.title2)
+                                    .fontWeight(.medium)
+
+                                // Minute Picker
+                                Picker("Minute", selection: $departureMinute) {
+                                    ForEach([0, 15, 30, 45], id: \.self) { minute in
+                                        Text(String(format: "%02d", minute))
+                                            .tag(minute)
+                                    }
+                                }
+                                .pickerStyle(.wheel)
+                                .frame(width: 60, height: 100)
+                                .clipped()
+
+                                // AM/PM Picker
+                                Picker("AM/PM", selection: $departureAMPM) {
+                                    Text("AM").tag(0)
+                                    Text("PM").tag(1)
+                                }
+                                .pickerStyle(.wheel)
+                                .frame(width: 60, height: 100)
+                                .clipped()
+
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+
+                            Text("\(selectedStartDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(departureHour):\(String(format: "%02d", departureMinute)) \(departureAMPM == 0 ? "AM" : "PM")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+
+                        // Return Time
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Return Time", systemImage: "airplane.arrival")
+                                .font(.headline)
+                                .foregroundStyle(Color.orange)
+
+                            HStack(spacing: 4) {
+                                // Hour Picker (12-hour format)
+                                Picker("Hour", selection: $returnHour) {
+                                    ForEach(1...12, id: \.self) { hour in
+                                        Text("\(hour)")
+                                            .tag(hour)
+                                    }
+                                }
+                                .pickerStyle(.wheel)
+                                .frame(width: 50, height: 100)
+                                .clipped()
+
+                                Text(":")
+                                    .font(.title2)
+                                    .fontWeight(.medium)
+
+                                // Minute Picker
+                                Picker("Minute", selection: $returnMinute) {
+                                    ForEach([0, 15, 30, 45], id: \.self) { minute in
+                                        Text(String(format: "%02d", minute))
+                                            .tag(minute)
+                                    }
+                                }
+                                .pickerStyle(.wheel)
+                                .frame(width: 60, height: 100)
+                                .clipped()
+
+                                // AM/PM Picker
+                                Picker("AM/PM", selection: $returnAMPM) {
+                                    Text("AM").tag(0)
+                                    Text("PM").tag(1)
+                                }
+                                .pickerStyle(.wheel)
+                                .frame(width: 60, height: 100)
+                                .clipped()
+
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+
+                            Text("\(selectedEndDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(returnHour):\(String(format: "%02d", returnMinute)) \(returnAMPM == 0 ? "AM" : "PM")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+
+                        // Grace Period
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Grace Period", systemImage: "hourglass")
+                                .font(.headline)
+                                .foregroundStyle(.orange)
+
+                            VStack(spacing: 16) {
+                                HStack {
+                                    Text("Alert delay after return time")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text("\(Int(graceMinutes)) min")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(graceMinutes == 0 ? .red : .orange)
+                                }
+
+                                // Slider from 0 to 120 minutes
+                                Slider(value: $graceMinutes, in: 0...120, step: 5)
+                                    .tint(graceMinutes == 0 ? .red : .orange)
+
+                                // Quick select buttons
+                                HStack(spacing: 8) {
+                                    ForEach([0, 15, 30, 60], id: \.self) { minutes in
+                                        Button(action: {
+                                            graceMinutes = Double(minutes)
+                                        }) {
+                                            Text("\(minutes)m")
+                                                .font(.caption)
+                                                .fontWeight(graceMinutes == Double(minutes) ? .semibold : .regular)
+                                                .foregroundStyle(graceMinutes == Double(minutes) ? .white : Color.primary)
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 8)
+                                                .background(
+                                                    graceMinutes == Double(minutes) ?
+                                                        (minutes == 0 ? Color.red : Color.orange) :
+                                                        Color(.tertiarySystemFill)
+                                                )
+                                                .cornerRadius(8)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+
+                            if graceMinutes == 0 {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.red)
+                                    Text("Contacts will be notified immediately if you're late")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                            } else {
+                                Text("Contacts will be notified \(Int(graceMinutes)) minutes after your return time")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .padding()
                         .background(Color(.secondarySystemFill))
                         .cornerRadius(12)
                     }
-
-                    // ETA Display
-                    HStack {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Return Time")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(etaTime, format: .dateTime.weekday().month().day().hour().minute())
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                        }
-                        Spacer()
-                    }
-                    .padding()
-                    .background(Color(.tertiarySystemFill))
-                    .cornerRadius(12)
-                }
-
-                // Grace Period
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Grace Period", systemImage: "hourglass")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    VStack(spacing: 12) {
-                        HStack {
-                            Text("Alert delay after ETA")
-                                .font(.subheadline)
-                            Spacer()
-                            Text("\(Int(graceMinutes)) minutes")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(graceMinutes == 0 ? .red : .orange)
-                        }
-
-                        Slider(value: $graceMinutes, in: 0...120, step: 15)
-                            .tint(graceMinutes == 0 ? .red : .orange)
-                    }
-                    .padding()
-                    .background(Color(.secondarySystemFill))
-                    .cornerRadius(12)
-
-                    Text("Contacts will be notified \(Int(graceMinutes)) minutes after your ETA if you haven't checked in")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 100)
@@ -479,8 +689,417 @@ struct Step2TimeSettings: View {
             .padding(.horizontal)
         }
         .onAppear {
-            duration = etaTime.timeIntervalSince(startTime) / 3600
+            // Initialize with current date/time values
+            selectedStartDate = startTime
+            selectedEndDate = etaTime
+
+            let calendar = Calendar.current
+            let startHour24 = calendar.component(.hour, from: startTime)
+            let endHour24 = calendar.component(.hour, from: etaTime)
+
+            // Convert 24-hour to 12-hour format for departure
+            if startHour24 == 0 {
+                departureHour = 12
+                departureAMPM = 0
+            } else if startHour24 < 12 {
+                departureHour = startHour24
+                departureAMPM = 0
+            } else if startHour24 == 12 {
+                departureHour = 12
+                departureAMPM = 1
+            } else {
+                departureHour = startHour24 - 12
+                departureAMPM = 1
+            }
+
+            // Convert 24-hour to 12-hour format for return
+            if endHour24 == 0 {
+                returnHour = 12
+                returnAMPM = 0
+            } else if endHour24 < 12 {
+                returnHour = endHour24
+                returnAMPM = 0
+            } else if endHour24 == 12 {
+                returnHour = 12
+                returnAMPM = 1
+            } else {
+                returnHour = endHour24 - 12
+                returnAMPM = 1
+            }
+
+            departureMinute = calendar.component(.minute, from: startTime)
+            returnMinute = calendar.component(.minute, from: etaTime)
         }
+        .onChange(of: departureHour) { _, _ in updateDates() }
+        .onChange(of: departureMinute) { _, _ in updateDates() }
+        .onChange(of: departureAMPM) { _, _ in updateDates() }
+        .onChange(of: returnHour) { _, _ in updateDates() }
+        .onChange(of: returnMinute) { _, _ in updateDates() }
+        .onChange(of: returnAMPM) { _, _ in updateDates() }
+        .onChange(of: selectedStartDate) { _, _ in updateDates() }
+        .onChange(of: selectedEndDate) { _, _ in updateDates() }
+        .onChange(of: showingTimeSelection) { _, newValue in
+            if newValue {
+                // When transitioning to time selection, ensure dates are properly set
+                updateDates()
+            }
+        }
+    }
+
+    private func updateDates() {
+        let calendar = Calendar.current
+
+        // Convert 12-hour to 24-hour for departure
+        var departureHour24: Int
+        if departureHour == 12 && departureAMPM == 0 {
+            // 12 AM = 0
+            departureHour24 = 0
+        } else if departureHour == 12 && departureAMPM == 1 {
+            // 12 PM = 12
+            departureHour24 = 12
+        } else if departureAMPM == 0 {
+            // AM hours (1-11 AM)
+            departureHour24 = departureHour
+        } else {
+            // PM hours (1-11 PM)
+            departureHour24 = departureHour + 12
+        }
+
+        // Convert 12-hour to 24-hour for return
+        var returnHour24: Int
+        if returnHour == 12 && returnAMPM == 0 {
+            // 12 AM = 0
+            returnHour24 = 0
+        } else if returnHour == 12 && returnAMPM == 1 {
+            // 12 PM = 12
+            returnHour24 = 12
+        } else if returnAMPM == 0 {
+            // AM hours (1-11 AM)
+            returnHour24 = returnHour
+        } else {
+            // PM hours (1-11 PM)
+            returnHour24 = returnHour + 12
+        }
+
+        // Update start time
+        var startComponents = calendar.dateComponents([.year, .month, .day], from: selectedStartDate)
+        startComponents.hour = departureHour24
+        startComponents.minute = departureMinute
+        if let newStart = calendar.date(from: startComponents) {
+            startTime = newStart
+        }
+
+        // Update end time
+        var endComponents = calendar.dateComponents([.year, .month, .day], from: selectedEndDate)
+        endComponents.hour = returnHour24
+        endComponents.minute = returnMinute
+        if let newEnd = calendar.date(from: endComponents) {
+            etaTime = newEnd
+        }
+    }
+}
+
+// Multi-date picker component
+struct MultiDatePicker: View {
+    @Binding var startDate: Date
+    @Binding var endDate: Date
+    @State private var selectedDates: Set<DateComponents> = []
+
+    var dateRange: ClosedRange<Date>? {
+        startDate <= endDate ? startDate...endDate : nil
+    }
+
+    var body: some View {
+        VStack {
+            // Custom calendar with range selection
+            CalendarView(
+                startDate: $startDate,
+                endDate: $endDate,
+                selectedDates: $selectedDates
+            )
+
+            // Reset button
+            if !selectedDates.isEmpty {
+                Button(action: {
+                    selectedDates.removeAll()
+                    startDate = Date()
+                    endDate = Date()
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text("Reset Dates")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+}
+
+// Custom calendar view with date range highlighting
+struct CalendarView: View {
+    @Binding var startDate: Date
+    @Binding var endDate: Date
+    @Binding var selectedDates: Set<DateComponents>
+
+    @State private var displayedMonth = Date()
+    @State private var selectionState: SelectionState = .selectingStart
+
+    enum SelectionState {
+        case selectingStart
+        case selectingEnd
+    }
+
+    let calendar = Calendar.current
+    let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter
+    }()
+
+    var monthDays: [Date?] {
+        guard let monthRange = calendar.range(of: .day, in: .month, for: displayedMonth),
+              let firstOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: displayedMonth)) else {
+            return []
+        }
+
+        let firstWeekday = calendar.component(.weekday, from: firstOfMonth) - 1
+        let previousMonthDays = Array(repeating: nil as Date?, count: firstWeekday)
+
+        let monthDays = monthRange.compactMap { day -> Date? in
+            calendar.date(byAdding: .day, value: day - 1, to: firstOfMonth)
+        }
+
+        return previousMonthDays + monthDays
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Month navigation header
+            HStack {
+                Button(action: {
+                    displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth
+                }) {
+                    Image(systemName: "chevron.left")
+                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                }
+
+                Spacer()
+
+                Text(dateFormatter.string(from: displayedMonth))
+                    .font(.headline)
+
+                Spacer()
+
+                Button(action: {
+                    displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth
+                }) {
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 12)
+
+            // Weekday headers
+            HStack {
+                ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
+                    Text(day)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+
+            // Calendar grid
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
+                ForEach(Array(monthDays.enumerated()), id: \.offset) { index, date in
+                    if let date = date {
+                        DayView(
+                            date: date,
+                            isSelected: isDateSelected(date),
+                            isInRange: isDateInRange(date),
+                            isStart: calendar.isDate(date, inSameDayAs: startDate),
+                            isEnd: calendar.isDate(date, inSameDayAs: endDate),
+                            isToday: calendar.isDateInToday(date),
+                            isPast: date < calendar.startOfDay(for: Date())
+                        ) {
+                            selectDate(date)
+                        }
+                    } else {
+                        Color.clear
+                            .frame(height: 35)
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func isDateSelected(_ date: Date) -> Bool {
+        calendar.isDate(date, inSameDayAs: startDate) || calendar.isDate(date, inSameDayAs: endDate)
+    }
+
+    private func isDateInRange(_ date: Date) -> Bool {
+        let start = calendar.startOfDay(for: startDate)
+        let end = calendar.startOfDay(for: endDate)
+        let current = calendar.startOfDay(for: date)
+
+        if start <= end {
+            return current >= start && current <= end
+        } else {
+            return false
+        }
+    }
+
+    private func selectDate(_ date: Date) {
+        // Don't allow selecting dates in the past
+        guard date >= calendar.startOfDay(for: Date()) else { return }
+
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+
+        switch selectionState {
+        case .selectingStart:
+            startDate = date
+            endDate = date
+            selectedDates.removeAll()
+            selectedDates.insert(components)
+            selectionState = .selectingEnd
+
+        case .selectingEnd:
+            if date < startDate {
+                // If selecting earlier date, make it the new start
+                endDate = startDate
+                startDate = date
+            } else {
+                endDate = date
+            }
+
+            // Update selected dates to include range
+            selectedDates.removeAll()
+            var current = startDate
+            while current <= endDate {
+                let comp = calendar.dateComponents([.year, .month, .day], from: current)
+                selectedDates.insert(comp)
+                current = calendar.date(byAdding: .day, value: 1, to: current) ?? current
+            }
+
+            selectionState = .selectingStart
+        }
+    }
+}
+
+// Individual day view in the calendar
+struct DayView: View {
+    let date: Date
+    let isSelected: Bool
+    let isInRange: Bool
+    let isStart: Bool
+    let isEnd: Bool
+    let isToday: Bool
+    let isPast: Bool
+    let action: () -> Void
+
+    private var dayNumber: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d"
+        return formatter.string(from: date)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                // Range background
+                if isInRange {
+                    if isStart && isEnd {
+                        // Single day selection
+                        Circle()
+                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .opacity(0.2)
+                    } else if isStart {
+                        // Start of range
+                        HStack(spacing: 0) {
+                            Color.clear
+                                .frame(maxWidth: .infinity)
+                            Rectangle()
+                                .fill(Color(hex: "#6C63FF") ?? .purple)
+                                .opacity(0.1)
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        Circle()
+                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .opacity(0.2)
+                    } else if isEnd {
+                        // End of range
+                        HStack(spacing: 0) {
+                            Rectangle()
+                                .fill(Color(hex: "#6C63FF") ?? .purple)
+                                .opacity(0.1)
+                                .frame(maxWidth: .infinity)
+                            Color.clear
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        Circle()
+                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .opacity(0.2)
+                    } else {
+                        // Middle of range
+                        Rectangle()
+                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .opacity(0.1)
+                    }
+                }
+
+                // Day number
+                Text(dayNumber)
+                    .font(.system(size: 16, weight: (isStart || isEnd) ? .semibold : .regular))
+                    .foregroundStyle(
+                        isPast ? .secondary :
+                        (isStart || isEnd) ? .white :
+                        isInRange ? Color(hex: "#6C63FF") ?? .purple :
+                        isToday ? Color(hex: "#6C63FF") ?? .purple :
+                        .primary
+                    )
+                    .frame(width: 35, height: 35)
+                    .background(
+                        Group {
+                            if isStart || isEnd {
+                                Circle()
+                                    .fill(Color(hex: "#6C63FF") ?? .purple)
+                            } else if isToday && !isInRange {
+                                Circle()
+                                    .stroke(Color(hex: "#6C63FF") ?? .purple, lineWidth: 1)
+                            }
+                        }
+                    )
+            }
+            .frame(height: 35)
+        }
+        .disabled(isPast)
+    }
+}
+
+// Helper for rounded corners
+extension View {
+    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+        clipShape(RoundedCorner(radius: radius, corners: corners))
+    }
+}
+
+struct RoundedCorner: Shape {
+    var radius: CGFloat = .infinity
+    var corners: UIRectCorner = .allCorners
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
+        return Path(path.cgPath)
     }
 }
 

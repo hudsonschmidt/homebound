@@ -5,16 +5,10 @@ struct HistoryView: View {
     @Environment(\.dismiss) var dismiss
     @State private var allPlans: [PlanOut] = []
     @State private var isLoading = true
-    @State private var selectedFilter: String = "all"
     @State private var searchText = ""
-
-    let filters = ["all", "completed", "active", "overdue", "cancelled"]
 
     var filteredPlans: [PlanOut] {
         let filtered = allPlans.filter { plan in
-            if selectedFilter != "all" && plan.status != selectedFilter {
-                return false
-            }
             if !searchText.isEmpty {
                 return plan.title.localizedCaseInsensitiveContains(searchText) ||
                        (plan.location_text ?? "").localizedCaseInsensitiveContains(searchText)
@@ -50,55 +44,46 @@ struct HistoryView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Search Bar
-                            HStack {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundStyle(.secondary)
-                                TextField("Search trips...", text: $searchText)
-                                    .textFieldStyle(.plain)
-                            }
-                            .padding(12)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(12)
-                            .padding(.horizontal)
-                            .padding(.top)
-
-                            // Filter Pills
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(filters, id: \.self) { filter in
-                                        FilterPill(
-                                            title: filter.capitalized,
-                                            isSelected: selectedFilter == filter,
-                                            count: countForFilter(filter),
-                                            action: { selectedFilter = filter }
-                                        )
-                                    }
-                                }
-                                .padding(.horizontal)
-                                .padding(.vertical, 10)
-                            }
-
-                            // Trip List
-                            LazyVStack(spacing: 12) {
-                                ForEach(filteredPlans) { plan in
-                                    TripHistoryCard(plan: plan)
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                            Button(role: .destructive) {
-                                                Task {
-                                                    await deletePlan(plan)
-                                                }
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                        }
+                    VStack(spacing: 0) {
+                        // Search Bar
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                            TextField("Search trips...", text: $searchText)
+                                .textFieldStyle(.plain)
+                            if !searchText.isEmpty {
+                                Button(action: { searchText = "" }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.secondary)
                                 }
                             }
-                            .padding(.horizontal)
-                            .padding(.bottom, 20)
                         }
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+                        .padding(.horizontal)
+                        .padding(.vertical)
+
+                        // Trip List using List for swipe actions
+                        List {
+                            ForEach(filteredPlans) { plan in
+                                TripHistoryCard(plan: plan)
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button(role: .destructive) {
+                                            Task {
+                                                await deletePlan(plan)
+                                            }
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                            }
+                        }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
                     }
                 }
             }
@@ -116,13 +101,6 @@ struct HistoryView: View {
         .task {
             await loadAllPlans()
         }
-    }
-
-    func countForFilter(_ filter: String) -> Int {
-        if filter == "all" {
-            return allPlans.count
-        }
-        return allPlans.filter { $0.status == filter }.count
     }
 
     func loadAllPlans() async {
@@ -263,53 +241,6 @@ struct TripHistoryCard: View {
             return "\(hours)h \(minutes)m"
         } else {
             return "\(minutes)m"
-        }
-    }
-}
-
-struct FilterPill: View {
-    let title: String
-    let isSelected: Bool
-    let count: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Text(title)
-                    .font(.subheadline)
-                    .fontWeight(isSelected ? .semibold : .regular)
-
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(isSelected ? Color(.systemBackground) : Color(hex: "#6C63FF") ?? .purple)
-                        )
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(
-                Capsule()
-                    .fill(isSelected ?
-                        LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ) :
-                        LinearGradient(
-                            colors: [Color(.tertiarySystemBackground), Color(.tertiarySystemBackground)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-            )
-            .foregroundStyle(isSelected ? .white : Color(.label))
         }
     }
 }
