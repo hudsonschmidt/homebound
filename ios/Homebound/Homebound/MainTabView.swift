@@ -102,11 +102,9 @@ struct NewHomeView: View {
                                 .padding(.horizontal)
                         }
 
-                        // Quick Stats Section (optional)
-                        if session.activePlan == nil {
-                            QuickStatsSection()
-                                .padding(.horizontal)
-                        }
+                        // Upcoming Trips Section (always visible)
+                        UpcomingTripsSection()
+                            .padding(.horizontal)
                     }
                     .padding(.bottom, 100)
                 }
@@ -424,64 +422,132 @@ struct ActivePlanCardCompact: View {
     }
 }
 
-// MARK: - Quick Stats Section
-struct QuickStatsSection: View {
+// MARK: - Upcoming Trips Section
+struct UpcomingTripsSection: View {
     @EnvironmentObject var session: Session
+    @State private var upcomingPlans: [PlanOut] = []
+    @State private var countdowns: [Int: String] = [:]
+    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Your Safety Stats")
+            Text("Upcoming Trips")
                 .font(.headline)
 
-            HStack(spacing: 16) {
-                QuickStatCard(
-                    icon: "checkmark.shield.fill",
-                    value: "12",
-                    label: "Safe Returns",
-                    color: .green
-                )
-
-                QuickStatCard(
-                    icon: "clock.fill",
-                    value: "3h",
-                    label: "Avg Trip",
-                    color: Color(hex: "#6C63FF") ?? .purple
-                )
-
-                QuickStatCard(
-                    icon: "person.2.fill",
-                    value: "3",
-                    label: "Contacts",
-                    color: Color(hex: "#4ECDC4") ?? .teal
-                )
+            if upcomingPlans.isEmpty {
+                HStack {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                    Text("No upcoming trips scheduled")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 20)
+                .padding(.horizontal)
+                .background(Color(.tertiarySystemBackground))
+                .cornerRadius(12)
+            } else {
+                ForEach(upcomingPlans) { plan in
+                    UpcomingTripCard(plan: plan, countdown: countdowns[plan.id] ?? "")
+                }
             }
+        }
+        .onReceive(timer) { _ in
+            updateCountdowns()
+        }
+        .task {
+            await loadUpcomingPlans()
+        }
+    }
+
+    func loadUpcomingPlans() async {
+        // Load plans that have status "upcoming" (not started yet)
+        do {
+            let allPlans: [PlanOut] = try await session.api.get(
+                session.url("/api/v1/plans"),
+                bearer: session.accessToken
+            )
+
+            await MainActor.run {
+                upcomingPlans = allPlans
+                    .filter { $0.status == "upcoming" }
+                    .sorted { $0.start_at < $1.start_at }
+                    .prefix(3) // Show max 3 upcoming trips
+                    .map { $0 }
+
+                updateCountdowns()
+            }
+        } catch {
+            print("Failed to load upcoming plans: \(error)")
+        }
+    }
+
+    func updateCountdowns() {
+        let now = Date()
+        for plan in upcomingPlans {
+            let interval = plan.start_at.timeIntervalSince(now)
+            if interval > 0 {
+                countdowns[plan.id] = formatCountdown(interval)
+            } else {
+                countdowns[plan.id] = "Starting now"
+            }
+        }
+    }
+
+    func formatCountdown(_ interval: TimeInterval) -> String {
+        let days = Int(interval) / 86400
+        let hours = (Int(interval) % 86400) / 3600
+        let minutes = (Int(interval) % 3600) / 60
+
+        if days > 0 {
+            return "\(days)d \(hours)h"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes) minutes"
         }
     }
 }
 
-// MARK: - Quick Stat Card
-struct QuickStatCard: View {
-    let icon: String
-    let value: String
-    let label: String
-    let color: Color
+// MARK: - Upcoming Trip Card
+struct UpcomingTripCard: View {
+    let plan: PlanOut
+    let countdown: String
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(color)
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(plan.title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
 
-            Text(value)
-                .font(.title3)
-                .fontWeight(.bold)
+                if let location = plan.location_text {
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                            .font(.caption2)
+                        Text(location)
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
 
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(countdown)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+
+                Text("until start")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
+        .padding()
         .background(Color(.tertiarySystemBackground))
         .cornerRadius(12)
     }
@@ -503,9 +569,12 @@ struct HistoryTabView: View {
                 } else if plans.isEmpty {
                     EmptyHistoryView()
                 } else {
-                    List(plans) { plan in
-                        HistoryRowView(plan: plan)
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    List {
+                        ForEach(plans) { plan in
+                            HistoryRowView(plan: plan)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                        .onDelete(perform: deletePlans)
                     }
                     .listStyle(PlainListStyle())
                 }
@@ -542,6 +611,18 @@ struct HistoryTabView: View {
         } catch {
             await MainActor.run {
                 errorMessage = "Failed to load history: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func deletePlans(at offsets: IndexSet) {
+        Task {
+            for index in offsets {
+                let plan = plans[index]
+                // Call delete endpoint if needed (currently just removes from local list)
+                await MainActor.run {
+                    plans.remove(atOffsets: offsets)
+                }
             }
         }
     }

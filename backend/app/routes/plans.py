@@ -59,6 +59,26 @@ async def get_active_plan(
     """Get the current active plan for the user."""
     user_id = get_current_user_id(request)
 
+    # First check for any upcoming plans that should now be active
+    now = datetime.utcnow()
+    upcoming_result = await session.execute(
+        select(Plan)
+        .where(
+            Plan.user_id == user_id,
+            Plan.status == "upcoming",
+            Plan.start_at <= now
+        )
+    )
+    upcoming_plans = upcoming_result.scalars().all()
+
+    # Update upcoming plans to active if their start time has passed
+    for plan in upcoming_plans:
+        plan.status = "active"
+        session.add(Event(plan_id=plan.id, kind="started"))
+
+    if upcoming_plans:
+        await session.commit()
+
     result = await session.execute(
         select(Plan)
         .where(

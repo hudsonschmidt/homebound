@@ -11,6 +11,11 @@ from ..schemas import ContactIn, PlanCreate
 
 
 async def create_plan(session: AsyncSession, data: PlanCreate, user_id: int) -> Plan:
+    # Determine initial status based on start time
+    from datetime import datetime
+    now = datetime.utcnow()
+    initial_status = "upcoming" if data.start_at > now else "active"
+
     plan = Plan(
         user_id=user_id,
         title=data.title,
@@ -22,7 +27,7 @@ async def create_plan(session: AsyncSession, data: PlanCreate, user_id: int) -> 
         location_lat=data.location_lat,
         location_lng=data.location_lng,
         notes=data.notes,
-        status="active",
+        status=initial_status,
     )
     session.add(plan)
     await session.flush()  # get plan.id
