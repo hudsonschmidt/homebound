@@ -1175,11 +1175,20 @@ struct Step3EmergencyContacts: View {
                 HStack(spacing: 12) {
                     // Select from Saved Contacts
                     Button(action: {
-                        showingSavedContacts = true
+                        Task {
+                            isLoadingSaved = true
+                            await loadSavedContacts()
+                            showingSavedContacts = true
+                        }
                     }) {
                         HStack {
-                            Image(systemName: "person.crop.circle.badge.checkmark")
-                                .font(.title3)
+                            if isLoadingSaved {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "person.crop.circle.badge.checkmark")
+                                    .font(.title3)
+                            }
                             Text("Choose Saved")
                                 .fontWeight(.medium)
                         }
@@ -1189,6 +1198,7 @@ struct Step3EmergencyContacts: View {
                         .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
                         .cornerRadius(12)
                     }
+                    .disabled(isLoadingSaved)
 
                     // Add New Contact
                     Button(action: { showAddContact = true }) {
@@ -1274,11 +1284,11 @@ struct Step3EmergencyContacts: View {
     }
 
     private func loadSavedContacts() async {
-        isLoadingSaved = true
         let loaded = await session.loadSavedContacts()
         await MainActor.run {
             self.savedContacts = loaded
             self.isLoadingSaved = false
+            print("DEBUG: Loaded \(loaded.count) saved contacts")
         }
     }
 }

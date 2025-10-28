@@ -3,7 +3,6 @@ Emergency contacts management endpoints
 """
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
@@ -89,7 +88,7 @@ async def add_saved_contact(
     )
 
     # Add to list
-    contacts_list.append(new_contact.dict())
+    contacts_list.append(new_contact.model_dump())
 
     # Update user's saved_contacts field
     user.saved_contacts = {'contacts': contacts_list}

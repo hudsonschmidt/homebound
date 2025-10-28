@@ -641,8 +641,19 @@ final class Session: ObservableObject {
         }
     }
 
-    func addSavedContact(_ contact: SavedContact) async -> Bool {
-        guard let bearer = accessToken else { return false }
+    func addSavedContact(_ contact: SavedContact) async -> SavedContact? {
+        print("DEBUG Session: addSavedContact called")
+        print("DEBUG Session: Contact to add: \(contact)")
+
+        guard let bearer = accessToken else {
+            print("DEBUG Session: No access token available")
+            await MainActor.run {
+                self.lastError = "Not authenticated. Please sign in again."
+            }
+            return nil
+        }
+
+        print("DEBUG Session: Access token exists")
 
         struct AddContactRequest: Encodable {
             let name: String
@@ -650,22 +661,31 @@ final class Session: ObservableObject {
             let email: String?
         }
 
+        let requestBody = AddContactRequest(
+            name: contact.name,
+            phone: contact.phone,
+            email: contact.email
+        )
+
+        print("DEBUG Session: Request body: \(requestBody)")
+        print("DEBUG Session: URL: \(url("/api/v1/contacts"))")
+
         do {
-            let _: SavedContact = try await api.post(
+            print("DEBUG Session: Making API call...")
+            let response: SavedContact = try await api.post(
                 url("/api/v1/contacts"),
-                body: AddContactRequest(
-                    name: contact.name,
-                    phone: contact.phone,
-                    email: contact.email
-                ),
+                body: requestBody,
                 bearer: bearer
             )
-            return true
+            print("DEBUG Session: API call successful. Response: \(response)")
+            // Return the saved contact from the server (with server-generated ID)
+            return response
         } catch {
+            print("DEBUG Session: API call failed - Error: \(error)")
             await MainActor.run {
                 self.lastError = "Failed to add contact: \(error.localizedDescription)"
             }
-            return false
+            return nil
         }
     }
 

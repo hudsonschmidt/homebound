@@ -10,6 +10,7 @@ struct EmergencyContactsView: View {
     @State private var isLoading = true
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var hasLoadedInitially = false
 
     var body: some View {
         ZStack {
@@ -80,15 +81,21 @@ struct EmergencyContactsView: View {
         .navigationTitle("Emergency Contacts")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await loadContacts()
+            // Only load contacts on initial view appearance
+            if !hasLoadedInitially {
+                await loadContacts()
+                hasLoadedInitially = true
+            }
         }
         .sheet(isPresented: $showingAddContact) {
             AddEmergencyContactSheet(
                 name: $newContactName,
                 phone: $newContactPhone,
                 email: $newContactEmail,
+                showingSheet: $showingAddContact,
                 onAdd: {
                     Task {
+                        print("DEBUG: onAdd callback triggered")
                         await addContact()
                     }
                 }
@@ -102,15 +109,24 @@ struct EmergencyContactsView: View {
     }
 
     private func loadContacts() async {
+        print("DEBUG loadContacts: Starting to load contacts")
         isLoading = true
         let contacts = await session.loadSavedContacts()
+        print("DEBUG loadContacts: Loaded \(contacts.count) contacts from server")
         await MainActor.run {
+            print("DEBUG loadContacts: Updating UI with contacts")
             self.savedContacts = contacts
             self.isLoading = false
+            print("DEBUG loadContacts: UI updated, savedContacts now has \(self.savedContacts.count) items")
         }
     }
 
     private func addContact() async {
+        print("DEBUG: Starting addContact()")
+        print("DEBUG: Contact Name: \(newContactName)")
+        print("DEBUG: Contact Phone: \(newContactPhone)")
+        print("DEBUG: Contact Email: \(newContactEmail)")
+
         let contact = SavedContact(
             id: UUID().uuidString,
             name: newContactName,
@@ -118,18 +134,32 @@ struct EmergencyContactsView: View {
             email: newContactEmail.isEmpty ? nil : newContactEmail
         )
 
-        let success = await session.addSavedContact(contact)
-        if success {
+        print("DEBUG: Created contact object: \(contact)")
+        let savedContact = await session.addSavedContact(contact)
+        print("DEBUG: addSavedContact returned: \(String(describing: savedContact))")
+
+        if let savedContact = savedContact {
+            print("DEBUG: Contact saved successfully, updating UI...")
             await MainActor.run {
-                savedContacts.append(contact)
+                print("DEBUG: Before append - savedContacts count: \(savedContacts.count)")
+                // Use the contact returned from the server (with server ID)
+                savedContacts.append(savedContact)
+                print("DEBUG: After append - savedContacts count: \(savedContacts.count)")
+                print("DEBUG: Contacts in list: \(savedContacts)")
+
+                // Clear the form
                 newContactName = ""
                 newContactPhone = ""
                 newContactEmail = ""
                 showingAddContact = false
+                print("DEBUG: Contact added successfully and sheet dismissed")
             }
+            // Don't reload contacts here - it causes a race condition where the
+            // server hasn't fully committed the new contact yet
         } else {
             await MainActor.run {
-                errorMessage = "Failed to add contact"
+                print("DEBUG: Save failed. Session error: \(session.lastError)")
+                errorMessage = session.lastError.isEmpty ? "Failed to add contact. Please try again." : session.lastError
                 showError = true
             }
         }
@@ -214,6 +244,7 @@ struct AddEmergencyContactSheet: View {
     @Binding var name: String
     @Binding var phone: String
     @Binding var email: String
+    @Binding var showingSheet: Bool
     let onAdd: () -> Void
     @Environment(\.dismiss) var dismiss
 
@@ -257,8 +288,11 @@ struct AddEmergencyContactSheet: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Add") {
+                        print("DEBUG AddEmergencyContactSheet: Add button tapped")
+                        print("DEBUG AddEmergencyContactSheet: isValid = \(isValid)")
+                        print("DEBUG AddEmergencyContactSheet: Calling onAdd()")
                         onAdd()
-                        dismiss()
+                        // Don't dismiss immediately - let the async function handle it
                     }
                     .fontWeight(.semibold)
                     .disabled(!isValid)
