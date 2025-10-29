@@ -1,67 +1,60 @@
+# app/core/db.py
 from __future__ import annotations
 
 import os
-import ssl
 from collections.abc import AsyncGenerator
 from typing import Any
-from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
-
-from .config import settings
 
 
 class Base(DeclarativeBase):
     pass
 
 
-# ---- Supabase / PgBouncer-safe engine config ----
-is_pooler = ":6543/" in settings.DATABASE_URL
+# ---- One source of truth for the URL ----
+DB_URL = os.getenv("ASYNC_DATABASE_URL")  # e.g., postgresql+asyncpg://...:6543/db?sslmode=require
+if not DB_URL:
+    # fall back if you keep one in your settings module
+    from .config import settings
+    DB_URL = settings.DATABASE_URL
 
+if not DB_URL:
+    raise RuntimeError("ASYNC_DATABASE_URL (or settings.DATABASE_URL) must be set")
+
+# Ensure we have the async driver and SSL required
+if DB_URL.startswith("postgres://"):
+    DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
+if "+asyncpg" not in DB_URL:
+    DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+if "sslmode=" not in DB_URL:
+    DB_URL += ("&" if "?" in DB_URL else "?") + "sslmode=require"
+
+# Detect PgBouncer (Supabase pooler) by the pooled port
+is_pooler = ":6543/" in DB_URL
+
+# ---- asyncpg / PgBouncer-safe connect args ----
 connect_args: dict[str, Any] = {}
-if is_pooler:
-    # asyncpg: disable prepared statement cache (PgBouncer-friendly)
-    connect_args["statement_cache_size"] = 0
+# Disable prepared statements cache in asyncpg when behind PgBouncer txn/statement mode
+# (prevents DuplicatePreparedStatementError)
+connect_args["statement_cache_size"] = 0 if is_pooler else 0  # safe to keep 0 always
 
-host = (urlparse(settings.DATABASE_URL).hostname or "").lower()
-
-# STAGING UNBLOCK:
-# For Supabase, default to *insecure TLS* unless explicitly turned off.
-# Set PG_SSL_INSECURE=false later once you add a proper CA bundle.
-force_insecure = os.getenv("PG_SSL_INSECURE", "true").lower() == "true"
-if "supabase.com" in host or "supabase.co" in host:
-    ssl_ctx = ssl.create_default_context()
-    if force_insecure:
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-    else:
-        # When ready for strict TLS, load a real CA bundle here:
-        # ssl_ctx.load_verify_locations("backend/certs/rds-ca.pem")
-        ssl_ctx.check_hostname = True
-        ssl_ctx.verify_mode = ssl.CERT_REQUIRED
-    connect_args["ssl"] = ssl_ctx
-
+# ---- Engine ----
 engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,          # validate dead connections
-    pool_recycle=1800,           # recycle every 30m
-    pool_size=5,                 # Render free tier: keep it modest
-    max_overflow=5,
+    DB_URL,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "1")),   # keep tiny on serverless
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "0")),
+    pool_recycle=1800,
+    pool_timeout=30,
+    connect_args=connect_args,                       # ← use the dict we built
 )
 
-SessionLocal = async_sessionmaker(
-    engine,
-    expire_on_commit=False,
-    class_=AsyncSession,
-)
-
+# Single session factory
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    async with SessionLocal() as session:
+    async with AsyncSessionLocal() as session:
         yield session
 
-
-__all__ = ("Base", "engine", "SessionLocal", "get_session")
+__all__ = ("Base", "engine", "AsyncSessionLocal", "get_session")
