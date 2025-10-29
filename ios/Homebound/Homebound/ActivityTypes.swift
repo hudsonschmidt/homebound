@@ -1,6 +1,5 @@
 import SwiftUI
 
-// MARK: - Activity Type Definition
 enum ActivityType: String, CaseIterable, Codable {
     case hiking = "hiking"
     case biking = "biking"
