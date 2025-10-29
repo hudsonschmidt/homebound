@@ -248,6 +248,32 @@ async def get_plan_stats(
     }
 
 
+@router.delete("/plans/{plan_id}")
+async def delete_plan(
+    plan_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete a plan and all associated data."""
+    user_id = get_current_user_id(request)
+
+    # Get the plan and verify ownership
+    result = await session.execute(
+        select(Plan)
+        .where(Plan.id == plan_id, Plan.user_id == user_id)
+    )
+    plan = result.scalar_one_or_none()
+
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    # Delete the plan (cascade will handle contacts and events)
+    await session.delete(plan)
+    await session.commit()
+
+    return {"ok": True, "message": "Plan deleted successfully"}
+
+
 from pydantic import BaseModel
 
 class ExtendRequest(BaseModel):

@@ -33,6 +33,7 @@ struct NewHomeView: View {
     @State private var showingSettings = false
     @State private var greeting = "Good morning"
     @State private var timeline: [TimelineEvent] = []
+    @State private var refreshID = UUID()
 
     var body: some View {
         NavigationStack {
@@ -105,6 +106,7 @@ struct NewHomeView: View {
                         // Upcoming Trips Section (always visible)
                         UpcomingTripsSection()
                             .padding(.horizontal)
+                            .id(refreshID)
                     }
                     .padding(.bottom, 100)
                 }
@@ -120,8 +122,14 @@ struct NewHomeView: View {
             }
             .task {
                 updateGreeting()
-                await session.loadActivePlan()
-                await session.loadUserProfile()
+                // Sync all data on app open
+                await syncData()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                Task {
+                    // Sync when app comes to foreground
+                    await syncData()
+                }
             }
         }
     }
@@ -129,6 +137,20 @@ struct NewHomeView: View {
     func updateGreeting() {
         let hour = Calendar.current.component(.hour, from: Date())
         greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
+    }
+
+    func syncData() async {
+        // Load all necessary data in parallel
+        async let loadActive = session.loadActivePlan()
+        async let loadProfile = session.loadUserProfile()
+
+        // Wait for all to complete
+        _ = await (loadActive, loadProfile)
+
+        // Trigger a refresh of child views by changing the ID
+        await MainActor.run {
+            refreshID = UUID()
+        }
     }
 }
 
@@ -654,9 +676,27 @@ struct HistoryTabView: View {
         Task {
             for index in offsets {
                 let plan = plans[index]
-                // Call delete endpoint if needed (currently just removes from local list)
-                await MainActor.run {
-                    plans.remove(atOffsets: offsets)
+
+                // Call delete endpoint
+                do {
+                    struct DeleteResponse: Decodable {
+                        let ok: Bool
+                        let message: String
+                    }
+
+                    let _: DeleteResponse = try await session.api.delete(
+                        session.url("/api/v1/plans/\(plan.id)"),
+                        bearer: session.accessToken
+                    )
+
+                    // Remove from local list on successful delete
+                    await MainActor.run {
+                        plans.remove(atOffsets: offsets)
+                    }
+                } catch {
+                    await MainActor.run {
+                        errorMessage = "Failed to delete plan: \(error.localizedDescription)"
+                    }
                 }
             }
         }
