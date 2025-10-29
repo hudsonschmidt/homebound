@@ -12,9 +12,17 @@ from ..schemas import ContactIn, PlanCreate
 
 async def create_plan(session: AsyncSession, data: PlanCreate, user_id: int) -> Plan:
     # Determine initial status based on start time
-    from datetime import datetime
-    now = datetime.utcnow()
-    initial_status = "upcoming" if data.start_at > now else "active"
+    from datetime import datetime, timezone
+
+    # Ensure we're comparing timezone-aware datetimes
+    now = datetime.now(timezone.utc)
+    start_time = data.start_at
+
+    # If start_time is naive, make it timezone-aware (assume UTC)
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+
+    initial_status = "upcoming" if start_time > now else "active"
 
     plan = Plan(
         user_id=user_id,

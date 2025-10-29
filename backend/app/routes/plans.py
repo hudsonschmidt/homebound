@@ -60,7 +60,8 @@ async def get_active_plan(
     user_id = get_current_user_id(request)
 
     # First check for any upcoming plans that should now be active
-    now = datetime.utcnow()
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
     upcoming_result = await session.execute(
         select(Plan)
         .where(

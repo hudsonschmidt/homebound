@@ -460,6 +460,11 @@ struct UpcomingTripsSection: View {
         .task {
             await loadUpcomingPlans()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task {
+                await loadUpcomingPlans()
+            }
+        }
     }
 
     func loadUpcomingPlans() async {
@@ -557,16 +562,17 @@ struct UpcomingTripCard: View {
 struct HistoryTabView: View {
     @EnvironmentObject var session: Session
     @State private var plans: [PlanOut] = []
-    @State private var isLoading = true
+    @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var loadTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading {
+                if isLoading && plans.isEmpty {
                     ProgressView("Loading history...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if plans.isEmpty {
+                } else if plans.isEmpty && !isLoading {
                     EmptyHistoryView()
                 } else {
                     List {
@@ -592,25 +598,54 @@ struct HistoryTabView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .onDisappear {
+                loadTask?.cancel()
+            }
         }
     }
 
     func loadHistory() async {
-        isLoading = true
-        defer { isLoading = false }
+        // Cancel any existing load task
+        loadTask?.cancel()
 
-        do {
-            let loadedPlans: [PlanOut] = try await session.api.get(
-                session.url("/api/v1/plans"),
-                bearer: session.accessToken
-            )
+        // Create new task
+        loadTask = Task {
+            guard !Task.isCancelled else { return }
+
             await MainActor.run {
-                // Sort by most recent first
-                self.plans = loadedPlans.sorted { $0.start_at > $1.start_at }
+                isLoading = true
+                errorMessage = nil
             }
-        } catch {
-            await MainActor.run {
-                errorMessage = "Failed to load history: \(error.localizedDescription)"
+
+            do {
+                let loadedPlans: [PlanOut] = try await session.api.get(
+                    session.url("/api/v1/plans"),
+                    bearer: session.accessToken
+                )
+
+                // Check if task was cancelled before updating UI
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    // Sort by most recent first
+                    self.plans = loadedPlans.sorted { $0.start_at > $1.start_at }
+                    self.isLoading = false
+                }
+            } catch {
+                // Only show error if not cancelled
+                if !Task.isCancelled {
+                    let errorText = error.localizedDescription
+                    if !errorText.contains("cancelled") {
+                        await MainActor.run {
+                            errorMessage = "Failed to load history: \(errorText)"
+                            isLoading = false
+                        }
+                    } else {
+                        await MainActor.run {
+                            isLoading = false
+                        }
+                    }
+                }
             }
         }
     }
