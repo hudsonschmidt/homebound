@@ -1,53 +1,116 @@
-# alembic/env.py  (sync + psycopg + NullPool)
+import asyncio
 import os
+import sys
 from logging.config import fileConfig
-from sqlalchemy import create_engine, pool
+from pathlib import Path
+
+from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
-# import your metadata
-from app.core.db import Base  # adjust if your Base lives elsewhere
-# from app.models import *    # if you need to import models to register them
+# Add parent directory to path to import app modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.core.db import Base
+from app.models import *  # Import all models to ensure they're registered
+
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
 config = context.config
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# add your model's MetaData object here
+# for 'autogenerate' support
 target_metadata = Base.metadata
 
-def get_sync_url() -> str:
-    url = os.getenv("DATABASE_URL_SYNC") or os.getenv("DATABASE_URL")
+# other values from the config, defined by the needs of env.py,
+# can be acquired:
+# my_important_option = config.get_main_option("my_important_option")
+# ... etc.
+
+
+def get_url():
+    """Get database URL from environment variable or .env file."""
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    url = os.getenv("DATABASE_URL")
     if not url:
-        raise RuntimeError("DATABASE_URL_SYNC or DATABASE_URL must be set")
-    # normalize and force psycopg (sync)
-    url = url.replace("postgres://", "postgresql://", 1)
-    url = url.replace("+asyncpg", "")  # strip async driver if present
-    if "+psycopg" not in url:
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        # Default to SQLite for local development if no DATABASE_URL is set
+        return "sqlite+aiosqlite:///homebound.db"
+
+    # Convert postgres:// to postgresql:// for compatibility
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    # Convert to async driver
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif url.startswith("sqlite:///"):
+        url = url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+
     return url
 
+
 def run_migrations_offline() -> None:
-    url = get_sync_url()
+    """Run migrations in 'offline' mode.
+
+    This configures the context with just a URL
+    and not an Engine, though an Engine is acceptable
+    here as well.  By skipping the Engine creation
+    we don't even need a DBAPI to be available.
+
+    Calls to context.execute() here emit the given string to the
+    script output.
+
+    """
+    url = get_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
+
     with context.begin_transaction():
         context.run_migrations()
 
-def run_migrations_online() -> None:
-    # NullPool => one connection, no pooling, no prepared stmt headaches
-    engine = create_engine(
-        get_sync_url(),
+
+def do_run_migrations(connection):
+    context.configure(connection=connection, target_metadata=target_metadata)
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations():
+    """In this scenario we need to create an Engine
+    and associate a connection with the context.
+
+    """
+    configuration = config.get_section(config.config_ini_section)
+    configuration['sqlalchemy.url'] = get_url()
+
+    connectable = async_engine_from_config(
+        configuration,
+        prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        future=True,
-        isolation_level="AUTOCOMMIT",
     )
-    with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
-        with context.begin_transaction():
-            context.run_migrations()
+
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+
+    await connectable.dispose()
+
+
+def run_migrations_online() -> None:
+    """Run migrations in 'online' mode."""
+    asyncio.run(run_async_migrations())
+
 
 if context.is_offline_mode():
     run_migrations_offline()
