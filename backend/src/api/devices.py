@@ -1,85 +1,188 @@
-from __future__ import annotations
+"""Device registration endpoints for push notifications with raw SQL"""
+from datetime import datetime
+from typing import List
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from src import database as db
+from src.api import auth
+import sqlalchemy
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from ..config import settings
-from ..database import get_db
-from ..security import get_current_user_id
-from ..messaging.apns import get_push_sender
-from ..schemas import DeviceOut, DeviceRegisterIn
-from ..services.devices import delete_device, list_devices_for_user, upsert_device
-
-router = APIRouter()
-
-
-@router.get("/devices", response_model=list[DeviceOut])
-async def list_my_devices(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    user_id = get_current_user_id(request)
-    devices = await list_devices_for_user(session, user_id)
-    return [DeviceOut.model_validate(d, from_attributes=True) for d in devices]
+router = APIRouter(
+    prefix="/api/v1/devices",
+    tags=["devices"],
+    dependencies=[Depends(auth.get_current_user_id)]
+)
 
 
-@router.post("/devices", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
-async def register_device(
-    payload: DeviceRegisterIn,
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    user_id = get_current_user_id(request)
-
-    bundle_id = payload.bundle_id or settings.IOS_BUNDLE_ID
-    dev = await upsert_device(
-        session,
-        user_id=user_id,
-        token=payload.token,
-        platform=payload.platform,
-        bundle_id=bundle_id,
-        env=payload.env,
-    )
-    return DeviceOut.model_validate(dev, from_attributes=True)
+class DeviceRegister(BaseModel):
+    platform: str  # "ios" or "android"
+    token: str  # APNs or FCM token
+    bundle_id: str
+    env: str = "production"  # "production" or "development"
 
 
-@router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_device(
-    device_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    user_id = get_current_user_id(request)
-    ok = await delete_device(session, user_id, device_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="not found")
-    return None
+class DeviceResponse(BaseModel):
+    id: int
+    platform: str
+    token: str
+    bundle_id: str
+    env: str
+    created_at: str
+    last_seen_at: str
 
 
-@router.post("/devices/test", status_code=200)
-async def test_push_to_my_devices(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    """
-    Sends a test push to all of the user's devices.
-    Requires Authorization: Bearer <access-token>.
-    """
-    user_id = get_current_user_id(request)
-    devices = await list_devices_for_user(session, user_id)
-    if not devices:
-        return {"sent": 0, "results": []}
+@router.post("", response_model=DeviceResponse)
+def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_current_user_id)):
+    """Register or update a device for push notifications"""
 
-    sender = get_push_sender()
-    results = []
-    for d in devices:
-        res = await sender.send(d.token, "Homebound", "Test push", {"kind": "test"})
-        results.append({"device_id": d.id, **res.dict()})
+    # Validate platform
+    if body.platform not in ["ios", "android"]:
+        raise HTTPException(status_code=400, detail="Invalid platform. Must be 'ios' or 'android'")
 
-    # Close APNs httpx client if used
-    try:
-        await sender.close()  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    # Validate env
+    if body.env not in ["production", "development"]:
+        raise HTTPException(status_code=400, detail="Invalid env. Must be 'production' or 'development'")
 
-    return {"sent": len(results), "results": results}
+    with db.engine.begin() as conn:
+        # Check if device already exists
+        existing = conn.execute(
+            sqlalchemy.text("""
+                SELECT id FROM devices WHERE token = :token
+            """),
+            {"token": body.token}
+        ).fetchone()
+
+        now = datetime.utcnow().isoformat()
+
+        if existing:
+            # Update existing device
+            conn.execute(
+                sqlalchemy.text("""
+                    UPDATE devices
+                    SET user_id = :user_id, platform = :platform, bundle_id = :bundle_id,
+                        env = :env, last_seen_at = :last_seen_at
+                    WHERE token = :token
+                """),
+                {
+                    "user_id": user_id,
+                    "platform": body.platform,
+                    "bundle_id": body.bundle_id,
+                    "env": body.env,
+                    "last_seen_at": now,
+                    "token": body.token
+                }
+            )
+            device_id = existing.id
+        else:
+            # Insert new device
+            result = conn.execute(
+                sqlalchemy.text("""
+                    INSERT INTO devices (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
+                    VALUES (:user_id, :platform, :token, :bundle_id, :env, :created_at, :last_seen_at)
+                """),
+                {
+                    "user_id": user_id,
+                    "platform": body.platform,
+                    "token": body.token,
+                    "bundle_id": body.bundle_id,
+                    "env": body.env,
+                    "created_at": now,
+                    "last_seen_at": now
+                }
+            )
+            device_id = result.lastrowid
+
+        # Fetch device
+        device = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, platform, token, bundle_id, env, created_at, last_seen_at
+                FROM devices
+                WHERE id = :device_id
+            """),
+            {"device_id": device_id}
+        ).fetchone()
+
+        return DeviceResponse(
+            id=device.id,
+            platform=device.platform,
+            token=device.token,
+            bundle_id=device.bundle_id,
+            env=device.env,
+            created_at=str(device.created_at),
+            last_seen_at=str(device.last_seen_at)
+        )
+
+
+@router.get("", response_model=List[DeviceResponse])
+def list_devices(user_id: int = Depends(auth.get_current_user_id)):
+    """List all registered devices for the current user"""
+
+    with db.engine.begin() as conn:
+        devices = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, platform, token, bundle_id, env, created_at, last_seen_at
+                FROM devices
+                WHERE user_id = :user_id
+                ORDER BY last_seen_at DESC
+            """),
+            {"user_id": user_id}
+        ).fetchall()
+
+        return [
+            DeviceResponse(
+                id=d.id,
+                platform=d.platform,
+                token=d.token,
+                bundle_id=d.bundle_id,
+                env=d.env,
+                created_at=str(d.created_at),
+                last_seen_at=str(d.last_seen_at)
+            )
+            for d in devices
+        ]
+
+
+@router.delete("/{device_id}")
+def delete_device(device_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Unregister a device"""
+
+    with db.engine.begin() as conn:
+        # Verify device ownership
+        device = conn.execute(
+            sqlalchemy.text("SELECT id FROM devices WHERE id = :device_id AND user_id = :user_id"),
+            {"device_id": device_id, "user_id": user_id}
+        ).fetchone()
+
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        # Delete device
+        conn.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE id = :device_id"),
+            {"device_id": device_id}
+        )
+
+        return {"ok": True, "message": "Device unregistered successfully"}
+
+
+@router.delete("/token/{token}")
+def delete_device_by_token(token: str, user_id: int = Depends(auth.get_current_user_id)):
+    """Unregister a device by token"""
+
+    with db.engine.begin() as conn:
+        # Verify device ownership
+        device = conn.execute(
+            sqlalchemy.text("SELECT id FROM devices WHERE token = :token AND user_id = :user_id"),
+            {"token": token, "user_id": user_id}
+        ).fetchone()
+
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        # Delete device
+        conn.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE token = :token"),
+            {"token": token}
+        )
+
+        return {"ok": True, "message": "Device unregistered successfully"}

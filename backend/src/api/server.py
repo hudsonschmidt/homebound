@@ -1,50 +1,70 @@
 from fastapi import FastAPI
-# from src.api import # 
+from src.api import auth_endpoints, plans, activities, contacts, devices, checkin, profile, admin
 from starlette.middleware.cors import CORSMiddleware
 
 description = """
-Plan in seconds. Get found fast.
+Homebound is a personal safety application that helps users create travel plans,
+set up check-in schedules, and automatically notify emergency contacts if they don't
+check in on time.
 """
+
 tags_metadata = [
-    {"name": "cart", "description": "Place potion orders."},
-    {"name": "catalog", "description": "View the available potions."},
-    {"name": "bottler", "description": "Bottle potions from the raw magical elixir."},
-    {
-        "name": "barrels",
-        "description": "Buy barrels of raw magical elixir for making potions.",
-    },
-    {"name": "admin", "description": "Where you reset the game state."},
-    {"name": "info", "description": "Get updates on time"},
-    {
-        "name": "inventory",
-        "description": "Get the current inventory of shop and buying capacity.",
-    },
+    {"name": "auth", "description": "Authentication and user management"},
+    {"name": "plans", "description": "Create and manage safety plans"},
+    {"name": "activities", "description": "Activity types and configurations"},
+    {"name": "contacts", "description": "Manage emergency contacts"},
+    {"name": "devices", "description": "Device registration for push notifications"},
+    {"name": "checkin", "description": "Check-in and check-out functionality"},
+    {"name": "profile", "description": "User profile management"},
+    {"name": "admin", "description": "Administrative functions"},
 ]
 
 app = FastAPI(
-    title="Homebound",
+    title="Homebound API",
     description=description,
-    version="0.0.1",
-    terms_of_service="http://example.com/terms/",
+    version="1.0.0",
     contact={
-        "name": "Hudson Schmidt",
-        "email": "hudsonschmidt08@gmail.com",
+        "name": "Homebound Team",
+        "email": "support@homeboundapp.com",
     },
     openapi_tags=tags_metadata,
 )
 
-origins = ["https://homebound.onrender.com"]
+# Configure CORS for mobile and web
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "capacitor://localhost",
+    "ionic://localhost",
+    "https://homebound.onrender.com",
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# app.include_router(inventory.router)
+# Include routers
+app.include_router(auth_endpoints.router)
+app.include_router(plans.router)
+app.include_router(activities.router)
+app.include_router(contacts.router)
+app.include_router(devices.router)
+app.include_router(checkin.router)
+app.include_router(profile.router)
+app.include_router(admin.router)
+
 
 @app.get("/")
-async def root():
-    return {"message": "Homebound backend is running."}
+def root():
+    return {"message": "Homebound API is running", "version": "1.0.0"}
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}

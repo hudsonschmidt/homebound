@@ -1,481 +1,413 @@
-"""
-Enhanced plan management endpoints
-"""
+"""Plan management endpoints with raw SQL"""
 from datetime import datetime, timedelta
-from typing import List, Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, func, and_, or_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from ..database import get_db
-from ..models import Plan, Event, Contact, User
-from ..schemas import PlanOut, PlanCreate
-from ..services.auth import get_current_user_id
-from ..services.plans import create_plan
-from ..services.tokens import sign_token
-
-router = APIRouter(prefix="/api/v1", tags=["plans"])
-
-
-@router.post("/plans", response_model=PlanOut)
-async def create_plan_route(
-    request: Request,
-    payload: PlanCreate,
-    session: AsyncSession = Depends(get_db),
-):
-    """Create a new plan."""
-    user_id = get_current_user_id(request)
-    if payload.eta_at <= payload.start_at:
-        raise HTTPException(status_code=400, detail="eta_at must be after start_at")
-
-    plan = await create_plan(session, payload, user_id)
-
-    exp = payload.eta_at + timedelta(days=1, minutes=payload.grace_minutes)
-    checkin = sign_token(plan.id, "checkin", exp)
-    checkout = sign_token(plan.id, "checkout", exp)
-
-    return PlanOut(
-        id=plan.id,
-        title=plan.title,
-        activity_type=plan.activity_type,
-        start_at=plan.start_at,
-        eta_at=plan.eta_at,
-        grace_minutes=plan.grace_minutes,
-        location_text=plan.location_text,
-        notes=plan.notes,
-        status=plan.status,
-        checkin_token=checkin,
-        checkout_token=checkout,
-    )
-
-
-@router.get("/plans/active", response_model=Optional[PlanOut])
-async def get_active_plan(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    """Get the current active plan for the user."""
-    user_id = get_current_user_id(request)
-
-    # First check for any upcoming plans that should now be active
-    from datetime import timezone
-    now = datetime.now(timezone.utc)
-    upcoming_result = await session.execute(
-        select(Plan)
-        .where(
-            Plan.user_id == user_id,
-            Plan.status == "upcoming",
-            Plan.start_at <= now
-        )
-    )
-    upcoming_plans = upcoming_result.scalars().all()
-
-    # Update upcoming plans to active if their start time has passed
-    for plan in upcoming_plans:
-        plan.status = "active"
-        session.add(Event(plan_id=plan.id, kind="started"))
-
-    if upcoming_plans:
-        await session.commit()
-
-    result = await session.execute(
-        select(Plan)
-        .where(
-            Plan.user_id == user_id,
-            Plan.status.in_(["active", "overdue", "overdue_notified"])
-        )
-        .order_by(Plan.created_at.desc())
-        .limit(1)
-    )
-    plan = result.scalar_one_or_none()
-
-    if not plan:
-        return None
-
-    # Generate tokens
-    exp = plan.eta_at + timedelta(days=1, minutes=plan.grace_minutes)
-    checkin = sign_token(plan.id, "checkin", exp)
-    checkout = sign_token(plan.id, "checkout", exp)
-
-    return PlanOut(
-        id=plan.id,
-        title=plan.title,
-        activity_type=plan.activity_type,
-        start_at=plan.start_at,
-        eta_at=plan.eta_at,
-        grace_minutes=plan.grace_minutes,
-        location_text=plan.location_text,
-        notes=plan.notes,
-        status=plan.status,
-        checkin_token=checkin,
-        checkout_token=checkout,
-    )
-
-
-@router.get("/plans", response_model=List[PlanOut])
-async def get_all_plans(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    """Get all plans for the user."""
-    user_id = get_current_user_id(request)
-
-    result = await session.execute(
-        select(Plan)
-        .where(Plan.user_id == user_id)
-        .order_by(Plan.created_at.desc())
-    )
-    plans = result.scalars().all()
-
-    plan_outs = []
-    for plan in plans:
-        exp = plan.eta_at + timedelta(days=1, minutes=plan.grace_minutes)
-        checkin = sign_token(plan.id, "checkin", exp)
-        checkout = sign_token(plan.id, "checkout", exp)
-
-        plan_outs.append(PlanOut(
-            id=plan.id,
-            title=plan.title,
-            activity_type=plan.activity_type,
-            start_at=plan.start_at,
-            eta_at=plan.eta_at,
-            grace_minutes=plan.grace_minutes,
-            location_text=plan.location_text,
-            notes=plan.notes,
-            status=plan.status,
-            checkin_token=checkin,
-            checkout_token=checkout,
-        ))
-
-    return plan_outs
-
-
-@router.get("/plans/recent", response_model=List[PlanOut])
-async def get_recent_plans(
-    request: Request,
-    limit: int = 10,
-    session: AsyncSession = Depends(get_db),
-):
-    """Get recent plans for the user."""
-    user_id = get_current_user_id(request)
-
-    result = await session.execute(
-        select(Plan)
-        .where(Plan.user_id == user_id)
-        .order_by(Plan.created_at.desc())
-        .limit(limit)
-    )
-    plans = result.scalars().all()
-
-    plan_outs = []
-    for plan in plans:
-        exp = plan.eta_at + timedelta(days=1, minutes=plan.grace_minutes)
-        checkin = sign_token(plan.id, "checkin", exp)
-        checkout = sign_token(plan.id, "checkout", exp)
-
-        plan_outs.append(PlanOut(
-            id=plan.id,
-            title=plan.title,
-            activity_type=plan.activity_type,
-            start_at=plan.start_at,
-            eta_at=plan.eta_at,
-            grace_minutes=plan.grace_minutes,
-            location_text=plan.location_text,
-            notes=plan.notes,
-            status=plan.status,
-            checkin_token=checkin,
-            checkout_token=checkout,
-        ))
-
-    return plan_outs
-
-
-@router.get("/plans/stats")
-async def get_plan_stats(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    """Get statistics about user's plans."""
-    user_id = get_current_user_id(request)
-
-    # Total trips
-    total_result = await session.execute(
-        select(func.count(Plan.id))
-        .where(Plan.user_id == user_id)
-    )
-    total_trips = total_result.scalar() or 0
-
-    # Completed trips (safe returns)
-    completed_result = await session.execute(
-        select(func.count(Plan.id))
-        .where(
-            Plan.user_id == user_id,
-            Plan.status == "completed"
-        )
-    )
-    completed_trips = completed_result.scalar() or 0
-
-    # This week's trips
-    week_ago = datetime.utcnow() - timedelta(days=7)
-    week_result = await session.execute(
-        select(func.count(Plan.id))
-        .where(
-            Plan.user_id == user_id,
-            Plan.created_at >= week_ago
-        )
-    )
-    week_trips = week_result.scalar() or 0
-
-    # Most common activity
-    activity_result = await session.execute(
-        select(Plan.activity_type, func.count(Plan.id).label("count"))
-        .where(Plan.user_id == user_id)
-        .group_by(Plan.activity_type)
-        .order_by(func.count(Plan.id).desc())
-        .limit(1)
-    )
-    favorite_activity = activity_result.first()
-
-    return {
-        "total_trips": total_trips,
-        "completed_trips": completed_trips,
-        "safe_return_rate": f"{int((completed_trips / total_trips * 100) if total_trips > 0 else 100)}%",
-        "week_trips": week_trips,
-        "favorite_activity": favorite_activity[0] if favorite_activity else "other",
-        "favorite_activity_count": favorite_activity[1] if favorite_activity else 0,
-    }
-
-
-@router.delete("/plans/{plan_id}")
-async def delete_plan(
-    plan_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    """Delete a plan and all associated data."""
-    user_id = get_current_user_id(request)
-
-    # Get the plan and verify ownership
-    result = await session.execute(
-        select(Plan)
-        .where(Plan.id == plan_id, Plan.user_id == user_id)
-    )
-    plan = result.scalar_one_or_none()
-
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    # Delete the plan (cascade will handle contacts and events)
-    await session.delete(plan)
-    await session.commit()
-
-    return {"ok": True, "message": "Plan deleted successfully"}
-
-
+import secrets
+from typing import Optional, List
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from src import database as db
+from src.api import auth
+import sqlalchemy
 
-class ExtendRequest(BaseModel):
-    minutes: int = 30
-
-@router.post("/plans/{plan_id}/extend")
-async def extend_plan(
-    plan_id: int,
-    request: Request,
-    extend_request: ExtendRequest = ExtendRequest(),
-    session: AsyncSession = Depends(get_db),
-):
-    """Extend a plan's ETA."""
-    user_id = get_current_user_id(request)
-    minutes = extend_request.minutes
-
-    plan = await session.get(Plan, plan_id)
-    if not plan or plan.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    if plan.status not in ["active", "overdue", "overdue_notified"]:
-        raise HTTPException(status_code=400, detail="Can only extend active plans")
-
-    # Update ETA
-    plan.eta_at = plan.eta_at + timedelta(minutes=minutes)
-    plan.extended_count += 1
-
-    # Reset status to active if it was overdue
-    if plan.status in ["overdue", "overdue_notified"]:
-        plan.status = "active"
-
-    # Add event
-    event = Event(
-        plan_id=plan.id,
-        kind="extended",
-        meta=f"Extended by {minutes} minutes"
-    )
-    session.add(event)
-
-    await session.commit()
-    await session.refresh(plan)
-
-    return {
-        "ok": True,
-        "new_eta": plan.eta_at.isoformat(),
-        "extended_count": plan.extended_count
-    }
+router = APIRouter(
+    prefix="/api/v1/plans",
+    tags=["plans"],
+    dependencies=[Depends(auth.get_current_user_id)]
+)
 
 
-class EmptyRequest(BaseModel):
-    pass
-
-@router.post("/plans/{plan_id}/checkin")
-async def checkin_plan(
-    plan_id: int,
-    request: Request,
-    _: EmptyRequest = EmptyRequest(),
-    session: AsyncSession = Depends(get_db),
-):
-    """Check in to a plan."""
-    user_id = get_current_user_id(request)
-
-    plan = await session.get(Plan, plan_id)
-    if not plan or plan.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    if plan.status not in ["active", "overdue", "overdue_notified"]:
-        raise HTTPException(status_code=400, detail="Plan is not active")
-
-    # Update last checkin time
-    plan.last_checkin_at = datetime.utcnow()
-
-    # Add event
-    event = Event(
-        plan_id=plan.id,
-        kind="checkin"
-    )
-    session.add(event)
-
-    await session.commit()
-
-    return {"ok": True, "message": "Checked in successfully"}
+def parse_datetime(dt):
+    """Parse datetime from SQLite string or return datetime object"""
+    if isinstance(dt, str):
+        return datetime.fromisoformat(dt.replace(' ', 'T'))
+    return dt
 
 
-@router.post("/plans/{plan_id}/complete")
-async def complete_plan(
-    plan_id: int,
-    request: Request,
-    _: EmptyRequest = EmptyRequest(),
-    session: AsyncSession = Depends(get_db),
-):
-    """Mark a plan as completed (safe return)."""
-    user_id = get_current_user_id(request)
-
-    plan = await session.get(Plan, plan_id)
-    if not plan or plan.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    if plan.status == "completed":
-        return {"ok": True, "message": "Plan already completed"}
-
-    # Update plan status
-    plan.status = "completed"
-    plan.completed_at = datetime.utcnow()
-
-    # Add event
-    event = Event(
-        plan_id=plan.id,
-        kind="checkout"
-    )
-    session.add(event)
-
-    await session.commit()
-
-    return {"ok": True, "message": "Welcome back! Trip completed safely"}
+class ContactCreate(BaseModel):
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notify_on_overdue: bool = True
 
 
-@router.post("/plans/{plan_id}/cancel")
-async def cancel_plan(
-    plan_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    """Cancel an active plan."""
-    user_id = get_current_user_id(request)
-
-    plan = await session.get(Plan, plan_id)
-    if not plan or plan.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    if plan.status != "active":
-        raise HTTPException(status_code=400, detail="Can only cancel active plans")
-
-    # Update plan status
-    plan.status = "cancelled"
-
-    # Add event
-    event = Event(
-        plan_id=plan.id,
-        kind="cancelled"
-    )
-    session.add(event)
-
-    await session.commit()
-
-    return {"ok": True, "message": "Plan cancelled"}
+class PlanCreate(BaseModel):
+    title: str
+    activity_type: str
+    start_at: datetime
+    eta_at: datetime
+    grace_minutes: int
+    location_text: Optional[str] = None
+    location_lat: Optional[float] = None
+    location_lng: Optional[float] = None
+    notes: Optional[str] = None
+    contacts: List[ContactCreate] = []
 
 
-@router.get("/plans/by-activity/{activity_type}")
-async def get_plans_by_activity(
-    activity_type: str,
-    request: Request,
-    limit: int = 20,
-    session: AsyncSession = Depends(get_db),
-):
-    """Get plans filtered by activity type."""
-    user_id = get_current_user_id(request)
+class PlanResponse(BaseModel):
+    id: int
+    title: str
+    activity_type: str
+    start_at: str
+    eta_at: str
+    grace_minutes: int
+    location_text: Optional[str]
+    location_lat: Optional[float]
+    location_lng: Optional[float]
+    notes: Optional[str]
+    status: str
+    completed_at: Optional[str]
+    extended_count: int
+    last_checkin_at: Optional[str]
+    created_at: str
+    checkin_token: Optional[str] = None
+    checkout_token: Optional[str] = None
 
-    result = await session.execute(
-        select(Plan)
-        .where(
-            Plan.user_id == user_id,
-            Plan.activity_type == activity_type
-        )
-        .order_by(Plan.created_at.desc())
-        .limit(limit)
-    )
-    plans = result.scalars().all()
 
-    return {
-        "activity_type": activity_type,
-        "count": len(plans),
-        "plans": [
+class ContactResponse(BaseModel):
+    id: int
+    name: str
+    phone: Optional[str]
+    email: Optional[str]
+    notify_on_overdue: bool
+
+
+@router.post("", response_model=PlanResponse)
+def create_plan(body: PlanCreate, user_id: int = Depends(auth.get_current_user_id)):
+    """Create a new safety plan"""
+
+    with db.engine.begin() as conn:
+        # Generate unique tokens for checkin/checkout
+        checkin_token = secrets.token_urlsafe(32)
+        checkout_token = secrets.token_urlsafe(32)
+
+        # Insert plan
+        result = conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO plans (
+                    user_id, title, activity_type, start_at, eta_at, grace_minutes,
+                    location_text, location_lat, location_lng, notes, status,
+                    extended_count, created_at, checkin_token, checkout_token
+                ) VALUES (
+                    :user_id, :title, :activity_type, :start_at, :eta_at, :grace_minutes,
+                    :location_text, :location_lat, :location_lng, :notes, 'active',
+                    0, :created_at, :checkin_token, :checkout_token
+                )
+            """),
             {
-                "id": p.id,
-                "title": p.title,
-                "start_at": p.start_at.isoformat(),
-                "eta_at": p.eta_at.isoformat(),
-                "status": p.status,
-                "location": p.location_text
+                "user_id": user_id,
+                "title": body.title,
+                "activity_type": body.activity_type,
+                "start_at": body.start_at.isoformat(),
+                "eta_at": body.eta_at.isoformat(),
+                "grace_minutes": body.grace_minutes,
+                "location_text": body.location_text,
+                "location_lat": body.location_lat,
+                "location_lng": body.location_lng,
+                "notes": body.notes,
+                "created_at": datetime.utcnow().isoformat(),
+                "checkin_token": checkin_token,
+                "checkout_token": checkout_token
             }
+        )
+        plan_id = result.lastrowid
+
+        # Insert contacts
+        for contact in body.contacts:
+            conn.execute(
+                sqlalchemy.text("""
+                    INSERT INTO contacts (plan_id, name, phone, email, notify_on_overdue)
+                    VALUES (:plan_id, :name, :phone, :email, :notify_on_overdue)
+                """),
+                {
+                    "plan_id": plan_id,
+                    "name": contact.name,
+                    "phone": contact.phone,
+                    "email": contact.email,
+                    "notify_on_overdue": contact.notify_on_overdue
+                }
+            )
+
+        # Fetch created plan
+        plan = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, user_id, title, activity_type, start_at, eta_at, grace_minutes,
+                       location_text, location_lat, location_lng, notes, status, completed_at,
+                       extended_count, last_checkin_at, created_at, checkin_token, checkout_token
+                FROM plans WHERE id = :plan_id
+            """),
+            {"plan_id": plan_id}
+        ).fetchone()
+
+        return PlanResponse(
+            id=plan.id,
+            title=plan.title,
+            activity_type=plan.activity_type,
+            start_at=str(plan.start_at),
+            eta_at=str(plan.eta_at),
+            grace_minutes=plan.grace_minutes,
+            location_text=plan.location_text,
+            location_lat=plan.location_lat,
+            location_lng=plan.location_lng,
+            notes=plan.notes,
+            status=plan.status,
+            completed_at=str(plan.completed_at) if plan.completed_at else None,
+            extended_count=plan.extended_count,
+            last_checkin_at=str(plan.last_checkin_at) if plan.last_checkin_at else None,
+            created_at=str(plan.created_at),
+            checkin_token=plan.checkin_token,
+            checkout_token=plan.checkout_token
+        )
+
+
+@router.get("", response_model=List[PlanResponse])
+def list_plans(user_id: int = Depends(auth.get_current_user_id)):
+    """List all plans for the current user"""
+
+    with db.engine.begin() as conn:
+        plans = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, user_id, title, activity_type, start_at, eta_at, grace_minutes,
+                       location_text, location_lat, location_lng, notes, status, completed_at,
+                       extended_count, last_checkin_at, created_at, checkin_token, checkout_token
+                FROM plans
+                WHERE user_id = :user_id
+                ORDER BY created_at DESC
+            """),
+            {"user_id": user_id}
+        ).fetchall()
+
+        return [
+            PlanResponse(
+                id=p.id,
+                title=p.title,
+                activity_type=p.activity_type,
+                start_at=str(p.start_at),
+                eta_at=str(p.eta_at),
+                grace_minutes=p.grace_minutes,
+                location_text=p.location_text,
+                location_lat=p.location_lat,
+                location_lng=p.location_lng,
+                notes=p.notes,
+                status=p.status,
+                completed_at=str(p.completed_at) if p.completed_at else None,
+                extended_count=p.extended_count,
+                last_checkin_at=str(p.last_checkin_at) if p.last_checkin_at else None,
+                created_at=str(p.created_at),
+                checkin_token=p.checkin_token,
+                checkout_token=p.checkout_token
+            )
             for p in plans
         ]
-    }
 
 
-@router.delete("/plans/{plan_id}")
-async def delete_plan(
-    plan_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-):
-    """Delete a plan and all associated data."""
-    user_id = get_current_user_id(request)
+@router.get("/active", response_model=Optional[PlanResponse])
+def get_active_plan(user_id: int = Depends(auth.get_current_user_id)):
+    """Get the current active plan"""
 
-    # Get the plan first to verify ownership
-    plan = await session.get(Plan, plan_id)
-    if not plan or plan.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Plan not found")
+    with db.engine.begin() as conn:
+        plan = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, user_id, title, activity_type, start_at, eta_at, grace_minutes,
+                       location_text, location_lat, location_lng, notes, status, completed_at,
+                       extended_count, last_checkin_at, created_at, checkin_token, checkout_token
+                FROM plans
+                WHERE user_id = :user_id AND status = 'active'
+                ORDER BY created_at DESC
+                LIMIT 1
+            """),
+            {"user_id": user_id}
+        ).fetchone()
 
-    # Delete the plan (cascading will handle related data)
-    await session.delete(plan)
-    await session.commit()
+        if not plan:
+            return None
 
-    return {"ok": True, "message": "Plan deleted successfully"}
+        return PlanResponse(
+            id=plan.id,
+            title=plan.title,
+            activity_type=plan.activity_type,
+            start_at=str(plan.start_at),
+            eta_at=str(plan.eta_at),
+            grace_minutes=plan.grace_minutes,
+            location_text=plan.location_text,
+            location_lat=plan.location_lat,
+            location_lng=plan.location_lng,
+            notes=plan.notes,
+            status=plan.status,
+            completed_at=str(plan.completed_at) if plan.completed_at else None,
+            extended_count=plan.extended_count,
+            last_checkin_at=str(plan.last_checkin_at) if plan.last_checkin_at else None,
+            created_at=str(plan.created_at),
+            checkin_token=plan.checkin_token,
+            checkout_token=plan.checkout_token
+        )
+
+
+@router.get("/{plan_id}", response_model=PlanResponse)
+def get_plan(plan_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Get a specific plan"""
+
+    with db.engine.begin() as conn:
+        plan = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, user_id, title, activity_type, start_at, eta_at, grace_minutes,
+                       location_text, location_lat, location_lng, notes, status, completed_at,
+                       extended_count, last_checkin_at, created_at, checkin_token, checkout_token
+                FROM plans
+                WHERE id = :plan_id AND user_id = :user_id
+            """),
+            {"plan_id": plan_id, "user_id": user_id}
+        ).fetchone()
+
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+
+        return PlanResponse(
+            id=plan.id,
+            title=plan.title,
+            activity_type=plan.activity_type,
+            start_at=str(plan.start_at),
+            eta_at=str(plan.eta_at),
+            grace_minutes=plan.grace_minutes,
+            location_text=plan.location_text,
+            location_lat=plan.location_lat,
+            location_lng=plan.location_lng,
+            notes=plan.notes,
+            status=plan.status,
+            completed_at=str(plan.completed_at) if plan.completed_at else None,
+            extended_count=plan.extended_count,
+            last_checkin_at=str(plan.last_checkin_at) if plan.last_checkin_at else None,
+            created_at=str(plan.created_at),
+            checkin_token=plan.checkin_token,
+            checkout_token=plan.checkout_token
+        )
+
+
+@router.get("/{plan_id}/contacts", response_model=List[ContactResponse])
+def get_plan_contacts(plan_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Get contacts for a specific plan"""
+
+    with db.engine.begin() as conn:
+        # Verify plan ownership
+        plan = conn.execute(
+            sqlalchemy.text("SELECT id FROM plans WHERE id = :plan_id AND user_id = :user_id"),
+            {"plan_id": plan_id, "user_id": user_id}
+        ).fetchone()
+
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+
+        contacts = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, name, phone, email, notify_on_overdue
+                FROM contacts
+                WHERE plan_id = :plan_id
+                ORDER BY id
+            """),
+            {"plan_id": plan_id}
+        ).fetchall()
+
+        return [
+            ContactResponse(
+                id=c.id,
+                name=c.name,
+                phone=c.phone,
+                email=c.email,
+                notify_on_overdue=bool(c.notify_on_overdue)
+            )
+            for c in contacts
+        ]
+
+
+@router.post("/{plan_id}/complete")
+def complete_plan(plan_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Mark a plan as completed"""
+
+    with db.engine.begin() as conn:
+        # Verify plan ownership and status
+        plan = conn.execute(
+            sqlalchemy.text("SELECT id, status FROM plans WHERE id = :plan_id AND user_id = :user_id"),
+            {"plan_id": plan_id, "user_id": user_id}
+        ).fetchone()
+
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+
+        if plan.status != "active":
+            raise HTTPException(status_code=400, detail="Plan is not active")
+
+        # Update plan status
+        conn.execute(
+            sqlalchemy.text("""
+                UPDATE plans
+                SET status = 'completed', completed_at = :completed_at
+                WHERE id = :plan_id
+            """),
+            {"plan_id": plan_id, "completed_at": datetime.utcnow().isoformat()}
+        )
+
+        return {"ok": True, "message": "Plan completed successfully"}
+
+
+@router.delete("/{plan_id}")
+def delete_plan(plan_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Delete a plan"""
+
+    with db.engine.begin() as conn:
+        # Verify plan ownership
+        plan = conn.execute(
+            sqlalchemy.text("SELECT id FROM plans WHERE id = :plan_id AND user_id = :user_id"),
+            {"plan_id": plan_id, "user_id": user_id}
+        ).fetchone()
+
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+
+        # Delete plan (contacts will cascade)
+        conn.execute(
+            sqlalchemy.text("DELETE FROM plans WHERE id = :plan_id"),
+            {"plan_id": plan_id}
+        )
+
+        return {"ok": True, "message": "Plan deleted successfully"}
+
+
+class TimelineEvent(BaseModel):
+    id: int
+    kind: str
+    at: str
+    meta: Optional[str]
+
+
+@router.get("/{plan_id}/timeline", response_model=List[TimelineEvent])
+def get_plan_timeline(plan_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Get timeline events for a specific plan"""
+
+    with db.engine.begin() as conn:
+        # Verify plan ownership
+        plan = conn.execute(
+            sqlalchemy.text("SELECT id FROM plans WHERE id = :plan_id AND user_id = :user_id"),
+            {"plan_id": plan_id, "user_id": user_id}
+        ).fetchone()
+
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+
+        # Fetch timeline events
+        events = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, kind, at, meta
+                FROM events
+                WHERE plan_id = :plan_id
+                ORDER BY at DESC
+            """),
+            {"plan_id": plan_id}
+        ).fetchall()
+
+        return [
+            TimelineEvent(
+                id=e.id,
+                kind=e.kind,
+                at=str(e.at),
+                meta=e.meta
+            )
+            for e in events
+        ]
