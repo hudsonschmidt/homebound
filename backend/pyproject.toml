@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Homebound API (FastAPI + SQLAlchemy)"
 readme = "README.md"
 requires-python = ">=3.12"
-authors = [{name="Homebound"}]
 
 dependencies = [
   "fastapi>=0.115",
@@ -43,3 +42,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
