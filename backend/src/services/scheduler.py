@@ -7,118 +7,152 @@ from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+import sqlalchemy
 
-from ..config import settings
-from ..models import Plan, Event, Contact
+from ..config import get_settings
+from .. import database as db
 from .notifications import send_overdue_notifications
 
+settings = get_settings()
 log = logging.getLogger(__name__)
 
 # Global scheduler instance
 scheduler: Optional[AsyncIOScheduler] = None
 
-# Create a separate engine for scheduler to avoid connection issues
-# Convert sync SQLite URL to async if needed
-DATABASE_URL = settings.DATABASE_URL
-if DATABASE_URL.startswith("sqlite"):
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
-else:
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-
-scheduler_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
-SchedulerSession = sessionmaker(scheduler_engine, class_=AsyncSession, expire_on_commit=False)
-
 
 async def check_overdue_plans():
     """Check for overdue plans and send notifications."""
-    async with SchedulerSession() as session:
-        try:
-            now = datetime.utcnow()
+    try:
+        now = datetime.utcnow()
 
+        with db.engine.begin() as conn:
             # Find active plans that are overdue
-            result = await session.execute(
-                select(Plan)
-                .where(Plan.status == "active")
-                .where(Plan.eta_at < now)
-            )
-            overdue_plans = result.scalars().all()
+            overdue_plans = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, title, eta_at, grace_minutes, location_text, status
+                    FROM plans
+                    WHERE status = 'active' AND eta_at < :now
+                """),
+                {"now": now}
+            ).fetchall()
 
             for plan in overdue_plans:
+                plan_id = plan.id
+
                 # Check if we've already marked this plan as overdue
-                event_result = await session.execute(
-                    select(Event)
-                    .where(Event.plan_id == plan.id)
-                    .where(Event.kind == "overdue")
-                    .limit(1)
-                )
-                existing_overdue = event_result.scalar_one_or_none()
+                existing_overdue = conn.execute(
+                    sqlalchemy.text("""
+                        SELECT id FROM events
+                        WHERE plan_id = :plan_id AND kind = 'overdue'
+                        LIMIT 1
+                    """),
+                    {"plan_id": plan_id}
+                ).fetchone()
 
                 if existing_overdue:
                     # Already marked as overdue, check if grace period expired
-                    grace_expired = plan.eta_at + timedelta(minutes=plan.grace_minutes)
+                    # Parse eta_at string to datetime
+                    if isinstance(plan.eta_at, str):
+                        eta_dt = datetime.fromisoformat(plan.eta_at.replace(' ', 'T'))
+                    else:
+                        eta_dt = plan.eta_at
+
+                    grace_expired = eta_dt + timedelta(minutes=plan.grace_minutes)
+
                     if now > grace_expired:
                         # Check if we've already notified
-                        notify_result = await session.execute(
-                            select(Event)
-                            .where(Event.plan_id == plan.id)
-                            .where(Event.kind == "notify")
-                            .limit(1)
-                        )
-                        existing_notify = notify_result.scalar_one_or_none()
+                        existing_notify = conn.execute(
+                            sqlalchemy.text("""
+                                SELECT id FROM events
+                                WHERE plan_id = :plan_id AND kind = 'notify'
+                                LIMIT 1
+                            """),
+                            {"plan_id": plan_id}
+                        ).fetchone()
 
                         if not existing_notify:
-                            # Send notifications to contacts
-                            contacts_result = await session.execute(
-                                select(Contact)
-                                .where(Contact.plan_id == plan.id)
-                                .where(Contact.notify_on_overdue == True)
-                            )
-                            contacts = contacts_result.scalars().all()
+                            # Get contacts to notify
+                            contacts = conn.execute(
+                                sqlalchemy.text("""
+                                    SELECT name, phone, email
+                                    FROM contacts
+                                    WHERE plan_id = :plan_id AND notify_on_overdue = 1
+                                """),
+                                {"plan_id": plan_id}
+                            ).fetchall()
 
                             if contacts:
-                                log.info(f"Sending overdue notifications for plan {plan.id} to {len(contacts)} contacts")
-                                await send_overdue_notifications(plan, contacts)
+                                log.info(f"Sending overdue notifications for plan {plan_id} to {len(contacts)} contacts")
+                                # Send notifications (this is async but we're in sync context)
+                                await send_overdue_notifications(plan, list(contacts))
 
                                 # Mark as notified
-                                notify_event = Event(
-                                    plan_id=plan.id,
-                                    kind="notify",
-                                    meta=f"Notified {len(contacts)} contacts"
+                                conn.execute(
+                                    sqlalchemy.text("""
+                                        INSERT INTO events (plan_id, kind, meta, at)
+                                        VALUES (:plan_id, 'notify', :meta, :at)
+                                    """),
+                                    {
+                                        "plan_id": plan_id,
+                                        "meta": f"Notified {len(contacts)} contacts",
+                                        "at": datetime.utcnow()
+                                    }
                                 )
-                                session.add(notify_event)
 
                             # Update plan status
-                            plan.status = "overdue_notified"
+                            conn.execute(
+                                sqlalchemy.text("""
+                                    UPDATE plans SET status = 'overdue_notified'
+                                    WHERE id = :plan_id
+                                """),
+                                {"plan_id": plan_id}
+                            )
                 else:
                     # Mark as overdue
-                    log.info(f"Marking plan {plan.id} as overdue")
-                    overdue_event = Event(
-                        plan_id=plan.id,
-                        kind="overdue"
+                    log.info(f"Marking plan {plan_id} as overdue")
+                    conn.execute(
+                        sqlalchemy.text("""
+                            INSERT INTO events (plan_id, kind, at)
+                            VALUES (:plan_id, 'overdue', :at)
+                        """),
+                        {
+                            "plan_id": plan_id,
+                            "at": datetime.utcnow()
+                        }
                     )
-                    session.add(overdue_event)
-                    plan.status = "overdue"
 
-                await session.commit()
+                    conn.execute(
+                        sqlalchemy.text("""
+                            UPDATE plans SET status = 'overdue'
+                            WHERE id = :plan_id
+                        """),
+                        {"plan_id": plan_id}
+                    )
 
-        except Exception as e:
-            log.error(f"Error checking overdue plans: {e}")
-            await session.rollback()
+    except Exception as e:
+        log.error(f"Error checking overdue plans: {e}", exc_info=True)
 
 
 async def clean_expired_tokens():
     """Clean up expired login tokens."""
-    async with SchedulerSession() as session:
-        try:
-            from ..services.auth import clean_expired_tokens as cleanup
-            deleted = await cleanup(session)
+    try:
+        now = datetime.utcnow()
+
+        with db.engine.begin() as conn:
+            result = conn.execute(
+                sqlalchemy.text("""
+                    DELETE FROM login_tokens
+                    WHERE expires_at < :now
+                """),
+                {"now": now}
+            )
+            deleted = result.rowcount
+
             if deleted > 0:
                 log.info(f"Cleaned up {deleted} expired login tokens")
-        except Exception as e:
-            log.error(f"Error cleaning expired tokens: {e}")
+
+    except Exception as e:
+        log.error(f"Error cleaning expired tokens: {e}", exc_info=True)
 
 
 def init_scheduler() -> AsyncIOScheduler:

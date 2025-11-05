@@ -1,14 +1,14 @@
-"""Device registration endpoints for push notifications with raw SQL"""
-from datetime import datetime
+"""Device registration endpoints for push notifications"""
+from datetime import datetime, timezone
 from typing import List
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from src import database as db
 from src.api import auth
 import sqlalchemy
 
 router = APIRouter(
-    prefix="/api/v1/devices",
+    prefix="/devices",
     tags=["devices"],
     dependencies=[Depends(auth.get_current_user_id)]
 )
@@ -31,38 +31,50 @@ class DeviceResponse(BaseModel):
     last_seen_at: str
 
 
-@router.post("", response_model=DeviceResponse)
+@router.post("/", response_model=DeviceResponse, status_code=status.HTTP_201_CREATED)
 def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_current_user_id)):
     """Register or update a device for push notifications"""
 
     # Validate platform
     if body.platform not in ["ios", "android"]:
-        raise HTTPException(status_code=400, detail="Invalid platform. Must be 'ios' or 'android'")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid platform. Must be 'ios' or 'android'"
+        )
 
     # Validate env
     if body.env not in ["production", "development"]:
-        raise HTTPException(status_code=400, detail="Invalid env. Must be 'production' or 'development'")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid env. Must be 'production' or 'development'"
+        )
 
-    with db.engine.begin() as conn:
+    with db.engine.begin() as connection:
         # Check if device already exists
-        existing = conn.execute(
-            sqlalchemy.text("""
-                SELECT id FROM devices WHERE token = :token
-            """),
+        existing = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id
+                FROM devices
+                WHERE token = :token
+                """
+            ),
             {"token": body.token}
         ).fetchone()
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         if existing:
             # Update existing device
-            conn.execute(
-                sqlalchemy.text("""
+            connection.execute(
+                sqlalchemy.text(
+                    """
                     UPDATE devices
                     SET user_id = :user_id, platform = :platform, bundle_id = :bundle_id,
                         env = :env, last_seen_at = :last_seen_at
                     WHERE token = :token
-                """),
+                    """
+                ),
                 {
                     "user_id": user_id,
                     "platform": body.platform,
@@ -75,11 +87,14 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
             device_id = existing.id
         else:
             # Insert new device
-            result = conn.execute(
-                sqlalchemy.text("""
+            result = connection.execute(
+                sqlalchemy.text(
+                    """
                     INSERT INTO devices (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
                     VALUES (:user_id, :platform, :token, :bundle_id, :env, :created_at, :last_seen_at)
-                """),
+                    RETURNING id
+                    """
+                ),
                 {
                     "user_id": user_id,
                     "platform": body.platform,
@@ -90,15 +105,17 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
                     "last_seen_at": now
                 }
             )
-            device_id = result.lastrowid
+            device_id = result.fetchone()[0]
 
         # Fetch device
-        device = conn.execute(
-            sqlalchemy.text("""
+        device = connection.execute(
+            sqlalchemy.text(
+                """
                 SELECT id, platform, token, bundle_id, env, created_at, last_seen_at
                 FROM devices
                 WHERE id = :device_id
-            """),
+                """
+            ),
             {"device_id": device_id}
         ).fetchone()
 
@@ -113,18 +130,19 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
         )
 
 
-@router.get("", response_model=List[DeviceResponse])
-def list_devices(user_id: int = Depends(auth.get_current_user_id)):
-    """List all registered devices for the current user"""
-
-    with db.engine.begin() as conn:
-        devices = conn.execute(
-            sqlalchemy.text("""
+@router.get("/", response_model=List[DeviceResponse])
+def get_devices(user_id: int = Depends(auth.get_current_user_id)):
+    """Get all registered devices for the current user"""
+    with db.engine.begin() as connection:
+        devices = connection.execute(
+            sqlalchemy.text(
+                """
                 SELECT id, platform, token, bundle_id, env, created_at, last_seen_at
                 FROM devices
                 WHERE user_id = :user_id
                 ORDER BY last_seen_at DESC
-            """),
+                """
+            ),
             {"user_id": user_id}
         ).fetchall()
 
@@ -145,19 +163,27 @@ def list_devices(user_id: int = Depends(auth.get_current_user_id)):
 @router.delete("/{device_id}")
 def delete_device(device_id: int, user_id: int = Depends(auth.get_current_user_id)):
     """Unregister a device"""
-
-    with db.engine.begin() as conn:
+    with db.engine.begin() as connection:
         # Verify device ownership
-        device = conn.execute(
-            sqlalchemy.text("SELECT id FROM devices WHERE id = :device_id AND user_id = :user_id"),
+        device = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id
+                FROM devices
+                WHERE id = :device_id AND user_id = :user_id
+                """
+            ),
             {"device_id": device_id, "user_id": user_id}
         ).fetchone()
 
         if not device:
-            raise HTTPException(status_code=404, detail="Device not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Device not found"
+            )
 
         # Delete device
-        conn.execute(
+        connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE id = :device_id"),
             {"device_id": device_id}
         )
@@ -168,19 +194,27 @@ def delete_device(device_id: int, user_id: int = Depends(auth.get_current_user_i
 @router.delete("/token/{token}")
 def delete_device_by_token(token: str, user_id: int = Depends(auth.get_current_user_id)):
     """Unregister a device by token"""
-
-    with db.engine.begin() as conn:
+    with db.engine.begin() as connection:
         # Verify device ownership
-        device = conn.execute(
-            sqlalchemy.text("SELECT id FROM devices WHERE token = :token AND user_id = :user_id"),
+        device = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id
+                FROM devices
+                WHERE token = :token AND user_id = :user_id
+                """
+            ),
             {"token": token, "user_id": user_id}
         ).fetchone()
 
         if not device:
-            raise HTTPException(status_code=404, detail="Device not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Device not found"
+            )
 
         # Delete device
-        conn.execute(
+        connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE token = :token"),
             {"token": token}
         )

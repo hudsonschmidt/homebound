@@ -1,5 +1,5 @@
 """User profile management endpoints"""
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from typing import Optional
 from src import database as db
@@ -7,102 +7,108 @@ from src.api import auth
 import sqlalchemy
 
 router = APIRouter(
-    prefix="/api/v1/profile",
+    prefix="/profile",
     tags=["profile"],
     dependencies=[Depends(auth.get_current_user_id)]
 )
 
 
 class ProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    phone: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     age: Optional[int] = None
 
 
 class ProfileResponse(BaseModel):
     id: int
     email: str
-    name: Optional[str]
-    phone: Optional[str]
-    age: Optional[int]
+    first_name: str
+    last_name: str
+    age: int
 
 
 @router.get("", response_model=ProfileResponse)
 def get_profile(user_id: int = Depends(auth.get_current_user_id)):
     """Get current user's profile"""
-
-    with db.engine.begin() as conn:
-        user = conn.execute(
-            sqlalchemy.text("""
-                SELECT id, email, name, phone, age
+    with db.engine.begin() as connection:
+        user = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, email, first_name, last_name, age
                 FROM users
                 WHERE id = :user_id
-            """),
+                """
+            ),
             {"user_id": user_id}
         ).fetchone()
 
         if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
 
         return ProfileResponse(
             id=user.id,
             email=user.email,
-            name=user.name,
-            phone=user.phone,
+            first_name=user.first_name,
+            last_name=user.last_name,
             age=user.age
         )
 
 
 @router.put("", response_model=ProfileResponse)
-def update_profile( profile: ProfileUpdate):
+def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_user_id)):
     """Update current user's profile"""
-
-    with db.engine.begin() as conn:
+    with db.engine.begin() as connection:
         # Build dynamic update query
         updates = []
         params = {"user_id": user_id}
 
-        if profile.name is not None:
-            updates.append("name = :name")
-            params["name"] = profile.name
+        if body.first_name is not None:
+            updates.append("first_name = :first_name")
+            params["first_name"] = body.first_name
 
-        if profile.phone is not None:
-            updates.append("phone = :phone")
-            params["phone"] = profile.phone
+        if body.last_name is not None:
+            updates.append("last_name = :last_name")
+            params["last_name"] = body.last_name
 
-        if profile.age is not None:
+        if body.age is not None:
             updates.append("age = :age")
-            params["age"] = profile.age
+            params["age"] = body.age
 
         if updates:
-            query = f"UPDATE users SET {', '.join(updates)} WHERE id = :user_id"
-            conn.execute(sqlalchemy.text(query), params)
+            connection.execute(
+                sqlalchemy.text(f"UPDATE users SET {', '.join(updates)} WHERE id = :user_id"),
+                params
+            )
 
         # Return updated profile
-        user = conn.execute(
-            sqlalchemy.text("""
-                SELECT id, email, name, phone, age
+        user = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, email, first_name, last_name, age
                 FROM users
                 WHERE id = :user_id
-            """),
+                """
+            ),
             {"user_id": user_id}
         ).fetchone()
 
         return ProfileResponse(
             id=user.id,
             email=user.email,
-            name=user.name,
-            phone=user.phone,
+            first_name=user.first_name,
+            last_name=user.last_name,
             age=user.age
         )
 
 
 @router.delete("/account")
 def delete_account(user_id: int = Depends(auth.get_current_user_id)):
-    """Delete current user's account"""
-
-    with db.engine.begin() as conn:
-        conn.execute(
+    """Delete current user's account and all associated data"""
+    with db.engine.begin() as connection:
+        connection.execute(
             sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id}
         )

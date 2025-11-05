@@ -1,87 +1,102 @@
-"""Activity types and configurations - read-only endpoints"""
-from fastapi import APIRouter
+from fastapi import APIRouter, status, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Any
+import sqlalchemy
+import json
+from src import database as db
 
-router = APIRouter(prefix="/api/v1/activities", tags=["activities"])
+router = APIRouter(
+    prefix="/activities",
+    tags=["activities"]
+)
 
-
-# Activity configurations with themes, messages, and defaults
-ACTIVITIES = {
-    "hiking": {
-        "name": "Hiking",
-        "icon": "🥾",
-        "default_grace_minutes": 45,
-        "description": "Mountain trails and nature walks"
-    },
-    "biking": {
-        "name": "Biking",
-        "icon": "🚴",
-        "default_grace_minutes": 30,
-        "description": "Cycling and bike rides"
-    },
-    "running": {
-        "name": "Running",
-        "icon": "🏃",
-        "default_grace_minutes": 20,
-        "description": "Jogging and running"
-    },
-    "walking": {
-        "name": "Walking",
-        "icon": "🚶",
-        "default_grace_minutes": 30,
-        "description": "Casual walking"
-    },
-    "driving": {
-        "name": "Driving",
-        "icon": "🚗",
-        "default_grace_minutes": 30,
-        "description": "Road trips and commutes"
-    },
-    "other": {
-        "name": "Other",
-        "icon": "📍",
-        "default_grace_minutes": 30,
-        "description": "Other activities"
-    }
-}
-
-
-class ActivityType(BaseModel):
-    type: str
+class Activity(BaseModel):
+    id: int | None = None
     name: str
     icon: str
     default_grace_minutes: int
-    description: str
+    colors: Dict[str, str]
+    messages: Dict[str, Any]  # Can contain strings or lists
+    safety_tips: List[str]
+    order: int
 
 
-@router.get("", response_model=List[ActivityType])
-def list_activities():
-    """Get list of all activity types"""
-    return [
-        ActivityType(
-            type=key,
-            name=activity["name"],
-            icon=activity["icon"],
-            default_grace_minutes=activity["default_grace_minutes"],
-            description=activity["description"]
+@router.get("/", response_model=List[Activity])
+def get_activities():
+    """
+    Returns all activity types and their data
+    """
+    with db.engine.begin() as connection:
+        activities = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT *
+                FROM activities
+                """
+            )
+        ).mappings().all()
+
+    return [Activity(**row) for row in activities]
+
+
+@router.get("/{name}", response_model=Activity)
+def get_activity(name: str):
+    """
+    Returns individual activity
+    """
+    with db.engine.begin() as connection:
+        activity = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT *
+                FROM activities
+                WHERE LOWER(name) = LOWER(:name)
+                """
+            ),
+            {"name": name},
+        ).mappings().one_or_none()
+
+    return Activity(**activity) if activity else None
+
+
+@router.post("/new", status_code=status.HTTP_200_OK)
+def new_activity(activity: Activity):
+    """
+    Adds new activity type to the database
+    """
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO activities (name, icon, default_grace_minutes, colors, messages, safety_tips, "order")
+                VALUES (:name, :icon, :default_grace_minutes, :colors, :messages, :safety_tips, :order)
+                """
+            ),
+            {"name": activity.name,
+             "icon": activity.icon,
+             "default_grace_minutes": activity.default_grace_minutes,
+             "colors": json.dumps(activity.colors),
+             "messages": json.dumps(activity.messages),
+             "safety_tips": json.dumps(activity.safety_tips),
+             "order": activity.order},
+        ) 
+
+
+@router.delete("/{name}", status_code=status.HTTP_200_OK)
+def delete_activity(name: str):
+    """
+    Deletes activity from the database
+    """
+    with db.engine.begin() as connection:
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                DELETE FROM activities
+                WHERE name = :name
+                """
+            ),
+            {"name": name},
         )
-        for key, activity in ACTIVITIES.items()
-    ]
-
-
-@router.get("/{activity_type}", response_model=ActivityType)
-def get_activity(activity_type: str):
-    """Get details for a specific activity type"""
-    if activity_type not in ACTIVITIES:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Activity type not found")
-
-    activity = ACTIVITIES[activity_type]
-    return ActivityType(
-        type=activity_type,
-        name=activity["name"],
-        icon=activity["icon"],
-        default_grace_minutes=activity["default_grace_minutes"],
-        description=activity["description"]
-    )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        

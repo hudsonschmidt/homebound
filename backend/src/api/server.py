@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from src.api import auth_endpoints, plans, activities, contacts, devices, checkin, profile, admin
+from src.api import auth_endpoints, trips, activities, contacts, devices, checkin, profile
 from starlette.middleware.cors import CORSMiddleware
 
 description = """
@@ -10,13 +10,12 @@ check in on time.
 
 tags_metadata = [
     {"name": "auth", "description": "Authentication and user management"},
-    {"name": "plans", "description": "Create and manage safety plans"},
+    {"name": "trips", "description": "Create and manage safety trips"},
     {"name": "activities", "description": "Activity types and configurations"},
     {"name": "contacts", "description": "Manage emergency contacts"},
     {"name": "devices", "description": "Device registration for push notifications"},
     {"name": "checkin", "description": "Check-in and check-out functionality"},
     {"name": "profile", "description": "User profile management"},
-    {"name": "admin", "description": "Administrative functions"},
 ]
 
 app = FastAPI(
@@ -51,13 +50,12 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth_endpoints.router)
-app.include_router(plans.router)
+app.include_router(trips.router)
 app.include_router(activities.router)
 app.include_router(contacts.router)
 app.include_router(devices.router)
 app.include_router(checkin.router)
 app.include_router(profile.router)
-app.include_router(admin.router)
 
 
 @app.get("/")

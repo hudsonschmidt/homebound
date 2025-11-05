@@ -32,7 +32,6 @@ dev = [
   "mypy>=1.11",
   "pytest>=8",
   "pytest-asyncio>=0.23",
-  "types-email-validator",
 ]
 
 [build-system]
@@ -45,3 +44,6 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.uv]
+managed = false

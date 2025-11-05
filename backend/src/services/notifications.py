@@ -1,38 +1,59 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Any
 
-from ..config import settings
-from ..models import Plan, Contact
+from ..config import get_settings
 
+settings = get_settings()
 log = logging.getLogger(__name__)
 
 
-async def send_overdue_notifications(plan: Plan, contacts: List[Contact]):
-    """Send overdue notifications to contacts via SMS, email, and push."""
+async def send_overdue_notifications(plan: Any, contacts: List[Any]):
+    """Send overdue notifications to contacts via SMS, email, and push.
 
-    message = f"URGENT: {plan.title} was expected by {plan.eta_at.strftime('%I:%M %p')} but hasn't checked in."
+    Args:
+        plan: Dictionary or Row object with keys: title, eta_at, location_text, user_id
+        contacts: List of dictionaries or Row objects with keys: phone, email
+    """
+    from datetime import datetime
 
-    if plan.location_text:
-        message += f" Last known location: {plan.location_text}"
+    # Handle both dict and Row objects
+    plan_title = plan.get('title') if hasattr(plan, 'get') else plan.title
+    plan_eta_at = plan.get('eta_at') if hasattr(plan, 'get') else plan.eta_at
+    plan_location_text = plan.get('location_text') if hasattr(plan, 'get') else plan.location_text
+    plan_user_id = plan.get('user_id') if hasattr(plan, 'get') else plan.user_id
+
+    # Format eta_at if it's a string
+    if isinstance(plan_eta_at, str):
+        eta_dt = datetime.fromisoformat(plan_eta_at.replace(' ', 'T'))
+        eta_formatted = eta_dt.strftime('%I:%M %p')
+    else:
+        eta_formatted = plan_eta_at.strftime('%I:%M %p')
+
+    message = f"URGENT: {plan_title} was expected by {eta_formatted} but hasn't checked in."
+
+    if plan_location_text:
+        message += f" Last known location: {plan_location_text}"
 
     # Send SMS notifications
     for contact in contacts:
-        if contact.phone:
-            await send_sms(contact.phone, message)
+        contact_phone = contact.get('phone') if hasattr(contact, 'get') else contact.phone
+        if contact_phone:
+            await send_sms(contact_phone, message)
 
     # Send Email notifications
     for contact in contacts:
-        if contact.email:
+        contact_email = contact.get('email') if hasattr(contact, 'get') else contact.email
+        if contact_email:
             await send_email(
-                contact.email,
-                f"Overdue Alert: {plan.title}",
+                contact_email,
+                f"Overdue Alert: {plan_title}",
                 message
             )
 
     # Send push notification to plan owner's devices
-    await send_push_to_user(plan.user_id, "Check-in Overdue", message)
+    await send_push_to_user(plan_user_id, "Check-in Overdue", message)
 
 
 async def send_sms(phone: str, message: str):
@@ -93,11 +114,36 @@ If you didn't request this code, please ignore this email.
     await send_email(email, subject, body, html_body)
 
 
-async def send_plan_created_notification(plan: Plan):
-    """Send notification when a plan is created."""
-    message = f"New trip plan created: {plan.title}"
+async def send_plan_created_notification(plan: Any):
+    """Send notification when a plan is created.
 
-    if plan.start_at and plan.eta_at:
-        message += f" from {plan.start_at.strftime('%I:%M %p')} to {plan.eta_at.strftime('%I:%M %p')}"
+    Args:
+        plan: Dictionary or Row object with keys: title, start_at, eta_at, user_id
+    """
+    from datetime import datetime
 
-    await send_push_to_user(plan.user_id, "Plan Created", message)
+    # Handle both dict and Row objects
+    plan_title = plan.get('title') if hasattr(plan, 'get') else plan.title
+    plan_start_at = plan.get('start_at') if hasattr(plan, 'get') else plan.start_at
+    plan_eta_at = plan.get('eta_at') if hasattr(plan, 'get') else plan.eta_at
+    plan_user_id = plan.get('user_id') if hasattr(plan, 'get') else plan.user_id
+
+    message = f"New trip plan created: {plan_title}"
+
+    if plan_start_at and plan_eta_at:
+        # Format times if they're strings
+        if isinstance(plan_start_at, str):
+            start_dt = datetime.fromisoformat(plan_start_at.replace(' ', 'T'))
+            start_formatted = start_dt.strftime('%I:%M %p')
+        else:
+            start_formatted = plan_start_at.strftime('%I:%M %p')
+
+        if isinstance(plan_eta_at, str):
+            eta_dt = datetime.fromisoformat(plan_eta_at.replace(' ', 'T'))
+            eta_formatted = eta_dt.strftime('%I:%M %p')
+        else:
+            eta_formatted = plan_eta_at.strftime('%I:%M %p')
+
+        message += f" from {start_formatted} to {eta_formatted}"
+
+    await send_push_to_user(plan_user_id, "Plan Created", message)

@@ -1,10 +1,8 @@
-"""Authentication middleware for JWT tokens"""
 import jwt
 from fastapi import Request, HTTPException, status
 from src import config
 
 settings = config.get_settings()
-
 
 async def get_current_user_id(request: Request) -> int:
     """
@@ -23,7 +21,12 @@ async def get_current_user_id(request: Request) -> int:
     token = auth.split(" ", 1)[1].strip()
 
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            options={"verify_iat": False}  # Disable iat validation to avoid clock skew issues
+        )
 
         # Verify it's an access token
         if payload.get("typ") != "access":
