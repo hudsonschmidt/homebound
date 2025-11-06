@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import pytest
 from jose import jwt
+from jose.exceptions import JWTError, ExpiredSignatureError
 from src import database as db
 from src import config
 import sqlalchemy
@@ -99,14 +100,209 @@ def test_request_magic_link_existing_user():
 
 
 def test_request_magic_link_nonexistent_user():
-    """Test requesting magic link for non-existent user"""
-    request = MagicLinkRequest(email="nonexistent@example.com")
+    """Test requesting magic link for non-existent user (should auto-create account)"""
+    test_email = "autocreate@example.com"
 
-    with pytest.raises(HTTPException) as exc_info:
-        request_magic_link(request)
+    # Clean up first
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE email = :email"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
 
-    assert exc_info.value.status_code == 404
-    assert "not found" in exc_info.value.detail.lower()
+    request = MagicLinkRequest(email=test_email)
+    result = request_magic_link(request)
+
+    assert result["ok"] is True
+    assert "message" in result
+
+    # Verify user was created
+    with db.engine.begin() as connection:
+        user = connection.execute(
+            sqlalchemy.text("SELECT id, email FROM users WHERE email = :email"),
+            {"email": test_email}
+        ).fetchone()
+
+        assert user is not None
+        assert user.email == test_email
+
+        # Verify token was created
+        token = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT token, email
+                FROM login_tokens
+                WHERE email = :email
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"email": test_email}
+        ).fetchone()
+
+        assert token is not None
+        assert len(token.token) == 6
+        assert token.token.isdigit()
+
+
+def test_auto_create_account_full_flow():
+    """Test complete flow: auto-create account -> request magic link -> verify -> get tokens"""
+    test_email = "fullflow@newuser.com"
+
+    # Clean up first
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE email = :email"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+    # Step 1: Request magic link (should auto-create account)
+    request = MagicLinkRequest(email=test_email)
+    result = request_magic_link(request)
+    assert result["ok"] is True
+
+    # Step 2: Get the magic code from database
+    with db.engine.begin() as connection:
+        token_record = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT token, user_id
+                FROM login_tokens
+                WHERE email = :email
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"email": test_email}
+        ).fetchone()
+
+        assert token_record is not None
+        magic_code = token_record.token
+        user_id = token_record.user_id
+
+        # Verify user was created
+        user = connection.execute(
+            sqlalchemy.text("SELECT id, email, first_name, last_name, age FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+
+        assert user is not None
+        assert user.email == test_email
+        # New users should have default empty values
+        assert user.first_name == ""
+        assert user.last_name == ""
+        assert user.age == 0
+
+    # Step 3: Verify the magic code
+    verify_req = VerifyRequest(email=test_email, code=magic_code)
+    token_response = verify_magic_code(verify_req)
+
+    assert isinstance(token_response, TokenResponse)
+    assert isinstance(token_response.access, str)
+    assert isinstance(token_response.refresh, str)
+    assert token_response.user["email"] == test_email
+    assert token_response.user["id"] == user_id
+
+
+def test_auto_create_vs_existing_user_last_login():
+    """Test that new users don't have last_login_at set, but existing users do"""
+    new_email = "newlogin@test.com"
+    existing_email = "existinglogin@test.com"
+
+    # Clean up
+    with db.engine.begin() as connection:
+        for email in [new_email, existing_email]:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM login_tokens WHERE email = :email"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+                {"email": email}
+            )
+
+        # Create existing user
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, 'Existing', 'User', 30)
+                """
+            ),
+            {"email": existing_email}
+        )
+
+    # Request magic link for new user (auto-create)
+    request_magic_link(MagicLinkRequest(email=new_email))
+
+    # Request magic link for existing user
+    request_magic_link(MagicLinkRequest(email=existing_email))
+
+    # Check both users
+    with db.engine.begin() as connection:
+        new_user = connection.execute(
+            sqlalchemy.text("SELECT email, last_login_at FROM users WHERE email = :email"),
+            {"email": new_email}
+        ).fetchone()
+
+        existing_user = connection.execute(
+            sqlalchemy.text("SELECT email, last_login_at FROM users WHERE email = :email"),
+            {"email": existing_email}
+        ).fetchone()
+
+        # New user should exist but not have last_login_at updated yet
+        assert new_user is not None
+        assert new_user.email == new_email
+
+        # Existing user should have last_login_at updated
+        assert existing_user is not None
+        assert existing_user.last_login_at is not None
+
+
+def test_auto_create_multiple_requests_same_email():
+    """Test that requesting magic link multiple times doesn't create duplicate users"""
+    test_email = "duplicate@test.com"
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE email = :email"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+    # Request magic link 3 times
+    for _ in range(3):
+        result = request_magic_link(MagicLinkRequest(email=test_email))
+        assert result["ok"] is True
+
+    # Verify only one user was created
+    with db.engine.begin() as connection:
+        user_count = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) as count FROM users WHERE email = :email"),
+            {"email": test_email}
+        ).fetchone()
+
+        assert user_count.count == 1
+
+        # Verify multiple tokens were created
+        token_count = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) as count FROM login_tokens WHERE email = :email"),
+            {"email": test_email}
+        ).fetchone()
+
+        assert token_count.count == 3
 
 
 def test_verify_magic_code_success():

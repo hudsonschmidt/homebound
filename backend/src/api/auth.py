@@ -1,4 +1,5 @@
 from jose import jwt
+from jose.exceptions import JWTError, ExpiredSignatureError
 from fastapi import Request, HTTPException, status
 from src import config
 
@@ -44,12 +45,12 @@ async def get_current_user_id(request: Request) -> int:
 
         return int(sub)
 
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired"
         )
-    except (jwt.InvalidTokenError, ValueError):
+    except (JWTError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"

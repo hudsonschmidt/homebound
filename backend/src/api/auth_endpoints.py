@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import secrets
 from jose import jwt
+from jose.exceptions import JWTError, ExpiredSignatureError
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from src import database as db
@@ -79,22 +80,35 @@ def request_magic_link(body: MagicLinkRequest):
         ).fetchone()
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found. Create new user."
+            # Create new user account with default values
+            result = connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO users (email, first_name, last_name, age)
+                    VALUES (:email, :first_name, :last_name, :age)
+                    RETURNING id, email
+                    """
+                ),
+                {
+                    "email": body.email,
+                    "first_name": "",
+                    "last_name": "",
+                    "age": 0
+                }
             )
-
-        # Update last login
-        connection.execute(
-            sqlalchemy.text(
-                """
-                UPDATE users
-                SET last_login_at = CURRENT_TIMESTAMP
-                WHERE id = :user_id
-                """
-            ),
-            {"user_id": user.id}
-        )
+            user = result.fetchone()
+        else:
+            # Update last login for existing user
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    UPDATE users
+                    SET last_login_at = CURRENT_TIMESTAMP
+                    WHERE id = :user_id
+                    """
+                ),
+                {"user_id": user.id}
+            )
 
         # Generate 6-digit code
         code = f"{secrets.randbelow(1000000):06d}"
@@ -260,12 +274,12 @@ def refresh_token(body: RefreshRequest):
                 }
             )
 
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired"
         )
-    except jwt.InvalidTokenError:
+    except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
