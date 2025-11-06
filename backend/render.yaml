@@ -2,7 +2,7 @@ services:
   - type: web
     name: homebound-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: alembic upgrade head && uvicorn src.api.server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
