@@ -141,8 +141,8 @@ struct NewHomeView: View {
 
     func syncData() async {
         // Load all necessary data in parallel
-        async let loadActive = session.loadActivePlan()
-        async let loadProfile = session.loadUserProfile()
+        async let loadActive: Void = session.loadActivePlan()
+        async let loadProfile: Void = session.loadUserProfile()
 
         // Wait for all to complete
         _ = await (loadActive, loadProfile)
@@ -316,10 +316,12 @@ struct ActivePlanCardCompact: View {
             HStack(spacing: 16) {
                 // Check-in button
                 Button(action: {
-                    Task {
-                        isPerformingAction = true
-                        await session.performTokenAction(plan.checkin_token, action: "checkin")
-                        isPerformingAction = false
+                    if let token = plan.checkin_token {
+                        Task {
+                            isPerformingAction = true
+                            await session.performTokenAction(token, action: "checkin")
+                            isPerformingAction = false
+                        }
                     }
                 }) {
                     Label("Check In", systemImage: "checkmark.circle.fill")
@@ -331,15 +333,18 @@ struct ActivePlanCardCompact: View {
                         .background(Color.green)
                         .cornerRadius(10)
                 }
+                .disabled(plan.checkin_token == nil || isPerformingAction)
 
                 // I'm safe button
                 Button(action: {
-                    Task {
-                        isPerformingAction = true
-                        await session.performTokenAction(plan.checkout_token, action: "checkout")
-                        // Reload active plan to update UI
-                        await session.loadActivePlan()
-                        isPerformingAction = false
+                    if let token = plan.checkout_token {
+                        Task {
+                            isPerformingAction = true
+                            await session.performTokenAction(token, action: "checkout")
+                            // Reload active plan to update UI
+                            await session.loadActivePlan()
+                            isPerformingAction = false
+                        }
                     }
                 }) {
                     Label("I'm Safe", systemImage: "house.fill")
@@ -357,6 +362,7 @@ struct ActivePlanCardCompact: View {
                         )
                         .cornerRadius(10)
                 }
+                .disabled(plan.checkout_token == nil || isPerformingAction)
             }
             .disabled(isPerformingAction)
 

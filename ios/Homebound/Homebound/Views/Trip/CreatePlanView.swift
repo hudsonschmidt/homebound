@@ -215,17 +215,35 @@ struct CreatePlanView: View {
         isCreating = true
 
         Task {
+            // Step 1: Create contacts and get their IDs
+            var contactIds: [Int] = []
+            for contact in contacts {
+                if let savedContact = await session.addSavedContact(name: contact.name, phone: contact.phone, email: nil) {
+                    contactIds.append(savedContact.id)
+                } else {
+                    await MainActor.run {
+                        isCreating = false
+                        errorMessage = "Failed to create contact: \(contact.name)"
+                        showError = true
+                    }
+                    return
+                }
+            }
+
+            // Step 2: Create plan with contact IDs
             let plan = PlanCreate(
                 title: planTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                activity_type: selectedActivity,
-                start_at: startTime,
-                eta_at: etaTime,
-                grace_minutes: Int(graceMinutes),
+                activity: selectedActivity,
+                start: startTime,
+                eta: etaTime,
+                grace_min: Int(graceMinutes),
                 location_text: location.trimmingCharacters(in: .whitespacesAndNewlines),
-                location_lat: locationCoordinates?.latitude,
-                location_lng: locationCoordinates?.longitude,
+                gen_lat: locationCoordinates?.latitude,
+                gen_lon: locationCoordinates?.longitude,
                 notes: notes.isEmpty ? nil : notes,
-                contacts: contacts.map { ContactIn(name: $0.name, phone: $0.phone, email: nil, notify_on_overdue: true) }
+                contact1: contactIds.count > 0 ? contactIds[0] : nil,
+                contact2: contactIds.count > 1 ? contactIds[1] : nil,
+                contact3: contactIds.count > 2 ? contactIds[2] : nil
             )
 
             let createdPlan = await session.createPlan(plan)
@@ -1511,7 +1529,7 @@ struct SavedContactsSelectionSheet: View {
     let savedContacts: [SavedContact]
     @Binding var selectedContacts: [EmergencyContact]
     @Binding var isPresented: Bool
-    @State private var tempSelection: Set<String> = []
+    @State private var tempSelection: Set<Int> = []
 
     var body: some View {
         NavigationStack {
@@ -1579,14 +1597,18 @@ struct SavedContactsSelectionSheet: View {
                         // Convert saved contacts to emergency contacts
                         let newContacts = savedContacts
                             .filter { tempSelection.contains($0.id) }
-                            .filter { saved in
+                            .compactMap { saved -> EmergencyContact? in
+                                // Only include contacts with a phone number
+                                guard let phone = saved.phone, !phone.isEmpty else {
+                                    return nil
+                                }
                                 // Don't add duplicates
-                                !selectedContacts.contains(where: { $0.phone == saved.phone })
-                            }
-                            .map { saved in
-                                EmergencyContact(
+                                guard !selectedContacts.contains(where: { $0.phone == phone }) else {
+                                    return nil
+                                }
+                                return EmergencyContact(
                                     name: saved.name,
-                                    phone: saved.phone
+                                    phone: phone
                                 )
                             }
 
@@ -1650,7 +1672,7 @@ struct SavedContactSelectionRow: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.primary)
 
-                    Text(contact.phone)
+                    Text(contact.phone ?? "")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 

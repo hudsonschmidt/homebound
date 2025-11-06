@@ -162,13 +162,41 @@ def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_u
 def delete_account(user_id: int = Depends(auth.get_current_user_id)):
     """Delete current user's account and all associated data"""
     with db.engine.begin() as connection:
-        # Delete login tokens first (foreign key constraint)
+        # Delete in order to satisfy foreign key constraints:
+        # Events reference trips, trips reference contacts
+        # So delete order: events → trips → contacts
+
+        # 1. Delete events (they reference trips via trip_id)
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 2. Delete trips (they reference contacts via contact1/2/3)
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 3. Delete saved contacts (now safe since trips are deleted)
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 4. Delete devices
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 5. Delete login tokens
         connection.execute(
             sqlalchemy.text("DELETE FROM login_tokens WHERE user_id = :user_id"),
             {"user_id": user_id}
         )
 
-        # Then delete the user (trips, contacts, events will cascade)
+        # 6. Finally delete the user
         connection.execute(
             sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id}

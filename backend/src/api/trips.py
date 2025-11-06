@@ -65,6 +65,13 @@ class TimelineEvent(BaseModel):
 @router.post("/", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
 def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_id)):
     """Create a new trip"""
+    # Validate that at least contact1 is provided (required by database)
+    if body.contact1 is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one emergency contact (contact1) is required"
+        )
+
     with db.engine.begin() as connection:
         # Verify activity exists and get its ID
         activity = connection.execute(
@@ -135,9 +142,9 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
                 "start": body.start.isoformat(),
                 "eta": body.eta.isoformat(),
                 "grace_min": body.grace_min,
-                "location_text": body.location_text,
-                "gen_lat": body.gen_lat,
-                "gen_lon": body.gen_lon,
+                "location_text": body.location_text or "Unknown Location",  # Default if not provided
+                "gen_lat": body.gen_lat if body.gen_lat is not None else 0.0,  # Default to 0.0
+                "gen_lon": body.gen_lon if body.gen_lon is not None else 0.0,  # Default to 0.0
                 "notes": body.notes,
                 "contact1": body.contact1,
                 "contact2": body.contact2,

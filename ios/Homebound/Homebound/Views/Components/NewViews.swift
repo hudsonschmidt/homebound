@@ -328,16 +328,20 @@ struct OldCreatePlanView: View {
         Task {
             _ = PlanCreate(
                 title: title,
-                activity_type: selectedActivity.rawValue,
-                start_at: departureTime,
-                eta_at: returnTime,
-                grace_minutes: graceMinutes,
+                activity: selectedActivity.rawValue,
+                start: departureTime,
+                eta: returnTime,
+                grace_min: graceMinutes,
                 location_text: location.isEmpty ? nil : location,
+                gen_lat: nil,
+                gen_lon: nil,
                 notes: notes.isEmpty ? nil : notes,
-                contacts: contacts
+                contact1: nil,  // TODO: Save contacts first and use their IDs
+                contact2: nil,
+                contact3: nil
             )
 
-            // TODO: Call API to create plan
+            // TODO: Call API to create plan (see CreatePlanView.swift for implementation pattern)
             dismiss()
         }
     }

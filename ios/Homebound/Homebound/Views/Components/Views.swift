@@ -80,8 +80,8 @@ struct RootView: View {
         guard let bearer = session.accessToken else { return }
         let now = Date()
         let eta = now.addingTimeInterval(3 * 3600)
-        let payload = PlanCreate(title: "iOS Demo Plan", activity_type: "hiking", start_at: now, eta_at: eta,
-                                 grace_minutes: 30, location_text: "Trailhead", notes: "Blue trail")
+        let payload = PlanCreate(title: "iOS Demo Plan", activity: "hiking", start: now, eta: eta,
+                                 grace_min: 30, location_text: "Trailhead", notes: "Blue trail", contact1: nil)
         do {
             let p: PlanOut = try await session.api.post(
                 session.url("/api/v1/trips/"),
@@ -122,8 +122,19 @@ struct PlanDetail: View {
                 Text("Plan")
             }
             Section {
-                Button("Check-In") { Task { await hitToken(plan.checkin_token, action: "checkin") } }
-                Button("Check-Out") { Task { await hitToken(plan.checkout_token, action: "checkout") } }
+                Button("Check-In") {
+                    if let token = plan.checkin_token {
+                        Task { await hitToken(token, action: "checkin") }
+                    }
+                }
+                .disabled(plan.checkin_token == nil)
+
+                Button("Check-Out") {
+                    if let token = plan.checkout_token {
+                        Task { await hitToken(token, action: "checkout") }
+                    }
+                }
+                .disabled(plan.checkout_token == nil)
             } header: {
                 Text("Actions")
             }

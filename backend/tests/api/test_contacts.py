@@ -275,3 +275,141 @@ def test_delete_nonexistent_contact():
     with pytest.raises(HTTPException) as exc_info:
         delete_contact(999999, user_id=1)
     assert exc_info.value.status_code == 404
+
+
+def test_contact_id_is_integer():
+    """Test that contact ID is returned as integer (not string)"""
+    test_email = "contact-id-type@homeboundapp.com"
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "ID",
+                "last_name": "Test",
+                "age": 29
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    # Create contact
+    contact = create_contact(
+        ContactCreate(name="Test Contact", phone="111", email="test@example.com"),
+        user_id=user_id
+    )
+
+    # Verify ID is integer
+    assert isinstance(contact.id, int), f"Contact ID should be int, got {type(contact.id)}"
+    assert isinstance(contact.user_id, int), f"User ID should be int, got {type(contact.user_id)}"
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+def test_user_cannot_access_other_users_contacts():
+    """Test that users cannot access contacts belonging to other users"""
+    test_email1 = "user1-contacts@homeboundapp.com"
+    test_email2 = "user2-contacts@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        for email in [test_email1, test_email2]:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+                {"email": email}
+            )
+
+        # Create two users
+        result1 = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email1,
+                "first_name": "User",
+                "last_name": "One",
+                "age": 30
+            }
+        )
+        user1_id = result1.fetchone()[0]
+
+        result2 = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email2,
+                "first_name": "User",
+                "last_name": "Two",
+                "age": 28
+            }
+        )
+        user2_id = result2.fetchone()[0]
+
+    # User 1 creates a contact
+    contact1 = create_contact(
+        ContactCreate(name="User1 Contact", phone="111", email="user1@example.com"),
+        user_id=user1_id
+    )
+
+    # User 2 tries to access User 1's contact - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        get_contact(contact1.id, user_id=user2_id)
+    assert exc_info.value.status_code == 404
+
+    # User 2 tries to update User 1's contact - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        update_contact(contact1.id, ContactUpdate(name="Hacked"), user_id=user2_id)
+    assert exc_info.value.status_code == 404
+
+    # User 2 tries to delete User 1's contact - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        delete_contact(contact1.id, user_id=user2_id)
+    assert exc_info.value.status_code == 404
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (:user1_id, :user2_id)"),
+            {"user1_id": user1_id, "user2_id": user2_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id IN (:user1_id, :user2_id)"),
+            {"user1_id": user1_id, "user2_id": user2_id}
+        )

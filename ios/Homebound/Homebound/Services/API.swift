@@ -102,10 +102,20 @@ struct API {
     private func check(resp: URLResponse, data: Data) throws {
         guard let http = resp as? HTTPURLResponse else { throw APIError.badResponse }
         if (200..<300).contains(http.statusCode) { return }
+
+        // Detect 401 Unauthorized for token refresh handling
+        if http.statusCode == 401 {
+            throw APIError.unauthorized
+        }
+
         let msg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
         throw APIError.server(msg)
     }
 
     struct Empty: Decodable {}
-    enum APIError: Error { case badResponse, server(String) }
+    enum APIError: Error {
+        case badResponse
+        case unauthorized
+        case server(String)
+    }
 }

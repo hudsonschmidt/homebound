@@ -533,3 +533,544 @@ def test_zero_age_marks_profile_incomplete():
             sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id}
         )
+
+
+def test_delete_account_with_contacts():
+    """Test deleting account with saved contacts (cascade delete)"""
+    test_email = "delete-with-contacts@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Delete",
+                "last_name": "Test",
+                "age": 30
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create contacts for this user
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, phone, email)
+                VALUES
+                    (:user_id, :name1, :phone1, :email1),
+                    (:user_id, :name2, :phone2, :email2)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "name1": "Contact One",
+                "phone1": "111-1111",
+                "email1": "one@example.com",
+                "name2": "Contact Two",
+                "phone2": "222-2222",
+                "email2": "two@example.com"
+            }
+        )
+
+    # Delete account - should cascade delete contacts
+    result = delete_account(user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify user and contacts are both deleted
+    with db.engine.begin() as connection:
+        user_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert user_check == 0
+
+        contacts_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert contacts_check == 0
+
+
+def test_delete_account_with_trips_and_events():
+    """Test deleting account with trips and events (cascade delete)"""
+    test_email = "delete-with-trips@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up with cascade deletion order
+        # Events reference trips, so delete events first
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Delete",
+                "last_name": "Trips",
+                "age": 28
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create contacts for the trip
+        contact_result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, phone, email)
+                VALUES (:user_id, :name, :phone, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "name": "Emergency Contact",
+                "phone": "555-0001",
+                "email": "emergency@example.com"
+            }
+        )
+        contact_id = contact_result.fetchone()[0]
+
+        # Create a trip
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        trip_result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text, gen_lat, gen_lon, contact1, contact2, contact3, status)
+                VALUES (:user_id, :title, :activity, :start, :eta, :grace_min, :location_text, :gen_lat, :gen_lon, :contact1, :contact2, :contact3, :status)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "title": "Test Trip",
+                "activity": 1,  # ID for "Hiking"
+                "start": now,
+                "eta": now + timedelta(hours=2),
+                "grace_min": 30,
+                "location_text": "Test Location",
+                "gen_lat": 0.0,
+                "gen_lon": 0.0,
+                "contact1": contact_id,
+                "contact2": None,
+                "contact3": None,
+                "status": "active"
+            }
+        )
+        trip_id = trip_result.fetchone()[0]
+
+        # Create events for this trip
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO events (user_id, trip_id, what, timestamp)
+                VALUES (:user_id, :trip_id, :what, :timestamp)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "trip_id": trip_id,
+                "what": "created",
+                "timestamp": now
+            }
+        )
+
+    # Delete account - should cascade delete trips and events
+    result = delete_account(user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify everything is deleted
+    with db.engine.begin() as connection:
+        user_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert user_check == 0
+
+        trips_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM trips WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert trips_check == 0
+
+        events_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM events WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert events_check == 0
+
+
+def test_delete_account_with_devices():
+    """Test deleting account with registered devices (cascade delete)"""
+    test_email = "delete-with-devices@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Delete",
+                "last_name": "Devices",
+                "age": 32
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create devices
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO devices (user_id, token, platform, bundle_id, env)
+                VALUES (:user_id, :token1, :platform1, :bundle_id1, :env1),
+                    (:user_id, :token2, :platform2, :bundle_id2, :env2)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "token1": "device-token-1",
+                "platform1": "ios",
+                "bundle_id1": "com.homeboundapp.Homebound",
+                "env1": "production",
+                "token2": "device-token-2",
+                "platform2": "ios",
+                "bundle_id2": "com.homeboundapp.Homebound",
+                "env2": "production"
+            }
+        )
+
+    # Delete account - should cascade delete devices
+    result = delete_account(user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify everything is deleted
+    with db.engine.begin() as connection:
+        user_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert user_check == 0
+
+        devices_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM devices WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert devices_check == 0
+
+
+def test_delete_account_with_login_tokens():
+    """Test deleting account with login tokens (cascade delete)"""
+    test_email = "delete-with-tokens@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Delete",
+                "last_name": "Tokens",
+                "age": 27
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create login tokens
+        from datetime import datetime, timedelta
+        expires = datetime.utcnow() + timedelta(days=90)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO login_tokens (user_id, email, token, expires_at)
+                VALUES (:user_id, :email, :token, :expires_at)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "email": test_email,
+                "token": "test-refresh-token",
+                "expires_at": expires
+            }
+        )
+
+    # Delete account - should cascade delete login tokens
+    result = delete_account(user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify everything is deleted
+    with db.engine.begin() as connection:
+        user_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert user_check == 0
+
+        tokens_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM login_tokens WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert tokens_check == 0
+
+
+def test_delete_account_full_cascade():
+    """Test deleting account with ALL related data (comprehensive cascade delete test)"""
+    test_email = "delete-everything@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up with cascade deletion order
+        # Events reference trips, so delete events first
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Delete",
+                "last_name": "Everything",
+                "age": 29
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create ALL types of related data
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+
+        # Login tokens
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO login_tokens (user_id, email, token, expires_at)
+                VALUES (:user_id, :email, :token, :expires_at)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "email": test_email,
+                "token": "full-test-token",
+                "expires_at": now + timedelta(days=90)
+            }
+        )
+
+        # Contacts
+        contact_result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, phone, email)
+                VALUES (:user_id, :name, :phone, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "name": "Emergency Contact",
+                "phone": "555-1234",
+                "email": "emergency@example.com"
+            }
+        )
+        contact_id = contact_result.fetchone()[0]
+
+        # Trip
+        trip_result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text, gen_lat, gen_lon, contact1, contact2, contact3, status)
+                VALUES (:user_id, :title, :activity, :start, :eta, :grace_min, :location_text, :gen_lat, :gen_lon, :contact1, :contact2, :contact3, :status)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "title": "Full Test Trip",
+                "activity": 19,  # ID for "Other Activity"
+                "start": now,
+                "eta": now + timedelta(hours=3),
+                "grace_min": 30,
+                "location_text": "Test Location",
+                "gen_lat": 0.0,
+                "gen_lon": 0.0,
+                "contact1": contact_id,
+                "contact2": None,
+                "contact3": None,
+                "status": "active"
+            }
+        )
+        trip_id = trip_result.fetchone()[0]
+
+        # Events
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO events (user_id, trip_id, what, timestamp)
+                VALUES (:user_id, :trip_id, :what, :timestamp)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "trip_id": trip_id,
+                "what": "created",
+                "timestamp": now
+            }
+        )
+
+        # Devices
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO devices (user_id, token, platform, bundle_id, env)
+                VALUES (:user_id, :token, :platform, :bundle_id, :env)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "token": "full-test-device-token",
+                "platform": "ios"
+            ,
+                "bundle_id": "com.homeboundapp.Homebound",
+                "env": "production"
+            }
+        )
+
+    # Delete account - should cascade delete EVERYTHING
+    result = delete_account(user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify EVERYTHING is deleted in the correct order
+    with db.engine.begin() as connection:
+        # Check user
+        user_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert user_check == 0, "User should be deleted"
+
+        # Check login_tokens
+        tokens_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM login_tokens WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert tokens_check == 0, "Login tokens should be deleted"
+
+        # Check contacts
+        contacts_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert contacts_check == 0, "Contacts should be deleted"
+
+        # Check events
+        events_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM events WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert events_check == 0, "Events should be deleted"
+
+        # Check trips
+        trips_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM trips WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert trips_check == 0, "Trips should be deleted"
+
+        # Check devices
+        devices_check = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM devices WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()[0]
+        assert devices_check == 0, "Devices should be deleted"

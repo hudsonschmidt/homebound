@@ -127,15 +127,11 @@ struct EmergencyContactsView: View {
         print("DEBUG: Contact Phone: \(newContactPhone)")
         print("DEBUG: Contact Email: \(newContactEmail)")
 
-        let contact = SavedContact(
-            id: UUID().uuidString,
+        let savedContact = await session.addSavedContact(
             name: newContactName,
-            phone: newContactPhone,
+            phone: newContactPhone.isEmpty ? nil : newContactPhone,
             email: newContactEmail.isEmpty ? nil : newContactEmail
         )
-
-        print("DEBUG: Created contact object: \(contact)")
-        let savedContact = await session.addSavedContact(contact)
         print("DEBUG: addSavedContact returned: \(String(describing: savedContact))")
 
         if let savedContact = savedContact {
@@ -206,9 +202,11 @@ struct SavedContactRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                Text(contact.phone)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let phone = contact.phone, !phone.isEmpty {
+                    Text(phone)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if let email = contact.email, !email.isEmpty {
                     Text(email)

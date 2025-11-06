@@ -5,6 +5,7 @@ import Combine
 private enum Routes {
     static let sendCode  = "/api/v1/auth/request-magic-link"
     static let verify    = "/api/v1/auth/verify"
+    static let refresh   = "/api/v1/auth/refresh"
     // add more here as you build out
 }
 
@@ -44,6 +45,16 @@ private struct VerifyResponse: Decodable {
 private struct GenericResponse: Decodable {
     let ok: Bool?
     let message: String?
+}
+
+private struct RefreshRequest: Encodable {
+    let refresh_token: String
+}
+
+private struct RefreshResponse: Decodable {
+    let access: String?
+    let refresh: String?
+    let access_token: String?  // Fallback for compatibility
 }
 
 private struct EmptyBody: Encodable {}
@@ -217,6 +228,11 @@ final class Session: ObservableObject {
                 accessToken = t
             }
 
+            // Store refresh token if present
+            if let refresh = resp.refresh {
+                keychain.saveRefreshToken(refresh)
+            }
+
             // Store user profile data
             if let user = resp.user {
                 userName = user.name
@@ -248,6 +264,64 @@ final class Session: ObservableObject {
         await MainActor.run { self.isVerifying = true }
         defer { Task { await MainActor.run { self.isVerifying = false } } }
         await verify()
+    }
+
+    /// Refresh the access token using the stored refresh token
+    @MainActor
+    func refreshAccessToken() async -> Bool {
+        guard let refreshToken = keychain.getRefreshToken() else {
+            // No refresh token available, user needs to re-authenticate
+            isAuthenticated = false
+            accessToken = nil
+            return false
+        }
+
+        do {
+            let resp: RefreshResponse = try await api.post(
+                url(Routes.refresh),
+                body: RefreshRequest(refresh_token: refreshToken),
+                bearer: nil
+            )
+
+            // Update access token
+            if let t = resp.access ?? resp.access_token {
+                accessToken = t
+            }
+
+            // Update refresh token if a new one was provided
+            if let newRefresh = resp.refresh {
+                keychain.saveRefreshToken(newRefresh)
+            }
+
+            return true
+        } catch {
+            // Token refresh failed, user needs to re-authenticate
+            isAuthenticated = false
+            accessToken = nil
+            keychain.clearAll()
+            return false
+        }
+    }
+
+    /// Execute an authenticated API call with automatic token refresh on 401
+    @MainActor
+    private func withAuth<T>(_ operation: @escaping (String) async throws -> T) async throws -> T {
+        guard let bearer = accessToken else {
+            throw API.APIError.unauthorized
+        }
+
+        do {
+            return try await operation(bearer)
+        } catch API.APIError.unauthorized {
+            // Try to refresh the token
+            let refreshed = await refreshAccessToken()
+            guard refreshed, let newBearer = accessToken else {
+                throw API.APIError.unauthorized
+            }
+
+            // Retry the operation with the new token
+            return try await operation(newBearer)
+        }
     }
 
     // MARK: - Dev helpers
@@ -316,14 +390,14 @@ final class Session: ObservableObject {
 
     // MARK: - Plan Management
     func createPlan(_ plan: PlanCreate) async -> PlanOut? {
-        guard let bearer = accessToken else { return nil }
-
         do {
-            let response: PlanOut = try await api.post(
-                url("/api/v1/trips/"),
-                body: plan,
-                bearer: bearer
-            )
+            let response: PlanOut = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/"),
+                    body: plan,
+                    bearer: bearer
+                )
+            }
 
             // After creating a plan, immediately set it as active
             await MainActor.run {
@@ -340,17 +414,17 @@ final class Session: ObservableObject {
     }
 
     func loadActivePlan() async {
-        guard let bearer = accessToken else { return }
-
         await MainActor.run {
             self.isLoadingPlan = true
         }
 
         do {
-            let response: PlanOut? = try await api.get(
-                url("/api/v1/trips/active"),
-                bearer: bearer
-            )
+            let response: PlanOut? = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/trips/active"),
+                    bearer: bearer
+                )
+            }
 
             await MainActor.run {
                 self.activePlan = response
@@ -389,14 +463,16 @@ final class Session: ObservableObject {
     }
 
     func completePlan() async -> Bool {
-        guard let bearer = accessToken, let plan = activePlan else { return false }
+        guard let plan = activePlan else { return false }
 
         do {
-            let _: GenericResponse = try await api.post(
-                url("/api/v1/trips/\(plan.id)/complete"),
-                body: EmptyBody(),
-                bearer: bearer
-            )
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(plan.id)/complete"),
+                    body: EmptyBody(),
+                    bearer: bearer
+                )
+            }
 
             await MainActor.run {
                 self.activePlan = nil
@@ -425,13 +501,13 @@ final class Session: ObservableObject {
     }
 
     func loadTimeline(planId: Int) async -> [TimelineEvent] {
-        guard let bearer = accessToken else { return [] }
-
         do {
-            let response: TimelineResponse = try await api.get(
-                url("/api/v1/trips/\(planId)/timeline"),
-                bearer: bearer
-            )
+            let response: TimelineResponse = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/trips/\(planId)/timeline"),
+                    bearer: bearer
+                )
+            }
             return response.events
         } catch {
             await MainActor.run {
@@ -443,8 +519,6 @@ final class Session: ObservableObject {
 
     // MARK: - Profile Management
     func updateProfile(firstName: String, lastName: String, age: Int) async -> Bool {
-        guard let bearer = accessToken else { return false }
-
         struct ProfileUpdateRequest: Encodable {
             let first_name: String
             let last_name: String
@@ -464,11 +538,13 @@ final class Session: ObservableObject {
         }
 
         do {
-            let response: ProfileUpdateResponse = try await api.put(
-                url("/api/v1/profile"),
-                body: ProfileUpdateRequest(first_name: firstName, last_name: lastName, age: age),
-                bearer: bearer
-            )
+            let response: ProfileUpdateResponse = try await withAuth { bearer in
+                try await self.api.put(
+                    self.url("/api/v1/profile"),
+                    body: ProfileUpdateRequest(first_name: firstName, last_name: lastName, age: age),
+                    bearer: bearer
+                )
+            }
 
             if response.ok, let user = response.user {
                 await MainActor.run {
@@ -491,8 +567,6 @@ final class Session: ObservableObject {
 
     // MARK: - Update Profile
     func updateProfile(firstName: String? = nil, lastName: String? = nil, age: Int? = nil, phone: String? = nil) async -> Bool {
-        guard let bearer = accessToken else { return false }
-
         struct UpdateProfileRequest: Encodable {
             let first_name: String?
             let last_name: String?
@@ -501,11 +575,13 @@ final class Session: ObservableObject {
         }
 
         do {
-            let _: GenericResponse = try await api.patch(
-                url("/api/v1/profile"),
-                body: UpdateProfileRequest(first_name: firstName, last_name: lastName, age: age, phone: phone),
-                bearer: bearer
-            )
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.patch(
+                    self.url("/api/v1/profile"),
+                    body: UpdateProfileRequest(first_name: firstName, last_name: lastName, age: age, phone: phone),
+                    bearer: bearer
+                )
+            }
 
             await MainActor.run {
                 if let first = firstName, let last = lastName {
@@ -530,13 +606,13 @@ final class Session: ObservableObject {
 
     // MARK: - Delete Account
     func deleteAccount() async -> Bool {
-        guard let bearer = accessToken else { return false }
-
         do {
-            let _: GenericResponse = try await api.delete(
-                url("/api/v1/profile/account"),
-                bearer: bearer
-            )
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.delete(
+                    self.url("/api/v1/profile/account"),
+                    bearer: bearer
+                )
+            }
 
             await MainActor.run {
                 // Clear all data and sign out
@@ -553,13 +629,13 @@ final class Session: ObservableObject {
 
     // MARK: - Delete Plan
     func deletePlan(_ planId: Int) async -> Bool {
-        guard let bearer = accessToken else { return false }
-
         do {
-            let _: GenericResponse = try await api.delete(
-                url("/api/v1/trips/\(planId)"),
-                bearer: bearer
-            )
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.delete(
+                    self.url("/api/v1/trips/\(planId)"),
+                    bearer: bearer
+                )
+            }
 
             await MainActor.run {
                 self.notice = "Trip deleted successfully"
@@ -575,8 +651,6 @@ final class Session: ObservableObject {
 
     // MARK: - Load User Profile
     func loadUserProfile() async {
-        guard let bearer = accessToken else { return }
-
         struct UserProfileResponse: Decodable {
             let id: Int?
             let email: String?
@@ -587,10 +661,12 @@ final class Session: ObservableObject {
         }
 
         do {
-            let response: UserProfileResponse = try await api.get(
-                url("/api/v1/profile"),
-                bearer: bearer
-            )
+            let response: UserProfileResponse = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/profile"),
+                    bearer: bearer
+                )
+            }
 
             await MainActor.run {
                 // Combine first and last name
@@ -617,13 +693,13 @@ final class Session: ObservableObject {
 
     // MARK: - Saved Contacts Management
     func loadSavedContacts() async -> [SavedContact] {
-        guard let bearer = accessToken else { return [] }
-
         do {
-            let contacts: [SavedContact] = try await api.get(
-                url("/api/v1/contacts/"),
-                bearer: bearer
-            )
+            let contacts: [SavedContact] = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/contacts/"),
+                    bearer: bearer
+                )
+            }
             return contacts
         } catch {
             print("Failed to load saved contacts: \(error.localizedDescription)")
@@ -631,30 +707,20 @@ final class Session: ObservableObject {
         }
     }
 
-    func addSavedContact(_ contact: SavedContact) async -> SavedContact? {
+    func addSavedContact(name: String, phone: String?, email: String?) async -> SavedContact? {
         print("DEBUG Session: addSavedContact called")
-        print("DEBUG Session: Contact to add: \(contact)")
-
-        guard let bearer = accessToken else {
-            print("DEBUG Session: No access token available")
-            await MainActor.run {
-                self.lastError = "Not authenticated. Please sign in again."
-            }
-            return nil
-        }
-
-        print("DEBUG Session: Access token exists")
+        print("DEBUG Session: Contact to add - name: \(name), phone: \(phone ?? "nil"), email: \(email ?? "nil")")
 
         struct AddContactRequest: Encodable {
             let name: String
-            let phone: String
+            let phone: String?
             let email: String?
         }
 
         let requestBody = AddContactRequest(
-            name: contact.name,
-            phone: contact.phone,
-            email: contact.email
+            name: name,
+            phone: phone,
+            email: email
         )
 
         print("DEBUG Session: Request body: \(requestBody)")
@@ -662,11 +728,13 @@ final class Session: ObservableObject {
 
         do {
             print("DEBUG Session: Making API call...")
-            let response: SavedContact = try await api.post(
-                url("/api/v1/contacts/"),
-                body: requestBody,
-                bearer: bearer
-            )
+            let response: SavedContact = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/contacts/"),
+                    body: requestBody,
+                    bearer: bearer
+                )
+            }
             print("DEBUG Session: API call successful. Response: \(response)")
             // Return the saved contact from the server (with server-generated ID)
             return response
@@ -679,14 +747,14 @@ final class Session: ObservableObject {
         }
     }
 
-    func deleteSavedContact(_ contactId: String) async -> Bool {
-        guard let bearer = accessToken else { return false }
-
+    func deleteSavedContact(_ contactId: Int) async -> Bool {
         do {
-            let _: GenericResponse = try await api.delete(
-                url("/api/v1/contacts/\(contactId)"),
-                bearer: bearer
-            )
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.delete(
+                    self.url("/api/v1/contacts/\(contactId)"),
+                    bearer: bearer
+                )
+            }
             return true
         } catch {
             await MainActor.run {
