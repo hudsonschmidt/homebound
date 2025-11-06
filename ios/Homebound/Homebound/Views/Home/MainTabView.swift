@@ -493,7 +493,7 @@ struct UpcomingTripsSection: View {
         // Load plans that have status "upcoming" (not started yet)
         do {
             let allPlans: [PlanOut] = try await session.api.get(
-                session.url("/api/v1/plans"),
+                session.url("/api/v1/trips/"),
                 bearer: session.accessToken
             )
 
@@ -641,7 +641,7 @@ struct HistoryTabView: View {
 
             do {
                 let loadedPlans: [PlanOut] = try await session.api.get(
-                    session.url("/api/v1/plans"),
+                    session.url("/api/v1/trips/"),
                     bearer: session.accessToken
                 )
 
@@ -685,7 +685,7 @@ struct HistoryTabView: View {
                     }
 
                     let _: DeleteResponse = try await session.api.delete(
-                        session.url("/api/v1/plans/\(plan.id)"),
+                        session.url("/api/v1/trips/\(plan.id)"),
                         bearer: session.accessToken
                     )
 

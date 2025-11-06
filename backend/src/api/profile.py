@@ -162,6 +162,13 @@ def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_u
 def delete_account(user_id: int = Depends(auth.get_current_user_id)):
     """Delete current user's account and all associated data"""
     with db.engine.begin() as connection:
+        # Delete login tokens first (foreign key constraint)
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # Then delete the user (trips, contacts, events will cascade)
         connection.execute(
             sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id}

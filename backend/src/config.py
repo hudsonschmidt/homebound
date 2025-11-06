@@ -16,8 +16,8 @@ class Settings:
     # JWT settings for authentication
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 days (for mobile persistent login)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 90  # 90 days
 
     # Email settings for magic links
     SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")

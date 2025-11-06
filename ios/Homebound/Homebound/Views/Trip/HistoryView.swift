@@ -108,12 +108,9 @@ struct HistoryView: View {
 
         isLoading = true
         do {
-            // Create URL with proper query parameters
-            var urlComponents = URLComponents(url: session.url("/api/v1/plans/recent"), resolvingAgainstBaseURL: false)!
-            urlComponents.queryItems = [URLQueryItem(name: "limit", value: "100")]
-
+            // Backend returns all trips ordered by created_at DESC (most recent first)
             let plans: [PlanOut] = try await session.api.get(
-                urlComponents.url!,
+                session.url("/api/v1/trips/"),
                 bearer: bearer
             )
 

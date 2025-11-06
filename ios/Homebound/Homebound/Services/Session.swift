@@ -320,7 +320,7 @@ final class Session: ObservableObject {
 
         do {
             let response: PlanOut = try await api.post(
-                url("/api/v1/plans"),
+                url("/api/v1/trips/"),
                 body: plan,
                 bearer: bearer
             )
@@ -348,7 +348,7 @@ final class Session: ObservableObject {
 
         do {
             let response: PlanOut? = try await api.get(
-                url("/api/v1/plans/active"),
+                url("/api/v1/trips/active"),
                 bearer: bearer
             )
 
@@ -357,6 +357,8 @@ final class Session: ObservableObject {
                 self.isLoadingPlan = false
             }
         } catch {
+            // If active plan endpoint fails, just set to nil
+            // Don't auto-signout - tokens last 30 days and user should stay signed in
             await MainActor.run {
                 self.activePlan = nil
                 self.isLoadingPlan = false
@@ -365,13 +367,13 @@ final class Session: ObservableObject {
     }
 
     func checkIn() async -> Bool {
-        guard let bearer = accessToken, let plan = activePlan else { return false }
+        guard let plan = activePlan else { return false }
 
         do {
-            let _: GenericResponse = try await api.post(
-                url("/api/v1/plans/\(plan.id)/checkin"),
-                body: EmptyBody(),
-                bearer: bearer
+            // Use token-based checkin endpoint (no auth required)
+            let _: GenericResponse = try await api.get(
+                url("/t/\(plan.checkin_token)/checkin"),
+                bearer: nil
             )
 
             await MainActor.run {
@@ -391,7 +393,7 @@ final class Session: ObservableObject {
 
         do {
             let _: GenericResponse = try await api.post(
-                url("/api/v1/plans/\(plan.id)/complete"),
+                url("/api/v1/trips/\(plan.id)/complete"),
                 body: EmptyBody(),
                 bearer: bearer
             )
@@ -413,33 +415,13 @@ final class Session: ObservableObject {
         }
     }
 
+    // NOTE: Backend does not currently have an extend endpoint
+    // This functionality may need to be implemented in the backend first
     func extendPlan(minutes: Int = 30) async -> Bool {
-        guard let bearer = accessToken, let plan = activePlan else { return false }
-
-        struct ExtendRequest: Encodable {
-            let minutes: Int
+        await MainActor.run {
+            self.lastError = "Extend functionality is not yet available"
         }
-
-        do {
-            let _: GenericResponse = try await api.post(
-                url("/api/v1/plans/\(plan.id)/extend"),
-                body: ExtendRequest(minutes: minutes),
-                bearer: bearer
-            )
-
-            // Reload the plan to get updated ETA
-            await loadActivePlan()
-
-            await MainActor.run {
-                self.notice = "Extended by \(minutes) minutes"
-            }
-            return true
-        } catch {
-            await MainActor.run {
-                self.lastError = "Failed to extend plan: \(error.localizedDescription)"
-            }
-            return false
-        }
+        return false
     }
 
     func loadTimeline(planId: Int) async -> [TimelineEvent] {
@@ -447,7 +429,7 @@ final class Session: ObservableObject {
 
         do {
             let response: TimelineResponse = try await api.get(
-                url("/api/v1/plans/\(planId)/timeline"),
+                url("/api/v1/trips/\(planId)/timeline"),
                 bearer: bearer
             )
             return response.events
@@ -552,7 +534,7 @@ final class Session: ObservableObject {
 
         do {
             let _: GenericResponse = try await api.delete(
-                url("/api/v1/auth/account"),
+                url("/api/v1/profile/account"),
                 bearer: bearer
             )
 
@@ -575,7 +557,7 @@ final class Session: ObservableObject {
 
         do {
             let _: GenericResponse = try await api.delete(
-                url("/api/v1/plans/\(planId)"),
+                url("/api/v1/trips/\(planId)"),
                 bearer: bearer
             )
 
@@ -627,7 +609,8 @@ final class Session: ObservableObject {
                 self.saveUserDataToKeychain()
             }
         } catch {
-            // If profile endpoint fails, keep existing cached data
+            // If profile endpoint fails, just keep existing cached data
+            // Don't auto-signout - tokens last 30 days and user should stay signed in
             print("Failed to load user profile: \(error.localizedDescription)")
         }
     }
@@ -638,7 +621,7 @@ final class Session: ObservableObject {
 
         do {
             let contacts: [SavedContact] = try await api.get(
-                url("/api/v1/contacts"),
+                url("/api/v1/contacts/"),
                 bearer: bearer
             )
             return contacts
@@ -675,12 +658,12 @@ final class Session: ObservableObject {
         )
 
         print("DEBUG Session: Request body: \(requestBody)")
-        print("DEBUG Session: URL: \(url("/api/v1/contacts"))")
+        print("DEBUG Session: URL: \(url("/api/v1/contacts/"))")
 
         do {
             print("DEBUG Session: Making API call...")
             let response: SavedContact = try await api.post(
-                url("/api/v1/contacts"),
+                url("/api/v1/contacts/"),
                 body: requestBody,
                 bearer: bearer
             )

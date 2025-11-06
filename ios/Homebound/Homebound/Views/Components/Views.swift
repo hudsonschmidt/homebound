@@ -84,7 +84,7 @@ struct RootView: View {
                                  grace_minutes: 30, location_text: "Trailhead", notes: "Blue trail")
         do {
             let p: PlanOut = try await session.api.post(
-                session.url("/api/v1/plans"),
+                session.url("/api/v1/trips/"),
                 body: payload, bearer: bearer
             )
             plan = p
@@ -96,7 +96,7 @@ struct RootView: View {
 
     func reloadTimeline(planId: Int) async throws {
         let r: TimelineResponse = try await session.api.get(
-            session.url("/api/v1/plans/\(planId)/timeline"),
+            session.url("/api/v1/trips/\(planId)/timeline"),
             bearer: session.accessToken
         )
         await MainActor.run {
@@ -152,7 +152,7 @@ struct PlanDetail: View {
     private func refresh() async {
         do {
             let r: TimelineResponse = try await session.api.get(
-                session.url("/api/v1/plans/\(plan.id)/timeline"),
+                session.url("/api/v1/trips/\(plan.id)/timeline"),
                 bearer: session.accessToken
             )
             timeline = r.events
