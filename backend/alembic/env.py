@@ -10,6 +10,10 @@ config = context.config
 # Load DB URI from environment and override config
 database_url = os.getenv("DATABASE_URL", "sqlite:///./homebound.db")
 
+# Debug: Print original URL (remove credentials for security)
+url_for_display = database_url.split('@')[0].split('://')[0] + '://***@' + database_url.split('@')[1] if '@' in database_url else database_url
+print(f"[Alembic] Original DATABASE_URL scheme: {url_for_display.split('://')[0]}")
+
 # Render uses postgres:// but SQLAlchemy needs postgresql://
 # Also ensure we use psycopg2 (synchronous) not asyncpg for Alembic
 if database_url.startswith("postgres://"):
@@ -17,6 +21,12 @@ if database_url.startswith("postgres://"):
 elif database_url.startswith("postgresql://") and "+psycopg" not in database_url:
     # If it's already postgresql:// but doesn't specify a driver, add psycopg2
     database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+elif "postgresql" in database_url and "+psycopg2" not in database_url and "+asyncpg" not in database_url:
+    # Catch any other postgresql URLs and force psycopg2
+    database_url = database_url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+print(f"[Alembic] Final URL scheme: {database_url.split('://')[0]}")
 
 config.set_main_option("sqlalchemy.url", database_url)
 
