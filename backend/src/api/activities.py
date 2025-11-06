@@ -6,7 +6,7 @@ import json
 from src import database as db
 
 router = APIRouter(
-    prefix="/activities",
+    prefix="/api/v1/activities",
     tags=["activities"]
 )
 

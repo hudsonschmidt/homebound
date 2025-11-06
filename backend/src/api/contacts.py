@@ -7,7 +7,7 @@ from src.api import auth
 import sqlalchemy
 
 router = APIRouter(
-    prefix="/contacts",
+    prefix="/api/v1/contacts",
     tags=["contacts"],
     dependencies=[Depends(auth.get_current_user_id)]
 )

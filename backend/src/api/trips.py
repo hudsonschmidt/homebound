@@ -9,7 +9,7 @@ from src.api import auth
 import sqlalchemy
 
 router = APIRouter(
-    prefix="/trips",
+    prefix="/api/v1/trips",
     tags=["trips"],
     dependencies=[Depends(auth.get_current_user_id)]
 )

@@ -8,7 +8,7 @@ from src.api import auth
 import sqlalchemy
 
 router = APIRouter(
-    prefix="/devices",
+    prefix="/api/v1/devices",
     tags=["devices"],
     dependencies=[Depends(auth.get_current_user_id)]
 )

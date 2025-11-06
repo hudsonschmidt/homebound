@@ -9,7 +9,7 @@ from src import config
 import sqlalchemy
 
 router = APIRouter(
-    prefix="/auth",
+    prefix="/api/v1/auth",
     tags=["auth"]
 )
 
