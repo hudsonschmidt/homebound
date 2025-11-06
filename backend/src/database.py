@@ -4,12 +4,15 @@ from sqlalchemy import create_engine
 settings = config.get_settings()
 connection_url = settings.DATABASE_URL
 
-# Render uses postgres:// but SQLAlchemy needs postgresql://
-# Use psycopg2 (synchronous) driver for production
-if connection_url.startswith("postgres://"):
+# Force psycopg2 (synchronous) driver
+# Replace ANY async driver (asyncpg) with psycopg2
+if "+asyncpg" in connection_url:
+    connection_url = connection_url.replace("+asyncpg", "+psycopg2")
+elif "postgresql+psycopg:" in connection_url:
+    connection_url = connection_url.replace("postgresql+psycopg:", "postgresql+psycopg2:")
+elif connection_url.startswith("postgres://"):
     connection_url = connection_url.replace("postgres://", "postgresql+psycopg2://", 1)
-elif connection_url.startswith("postgresql://") and "+psycopg" not in connection_url:
-    # If it's already postgresql:// but doesn't specify a driver, add psycopg2
+elif connection_url.startswith("postgresql://"):
     connection_url = connection_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 # Use synchronous engine for SQLite/PostgreSQL
