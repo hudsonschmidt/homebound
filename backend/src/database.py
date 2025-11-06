@@ -5,8 +5,12 @@ settings = config.get_settings()
 connection_url = settings.DATABASE_URL
 
 # Render uses postgres:// but SQLAlchemy needs postgresql://
+# Use psycopg2 (synchronous) driver for production
 if connection_url.startswith("postgres://"):
-    connection_url = connection_url.replace("postgres://", "postgresql://", 1)
+    connection_url = connection_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif connection_url.startswith("postgresql://") and "+psycopg" not in connection_url:
+    # If it's already postgresql:// but doesn't specify a driver, add psycopg2
+    connection_url = connection_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 # Use synchronous engine for SQLite/PostgreSQL
 if connection_url.startswith("sqlite"):

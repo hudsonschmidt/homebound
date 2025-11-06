@@ -11,8 +11,12 @@ config = context.config
 database_url = os.getenv("DATABASE_URL", "sqlite:///./homebound.db")
 
 # Render uses postgres:// but SQLAlchemy needs postgresql://
+# Also ensure we use psycopg2 (synchronous) not asyncpg for Alembic
 if database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
+    database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif database_url.startswith("postgresql://") and "+psycopg" not in database_url:
+    # If it's already postgresql:// but doesn't specify a driver, add psycopg2
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 config.set_main_option("sqlalchemy.url", database_url)
 
