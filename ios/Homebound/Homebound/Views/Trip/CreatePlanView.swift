@@ -33,6 +33,11 @@ struct CreatePlanView: View {
     @State private var showError = false
     @State private var errorMessage = ""
 
+    // Contact confirmation dialog
+    @State private var showSaveContactConfirmation = false
+    @State private var contactsToConfirm: [EmergencyContact] = []
+    @State private var contactsToSave: [EmergencyContact] = []
+
     // Activities array for the selector
     let activities = ActivityType.allCases
 
@@ -177,6 +182,29 @@ struct CreatePlanView: View {
             } message: {
                 Text("Setting a zero grace period means your emergency contacts will be notified immediately if you don't check out on time. Are you sure?")
             }
+            .confirmationDialog(
+                "Save Contacts?",
+                isPresented: $showSaveContactConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Save to My Contacts") {
+                    contactsToSave = contactsToConfirm
+                    proceedWithPlanCreation()
+                }
+                Button("Don't Save") {
+                    contactsToSave = []
+                    proceedWithPlanCreation()
+                }
+                Button("Cancel", role: .cancel) {
+                    contactsToConfirm = []
+                }
+            } message: {
+                if contactsToConfirm.count == 1 {
+                    Text("Would you like to save \(contactsToConfirm[0].name) to your saved contacts for future trips?")
+                } else {
+                    Text("Would you like to save these \(contactsToConfirm.count) contacts to your saved contacts for future trips?")
+                }
+            }
         }
     }
 
@@ -212,21 +240,56 @@ struct CreatePlanView: View {
     private func createPlan() {
         guard canProceedFromCurrentStep() else { return }
 
+        // Check if there are any new contacts that need to be saved
+        let newContacts = contacts.filter { $0.savedContactId == nil }
+
+        if !newContacts.isEmpty {
+            // Show confirmation dialog for saving new contacts
+            contactsToConfirm = newContacts
+            showSaveContactConfirmation = true
+            return
+        }
+
+        // If no new contacts or user confirmed, proceed with plan creation
+        proceedWithPlanCreation()
+    }
+
+    private func proceedWithPlanCreation() {
         isCreating = true
 
         Task {
-            // Step 1: Create contacts and get their IDs
+            // Step 1: Handle contacts - use existing IDs or create new ones if user confirmed
             var contactIds: [Int] = []
             for contact in contacts {
-                if let savedContact = await session.addSavedContact(name: contact.name, phone: contact.phone, email: nil) {
-                    contactIds.append(savedContact.id)
-                } else {
-                    await MainActor.run {
-                        isCreating = false
-                        errorMessage = "Failed to create contact: \(contact.name)"
-                        showError = true
+                if let savedId = contact.savedContactId {
+                    // Use existing saved contact ID (no duplication)
+                    contactIds.append(savedId)
+                } else if contactsToSave.contains(where: { $0.id == contact.id }) {
+                    // User confirmed to save this new contact
+                    if let savedContact = await session.addSavedContact(name: contact.name, phone: contact.phone, email: nil) {
+                        contactIds.append(savedContact.id)
+                    } else {
+                        await MainActor.run {
+                            isCreating = false
+                            errorMessage = "Failed to save contact: \(contact.name)"
+                            showError = true
+                        }
+                        return
                     }
-                    return
+                } else {
+                    // New contact that user chose not to save - we still need to handle this
+                    // For now, we'll create it temporarily to get an ID
+                    // TODO: Backend should support ephemeral contacts for trips
+                    if let savedContact = await session.addSavedContact(name: contact.name, phone: contact.phone, email: nil) {
+                        contactIds.append(savedContact.id)
+                    } else {
+                        await MainActor.run {
+                            isCreating = false
+                            errorMessage = "Failed to add contact: \(contact.name)"
+                            showError = true
+                        }
+                        return
+                    }
                 }
             }
 
@@ -1487,6 +1550,13 @@ struct EmergencyContact: Identifiable {
     let id = UUID()
     let name: String
     let phone: String
+    let savedContactId: Int?  // If nil, this is a new contact; if set, it's from saved contacts
+
+    init(name: String, phone: String, savedContactId: Int? = nil) {
+        self.name = name
+        self.phone = phone
+        self.savedContactId = savedContactId
+    }
 }
 
 struct AddContactSheet: View {
@@ -1608,7 +1678,8 @@ struct SavedContactsSelectionSheet: View {
                                 }
                                 return EmergencyContact(
                                     name: saved.name,
-                                    phone: phone
+                                    phone: phone,
+                                    savedContactId: saved.id  // Pass the saved contact ID to prevent duplication
                                 )
                             }
 

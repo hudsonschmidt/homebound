@@ -491,14 +491,45 @@ final class Session: ObservableObject {
         }
     }
 
-    // NOTE: Backend does not currently have an extend endpoint
-    // This functionality may need to be implemented in the backend first
     func extendPlan(minutes: Int = 30) async -> Bool {
-        await MainActor.run {
-            self.lastError = "Extend functionality is not yet available"
+        guard let plan = activePlan else {
+            await MainActor.run {
+                self.lastError = "No active plan to extend"
+            }
+            return false
         }
-        return false
+
+        do {
+            struct ExtendResponse: Decodable {
+                let ok: Bool
+                let message: String
+                let new_eta: String
+            }
+
+            let _: ExtendResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(plan.id)/extend?minutes=\(minutes)"),
+                    body: Empty(),
+                    bearer: bearer
+                )
+            }
+
+            // Reload the active plan to get updated data
+            await loadActivePlan()
+
+            await MainActor.run {
+                self.notice = "Trip extended by \(minutes) minutes"
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to extend plan: \(error.localizedDescription)"
+            }
+            return false
+        }
     }
+
+    struct Empty: Encodable {}
 
     func loadTimeline(planId: Int) async -> [TimelineEvent] {
         do {

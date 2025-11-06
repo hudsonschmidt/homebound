@@ -117,6 +117,10 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
         checkin_token = secrets.token_urlsafe(32)
         checkout_token = secrets.token_urlsafe(32)
 
+        # Determine initial status based on start time
+        current_time = datetime.now(timezone.utc)
+        initial_status = 'planned' if body.start > current_time else 'active'
+
         # Insert trip
         result = connection.execute(
             sqlalchemy.text(
@@ -128,7 +132,7 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
                     checkin_token, checkout_token
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
-                    :location_text, :gen_lat, :gen_lon, :notes, 'active',
+                    :location_text, :gen_lat, :gen_lon, :notes, :status,
                     :contact1, :contact2, :contact3, :created_at,
                     :checkin_token, :checkout_token
                 )
@@ -146,6 +150,7 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
                 "gen_lat": body.gen_lat if body.gen_lat is not None else 0.0,  # Default to 0.0
                 "gen_lon": body.gen_lon if body.gen_lon is not None else 0.0,  # Default to 0.0
                 "notes": body.notes,
+                "status": initial_status,
                 "contact1": body.contact1,
                 "contact2": body.contact2,
                 "contact3": body.contact3,
@@ -381,6 +386,69 @@ def complete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)
         )
 
         return {"ok": True, "message": "Trip completed successfully"}
+
+
+@router.post("/{trip_id}/extend")
+def extend_trip(trip_id: int, minutes: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Extend the ETA of an active trip by the specified number of minutes"""
+    with db.engine.begin() as connection:
+        # Verify trip ownership and status
+        trip = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, status, eta
+                FROM trips
+                WHERE id = :trip_id AND user_id = :user_id
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if not trip:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trip not found"
+            )
+
+        if trip.status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Can only extend active trips"
+            )
+
+        # Parse current ETA and add minutes
+        from datetime import timedelta
+        current_eta = datetime.fromisoformat(trip.eta)
+        new_eta = current_eta + timedelta(minutes=minutes)
+
+        # Update trip ETA
+        connection.execute(
+            sqlalchemy.text(
+                """
+                UPDATE trips
+                SET eta = :new_eta
+                WHERE id = :trip_id
+                """
+            ),
+            {"trip_id": trip_id, "new_eta": new_eta.isoformat()}
+        )
+
+        # Log timeline event
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO events (trip_id, kind, at, meta)
+                VALUES (:trip_id, 'extended', :at, :meta)
+                """
+            ),
+            {
+                "trip_id": trip_id,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "meta": f"Extended by {minutes} minutes"
+            }
+        )
+
+        return {"ok": True, "message": f"Trip extended by {minutes} minutes", "new_eta": new_eta.isoformat()}
 
 
 @router.delete("/{trip_id}")
