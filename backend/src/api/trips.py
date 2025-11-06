@@ -119,7 +119,9 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
 
         # Determine initial status based on start time
         current_time = datetime.now(timezone.utc)
-        initial_status = 'planned' if body.start > current_time else 'active'
+        # Ensure start time is timezone-aware for comparison
+        start_time = body.start if body.start.tzinfo else body.start.replace(tzinfo=timezone.utc)
+        initial_status = 'planned' if start_time > current_time else 'active'
 
         # Insert trip
         result = connection.execute(

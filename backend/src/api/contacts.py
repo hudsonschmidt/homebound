@@ -193,6 +193,26 @@ def delete_contact(contact_id: int, user_id: int = Depends(auth.get_current_user
                 detail="Contact not found"
             )
 
+        # Check if contact is being used by any active or planned trips
+        trips_using_contact = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, title
+                FROM trips
+                WHERE (contact1 = :contact_id OR contact2 = :contact_id OR contact3 = :contact_id)
+                AND status IN ('planned', 'active')
+                LIMIT 1
+                """
+            ),
+            {"contact_id": contact_id}
+        ).fetchone()
+
+        if trips_using_contact:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot delete contact. It is currently being used by trip: {trips_using_contact.title}"
+            )
+
         # Delete contact
         connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE id = :contact_id"),
