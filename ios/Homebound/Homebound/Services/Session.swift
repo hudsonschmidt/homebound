@@ -598,7 +598,8 @@ final class Session: ObservableObject {
         struct UserProfileResponse: Decodable {
             let id: Int?
             let email: String?
-            let name: String?
+            let first_name: String?
+            let last_name: String?
             let age: Int?
             let profile_completed: Bool?
         }
@@ -610,8 +611,9 @@ final class Session: ObservableObject {
             )
 
             await MainActor.run {
-                if let name = response.name {
-                    self.userName = name
+                // Combine first and last name
+                if let first = response.first_name, let last = response.last_name {
+                    self.userName = "\(first) \(last)"
                 }
                 if let age = response.age {
                     self.userAge = age
@@ -619,7 +621,7 @@ final class Session: ObservableObject {
                 if let email = response.email {
                     self.userEmail = email
                 }
-                self.profileCompleted = response.profile_completed ?? (response.name != nil)
+                self.profileCompleted = response.profile_completed ?? false
 
                 // Save to keychain
                 self.saveUserDataToKeychain()

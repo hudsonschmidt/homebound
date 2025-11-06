@@ -50,6 +50,7 @@ def test_get_profile():
     assert profile.first_name == "Profile"
     assert profile.last_name == "Test"
     assert profile.age == 30
+    assert profile.profile_completed is True  # All fields filled
 
     # Clean up
     with db.engine.begin() as connection:

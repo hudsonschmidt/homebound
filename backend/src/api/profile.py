@@ -25,6 +25,7 @@ class ProfileResponse(BaseModel):
     first_name: str
     last_name: str
     age: int
+    profile_completed: bool
 
 
 class ProfileUpdateResponse(BaseModel):
@@ -53,12 +54,21 @@ def get_profile(user_id: int = Depends(auth.get_current_user_id)):
                 detail="User not found"
             )
 
+        # Check if profile is complete
+        profile_completed = bool(
+            user.first_name and
+            user.last_name and
+            user.age and
+            user.age > 0
+        )
+
         return ProfileResponse(
             id=user.id,
             email=user.email,
             first_name=user.first_name,
             last_name=user.last_name,
-            age=user.age
+            age=user.age,
+            profile_completed=profile_completed
         )
 
 
