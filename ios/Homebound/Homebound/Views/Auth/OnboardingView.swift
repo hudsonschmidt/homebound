@@ -2,7 +2,8 @@ import SwiftUI
 
 struct OnboardingView: View {
     @EnvironmentObject var session: Session
-    @State private var name = ""
+    @State private var firstName = ""
+    @State private var lastName = ""
     @State private var age = ""
     @State private var isLoading = false
     @State private var showError = false
@@ -11,7 +12,8 @@ struct OnboardingView: View {
     @State private var animationAmount = 1.0
 
     enum Field {
-        case name
+        case firstName
+        case lastName
         case age
     }
 
@@ -61,15 +63,30 @@ struct OnboardingView: View {
 
                     // Glass card for form
                     VStack(spacing: 25) {
-                        // Name field
+                        // First name field
                         VStack(alignment: .leading, spacing: 10) {
-                            Label("What's your name?", systemImage: "person.fill")
+                            Label("What's your first name?", systemImage: "person.fill")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.9))
 
-                            TextField("Enter your name", text: $name)
+                            TextField("Enter your first name", text: $firstName)
                                 .textFieldStyle(GlassTextFieldStyle())
-                                .focused($focusedField, equals: .name)
+                                .focused($focusedField, equals: .firstName)
+                                .submitLabel(.next)
+                                .onSubmit {
+                                    focusedField = .lastName
+                                }
+                        }
+
+                        // Last name field
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("What's your last name?", systemImage: "person.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+
+                            TextField("Enter your last name", text: $lastName)
+                                .textFieldStyle(GlassTextFieldStyle())
+                                .focused($focusedField, equals: .lastName)
                                 .submitLabel(.next)
                                 .onSubmit {
                                     focusedField = .age
@@ -180,9 +197,9 @@ struct OnboardingView: View {
         }
         .onAppear {
             animationAmount = 1.1
-            // Auto-focus name field after a brief delay
+            // Auto-focus first name field after a brief delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                focusedField = .name
+                focusedField = .firstName
             }
         }
         .alert("Oops!", isPresented: $showError) {
@@ -193,7 +210,8 @@ struct OnboardingView: View {
     }
 
     private var isButtonDisabled: Bool {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
         age.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
         Int(age) == nil
     }
@@ -201,7 +219,8 @@ struct OnboardingView: View {
     private func saveProfile() {
         guard !isButtonDisabled else { return }
 
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let ageInt = Int(age) else {
             errorMessage = "Please enter a valid age"
             showError = true
@@ -219,7 +238,7 @@ struct OnboardingView: View {
         Task {
             do {
                 // Update profile via Session
-                let success = await session.updateProfile(name: trimmedName, age: ageInt)
+                let success = await session.updateProfile(firstName: trimmedFirstName, lastName: trimmedLastName, age: ageInt)
 
                 await MainActor.run {
                     isLoading = false

@@ -212,8 +212,13 @@ struct ProfileView: View {
             return
         }
 
+        // Split name into first and last
+        let components = editName.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let firstName = components.first.map(String.init) ?? editName
+        let lastName = components.count > 1 ? String(components[1]) : ""
+
         isSaving = true
-        let success = await session.updateProfile(name: editName, age: nil, phone: nil)
+        let success = await session.updateProfile(firstName: firstName, lastName: lastName, age: nil, phone: nil)
         isSaving = false
 
         if success {
@@ -232,7 +237,7 @@ struct ProfileView: View {
         }
 
         isSaving = true
-        let success = await session.updateProfile(name: nil, age: age, phone: nil)
+        let success = await session.updateProfile(firstName: nil, lastName: nil, age: age, phone: nil)
         isSaving = false
 
         if success {
@@ -251,7 +256,7 @@ struct ProfileView: View {
         }
 
         isSaving = true
-        let success = await session.updateProfile(name: nil, age: nil, phone: editPhone)
+        let success = await session.updateProfile(firstName: nil, lastName: nil, age: nil, phone: editPhone)
         isSaving = false
 
         if success {

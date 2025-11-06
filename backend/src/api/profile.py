@@ -27,6 +27,11 @@ class ProfileResponse(BaseModel):
     age: int
 
 
+class ProfileUpdateResponse(BaseModel):
+    ok: bool
+    user: dict
+
+
 @router.get("", response_model=ProfileResponse)
 def get_profile(user_id: int = Depends(auth.get_current_user_id)):
     """Get current user's profile"""
@@ -57,7 +62,7 @@ def get_profile(user_id: int = Depends(auth.get_current_user_id)):
         )
 
 
-@router.put("", response_model=ProfileResponse)
+@router.put("", response_model=ProfileUpdateResponse)
 def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_user_id)):
     """Update current user's profile"""
     with db.engine.begin() as connection:
@@ -95,13 +100,52 @@ def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_
             {"user_id": user_id}
         ).fetchone()
 
-        return ProfileResponse(
-            id=user.id,
-            email=user.email,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            age=user.age
+        # Check if profile is complete (non-empty strings and valid age)
+        profile_completed = bool(
+            user.first_name and
+            user.last_name and
+            user.age and
+            user.age > 0
         )
+
+        return ProfileUpdateResponse(
+            ok=True,
+            user={
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "age": user.age,
+                "profile_completed": profile_completed
+            }
+        )
+
+
+@router.patch("")
+def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_user_id)):
+    """Partially update current user's profile"""
+    with db.engine.begin() as connection:
+        # Build dynamic update query
+        updates = []
+        params = {"user_id": user_id}
+
+        if body.first_name is not None:
+            updates.append("first_name = :first_name")
+            params["first_name"] = body.first_name
+
+        if body.last_name is not None:
+            updates.append("last_name = :last_name")
+            params["last_name"] = body.last_name
+
+        if body.age is not None:
+            updates.append("age = :age")
+            params["age"] = body.age
+
+        if updates:
+            connection.execute(
+                sqlalchemy.text(f"UPDATE users SET {', '.join(updates)} WHERE id = :user_id"),
+                params
+            )
+
+        return {"ok": True, "message": "Profile updated successfully"}
 
 
 @router.delete("/account")

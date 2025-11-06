@@ -460,11 +460,12 @@ final class Session: ObservableObject {
     }
 
     // MARK: - Profile Management
-    func updateProfile(name: String, age: Int) async -> Bool {
+    func updateProfile(firstName: String, lastName: String, age: Int) async -> Bool {
         guard let bearer = accessToken else { return false }
 
         struct ProfileUpdateRequest: Encodable {
-            let name: String
+            let first_name: String
+            let last_name: String
             let age: Int
         }
 
@@ -473,7 +474,8 @@ final class Session: ObservableObject {
             let user: UserInfo?
 
             struct UserInfo: Decodable {
-                let name: String?
+                let first_name: String?
+                let last_name: String?
                 let age: Int?
                 let profile_completed: Bool?
             }
@@ -481,14 +483,16 @@ final class Session: ObservableObject {
 
         do {
             let response: ProfileUpdateResponse = try await api.put(
-                url("/api/v1/auth/profile"),
-                body: ProfileUpdateRequest(name: name, age: age),
+                url("/api/v1/profile"),
+                body: ProfileUpdateRequest(first_name: firstName, last_name: lastName, age: age),
                 bearer: bearer
             )
 
             if response.ok, let user = response.user {
                 await MainActor.run {
-                    self.userName = user.name
+                    if let first = user.first_name, let last = user.last_name {
+                        self.userName = "\(first) \(last)"
+                    }
                     self.userAge = user.age
                     self.profileCompleted = user.profile_completed ?? true
                 }
@@ -504,25 +508,26 @@ final class Session: ObservableObject {
     }
 
     // MARK: - Update Profile
-    func updateProfile(name: String? = nil, age: Int? = nil, phone: String? = nil) async -> Bool {
+    func updateProfile(firstName: String? = nil, lastName: String? = nil, age: Int? = nil, phone: String? = nil) async -> Bool {
         guard let bearer = accessToken else { return false }
 
         struct UpdateProfileRequest: Encodable {
-            let name: String?
+            let first_name: String?
+            let last_name: String?
             let age: Int?
             let phone: String?
         }
 
         do {
             let _: GenericResponse = try await api.patch(
-                url("/api/v1/auth/profile"),
-                body: UpdateProfileRequest(name: name, age: age, phone: phone),
+                url("/api/v1/profile"),
+                body: UpdateProfileRequest(first_name: firstName, last_name: lastName, age: age, phone: phone),
                 bearer: bearer
             )
 
             await MainActor.run {
-                if let name = name {
-                    self.userName = name
+                if let first = firstName, let last = lastName {
+                    self.userName = "\(first) \(last)"
                 }
                 if let age = age {
                     self.userAge = age
@@ -600,7 +605,7 @@ final class Session: ObservableObject {
 
         do {
             let response: UserProfileResponse = try await api.get(
-                url("/api/v1/auth/profile"),
+                url("/api/v1/profile"),
                 bearer: bearer
             )
 

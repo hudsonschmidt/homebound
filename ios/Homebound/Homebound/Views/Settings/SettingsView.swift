@@ -545,9 +545,11 @@ struct AccountView: View {
 
     private func updateProfile() {
         Task {
-            let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
             _ = await session.updateProfile(
-                name: fullName.isEmpty ? nil : fullName,
+                firstName: trimmedFirstName.isEmpty ? nil : trimmedFirstName,
+                lastName: trimmedLastName.isEmpty ? nil : trimmedLastName,
                 age: age > 0 ? age : nil,
                 phone: phone.isEmpty ? nil : phone
             )
