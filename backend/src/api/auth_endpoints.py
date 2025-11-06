@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import secrets
-import jwt
+from jose import jwt
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from src import database as db

@@ -1,4 +1,4 @@
-import jwt
+from jose import jwt
 from fastapi import Request, HTTPException, status
 from src import config
 

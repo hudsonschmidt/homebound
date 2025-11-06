@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import pytest
-import jwt
+from jose import jwt
 from src import database as db
 from src import config
 import sqlalchemy

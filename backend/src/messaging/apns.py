@@ -4,7 +4,7 @@ import time
 from typing import Any, Dict, Optional
 
 import httpx
-import jwt
+from jose import jwt
 
 from ..config import settings
 
