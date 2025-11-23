@@ -21,6 +21,13 @@ struct MainTabView: View {
                     Label("History", systemImage: "clock.fill")
                 }
                 .tag(1)
+
+            // Map Tab
+            TripMapView()
+                .tabItem {
+                    Label("Map", systemImage: "map.fill")
+                }
+                .tag(2)
         }
         .accentColor(Color(hex: "#6C63FF") ?? .purple)
     }
@@ -933,29 +940,12 @@ struct HistoryRowView: View {
 // MARK: - Trip Stats View
 struct TripStatsView: View {
     let plans: [PlanOut]
+    @State private var preferences = StatsPreferences.load()
+    @State private var showingEditStats = false
+    @State private var animatedValues: [StatType: Double] = [:]
 
-    var totalTrips: Int {
-        plans.count
-    }
-
-    var completedTrips: Int {
-        plans.filter { $0.status == "completed" }.count
-    }
-
-    var totalAdventureTime: String {
-        let totalSeconds = plans.reduce(0.0) { total, plan in
-            total + plan.eta_at.timeIntervalSince(plan.start_at)
-        }
-        let hours = Int(totalSeconds) / 3600
-        let days = hours / 24
-
-        if days > 0 {
-            return "\(days)d \(hours % 24)h"
-        } else if hours > 0 {
-            return "\(hours)h"
-        } else {
-            return "\(Int(totalSeconds) / 60)m"
-        }
+    var calculator: TripStatsCalculator {
+        TripStatsCalculator(trips: plans)
     }
 
     var favoriteActivity: (icon: String, name: String, count: Int)? {
@@ -967,17 +957,25 @@ struct TripStatsView: View {
             return nil
         }
 
-        let activity = ActivityType(rawValue: mostCommon.key) ?? .other
+        // Try exact match first
+        var activity: ActivityType = .other
+        if let matched = ActivityType(rawValue: mostCommon.key.lowercased()) {
+            activity = matched
+        } else {
+            let normalized = mostCommon.key.lowercased().replacingOccurrences(of: " ", with: "_")
+            activity = ActivityType(rawValue: normalized) ?? .other
+        }
+
         return (activity.icon, activity.displayName, mostCommon.value)
     }
 
-    var completionRate: Int {
-        guard totalTrips > 0 else { return 0 }
-        return Int((Double(completedTrips) / Double(totalTrips)) * 100)
+    var useScrolling: Bool {
+        preferences.selectedStats.count > 4
     }
 
     var body: some View {
         VStack(spacing: 12) {
+            // Header with Edit button
             HStack {
                 Text("Your Adventure Stats")
                     .font(.headline)
@@ -989,41 +987,39 @@ struct TripStatsView: View {
                         )
                     )
                 Spacer()
+                Button(action: { showingEditStats = true }) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.title3)
+                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                }
             }
 
-            // Stats Grid
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                // Total Trips
-                StatCardImproved(
-                    value: "\(totalTrips)",
-                    label: "Total Trips",
-                    icon: "map.fill",
-                    color: Color(hex: "#6C63FF") ?? .purple
-                )
-
-                // Completed Trips
-                StatCardImproved(
-                    value: "\(completedTrips)",
-                    label: "Completed",
-                    icon: "checkmark.circle.fill",
-                    color: .green
-                )
-
-                // Total Adventure Time
-                StatCardImproved(
-                    value: totalAdventureTime,
-                    label: "Adventure Time",
-                    icon: "clock.fill",
-                    color: .orange
-                )
-
-                // Completion Rate
-                StatCardImproved(
-                    value: "\(completionRate)%",
-                    label: "Success Rate",
-                    icon: "chart.line.uptrend.xyaxis",
-                    color: Color(hex: "#4ECDC4") ?? .teal
-                )
+            // Stats Grid or Scrolling
+            if useScrolling {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(Array(preferences.selectedStats.enumerated()), id: \.element) { index, statType in
+                            AnimatedStatCard(
+                                statType: statType,
+                                value: calculator.value(for: statType),
+                                badge: calculator.achievementBadge(for: statType),
+                                delay: Double(index) * 0.1
+                            )
+                            .frame(width: 140)
+                        }
+                    }
+                }
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    ForEach(Array(preferences.selectedStats.enumerated()), id: \.element) { index, statType in
+                        AnimatedStatCard(
+                            statType: statType,
+                            value: calculator.value(for: statType),
+                            badge: calculator.achievementBadge(for: statType),
+                            delay: Double(index) * 0.1
+                        )
+                    }
+                }
             }
 
             // Favorite Activity (if available)
@@ -1060,38 +1056,182 @@ struct TripStatsView: View {
                 .padding()
                 .background(Color(.tertiarySystemBackground))
                 .cornerRadius(12)
+                .transition(.scale.combined(with: .opacity))
             }
+        }
+        .sheet(isPresented: $showingEditStats) {
+            EditStatsView(preferences: $preferences)
         }
     }
 }
 
-// MARK: - Improved Stat Card
-struct StatCardImproved: View {
+// MARK: - Animated Stat Card
+struct AnimatedStatCard: View {
+    let statType: StatType
     let value: String
-    let label: String
-    let icon: String
-    let color: Color
+    let badge: String?
+    let delay: Double
+
+    @State private var appeared = false
+    @State private var scale: CGFloat = 0.8
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(color)
+            ZStack {
+                // Icon
+                Image(systemName: statType.icon)
+                    .font(.title2)
+                    .foregroundStyle(statType.color)
+
+                // Achievement badge
+                if let badge = badge {
+                    Text(badge)
+                        .font(.caption)
+                        .offset(x: 20, y: -20)
+                        .scaleEffect(appeared ? 1.2 : 0)
+                        .animation(.spring(response: 0.5, dampingFraction: 0.6).delay(delay + 0.3), value: appeared)
+                }
+            }
 
             Text(value)
                 .font(.title2)
                 .fontWeight(.bold)
                 .foregroundStyle(.primary)
+                .opacity(appeared ? 1 : 0)
 
-            Text(label)
+            Text(statType.displayName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
-        .background(Color(.secondarySystemBackground))
+        .background(
+            LinearGradient(
+                colors: [
+                    statType.color.opacity(0.1),
+                    statType.color.opacity(0.05)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
         .cornerRadius(12)
+        .scaleEffect(scale)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(delay)) {
+                appeared = true
+                scale = 1.0
+            }
+        }
+    }
+}
+
+// MARK: - Edit Stats View
+struct EditStatsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var preferences: StatsPreferences
+    @State private var selectedStats: [StatType]
+
+    init(preferences: Binding<StatsPreferences>) {
+        self._preferences = preferences
+        self._selectedStats = State(initialValue: preferences.wrappedValue.selectedStats)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Select up to 8 stats to display on your Adventure Stats dashboard")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Customize Your Stats")
+                }
+
+                Section {
+                    ForEach(StatType.allCases, id: \.self) { statType in
+                        HStack {
+                            Image(systemName: statType.icon)
+                                .foregroundStyle(statType.color)
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(statType.displayName)
+                                    .font(.subheadline)
+
+                                Text(getStatDescription(statType))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            if selectedStats.contains(statType) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(statType.color)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            toggleStat(statType)
+                        }
+                    }
+                } header: {
+                    Text("Available Stats (\(selectedStats.count)/8)")
+                }
+
+                Section {
+                    Button("Reset to Default") {
+                        selectedStats = StatsPreferences.defaultStats
+                    }
+                    .foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Edit Stats")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        savePreferences()
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(selectedStats.isEmpty)
+                }
+            }
+        }
+    }
+
+    func toggleStat(_ statType: StatType) {
+        if selectedStats.contains(statType) {
+            selectedStats.removeAll { $0 == statType }
+        } else if selectedStats.count < 8 {
+            selectedStats.append(statType)
+        }
+    }
+
+    func savePreferences() {
+        preferences.selectedStats = selectedStats
+        preferences.save()
+    }
+
+    func getStatDescription(_ statType: StatType) -> String {
+        switch statType {
+        case .totalTrips: return "Total number of adventures"
+        case .adventureTime: return "Total time on all trips"
+        case .longestAdventure: return "Your longest single trip"
+        case .activitiesTried: return "Different activity types"
+        case .thisMonth: return "Trips this month"
+        case .uniqueLocations: return "Different places visited"
+        case .mostAdventurousMonth: return "Month with most trips"
+        case .averageTripDuration: return "Average trip length"
+        }
     }
 }
 
