@@ -496,24 +496,17 @@ struct UpcomingTripsSection: View {
     }
 
     func loadUpcomingPlans() async {
-        // Load plans that have status "upcoming" (not started yet)
-        do {
-            let allPlans: [PlanOut] = try await session.api.get(
-                session.url("/api/v1/trips/"),
-                bearer: session.accessToken
-            )
+        // Load plans with caching support (uses LocalStorage for offline access)
+        let allPlans = await session.loadAllTrips()
 
-            await MainActor.run {
-                upcomingPlans = allPlans
-                    .filter { $0.status == "upcoming" }
-                    .sorted { $0.start_at < $1.start_at }
-                    .prefix(3) // Show max 3 upcoming trips
-                    .map { $0 }
+        await MainActor.run {
+            upcomingPlans = allPlans
+                .filter { $0.status == "planned" }
+                .sorted { $0.start_at < $1.start_at }
+                .prefix(3) // Show max 3 upcoming trips
+                .map { $0 }
 
-                updateCountdowns()
-            }
-        } catch {
-            print("Failed to load upcoming plans: \(error)")
+            updateCountdowns()
         }
     }
 

@@ -5,6 +5,6 @@
       location = "self:">
    </FileRef>
    <FileRef
-      location = "group:Homebound.entitlements">
+      location = "group:Package.swift">
    </FileRef>
 </Workspace>

@@ -8,7 +8,8 @@ from alembic import context
 config = context.config
 
 # Load DB URI from environment and override config
-database_url = os.getenv("DATABASE_URL", "sqlite:///./homebound.db")
+# Check DATABASE_URL first (Render sets this), then POSTGRES_URI, then default to local Docker
+database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI", "postgresql://myuser:mypassword@localhost:5432/mydatabase")
 
 # Debug: Print original URL (remove credentials for security)
 url_for_display = database_url.split('@')[0].split('://')[0] + '://***@' + database_url.split('@')[1] if '@' in database_url else database_url

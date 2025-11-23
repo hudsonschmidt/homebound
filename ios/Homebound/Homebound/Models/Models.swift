@@ -128,6 +128,51 @@ struct PlanOut: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(checkin_token, forKey: .checkin_token)
         try container.encodeIfPresent(checkout_token, forKey: .checkout_token)
     }
+
+    /// Memberwise initializer for local storage
+    init(
+        id: Int,
+        user_id: Int,
+        title: String,
+        activity: String,
+        start_at: Date,
+        eta_at: Date,
+        grace_minutes: Int,
+        location_text: String?,
+        location_lat: Double?,
+        location_lng: Double?,
+        notes: String?,
+        status: String,
+        completed_at: String?,
+        last_checkin: String?,
+        created_at: String,
+        contact1: Int?,
+        contact2: Int?,
+        contact3: Int?,
+        checkin_token: String?,
+        checkout_token: String?
+    ) {
+        self.id = id
+        self.user_id = user_id
+        self.title = title
+        self.activity = activity
+        self.start_at = start_at
+        self.eta_at = eta_at
+        self.grace_minutes = grace_minutes
+        self.location_text = location_text
+        self.location_lat = location_lat
+        self.location_lng = location_lng
+        self.notes = notes
+        self.status = status
+        self.completed_at = completed_at
+        self.last_checkin = last_checkin
+        self.created_at = created_at
+        self.contact1 = contact1
+        self.contact2 = contact2
+        self.contact3 = contact3
+        self.checkin_token = checkin_token
+        self.checkout_token = checkout_token
+    }
 }
 
 struct TimelineResponse: Codable {

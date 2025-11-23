@@ -1,9 +1,10 @@
-from fastapi import APIRouter, status, HTTPException
+from fastapi import APIRouter, status, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import sqlalchemy
 import json
 from src import database as db
+from src.api import auth
 
 router = APIRouter(
     prefix="/api/v1/activities",
@@ -60,9 +61,9 @@ def get_activity(name: str):
 
 
 @router.post("/new", status_code=status.HTTP_200_OK)
-def new_activity(activity: Activity):
+def new_activity(activity: Activity, user_id: int = Depends(auth.get_current_user_id)):
     """
-    Adds new activity type to the database
+    Adds new activity type to the database (requires authentication)
     """
     with db.engine.begin() as connection:
         connection.execute(
@@ -83,9 +84,9 @@ def new_activity(activity: Activity):
 
 
 @router.delete("/{name}", status_code=status.HTTP_200_OK)
-def delete_activity(name: str):
+def delete_activity(name: str, user_id: int = Depends(auth.get_current_user_id)):
     """
-    Deletes activity from the database
+    Deletes activity from the database (requires authentication)
     """
     with db.engine.begin() as connection:
         result = connection.execute(

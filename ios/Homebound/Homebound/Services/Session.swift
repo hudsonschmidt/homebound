@@ -63,8 +63,18 @@ final class Session: ObservableObject {
 
     // MARK: API & Base URL
 
-    static let baseURL = URL(string: "https://homebound.onrender.com")!
-    var baseURL: URL { Self.baseURL }
+    static let productionURL = URL(string: "https://homebound.onrender.com")!
+    static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
+
+    @Published var useLocalServer: Bool = UserDefaults.standard.bool(forKey: "useLocalServer") {
+        didSet {
+            UserDefaults.standard.set(useLocalServer, forKey: "useLocalServer")
+        }
+    }
+
+    var baseURL: URL {
+        useLocalServer ? Self.localURL : Self.productionURL
+    }
 
     /// Use your real API client from `API.swift`
     let api = API()
@@ -162,7 +172,7 @@ final class Session: ObservableObject {
 
     func url(_ path: String) -> URL {
         if let u = URL(string: path), u.scheme != nil { return u }
-        return Self.baseURL.appending(path: path)
+        return baseURL.appending(path: path)
     }
 
     // MARK: Auth flows
@@ -170,14 +180,31 @@ final class Session: ObservableObject {
     func handleAPNsToken(_ token: String) {
         self.apnsToken = token
 
-        // Optional: register device token with your backend once signed-in.
+        // Register device token with backend once signed-in.
         guard let bearer = self.accessToken else { return }
-        struct RegisterReq: Encodable { let apns_token: String }
+        struct DeviceRegister: Encodable {
+            let platform: String
+            let token: String
+            let bundle_id: String
+            let env: String
+        }
         Task {
             do {
+                let bundleId = Bundle.main.bundleIdentifier ?? "com.homeboundapp.Homebound"
+                #if DEBUG
+                let environment = "development"
+                #else
+                let environment = "production"
+                #endif
+
                 try await api.post(
-                    url("/api/v1/devices/apns"),
-                    body: RegisterReq(apns_token: token),
+                    url("/api/v1/devices/"),
+                    body: DeviceRegister(
+                        platform: "ios",
+                        token: token,
+                        bundle_id: bundleId,
+                        env: environment
+                    ),
                     bearer: bearer
                 )
             } catch {
@@ -399,9 +426,12 @@ final class Session: ObservableObject {
                 )
             }
 
-            // After creating a plan, immediately set it as active
+            // Only set as active plan if the status is actually 'active'
+            // Planned trips should not appear as active
             await MainActor.run {
-                self.activePlan = response
+                if response.status == "active" {
+                    self.activePlan = response
+                }
             }
 
             return response
@@ -429,24 +459,106 @@ final class Session: ObservableObject {
             await MainActor.run {
                 self.activePlan = response
                 self.isLoadingPlan = false
+
+                // Cache the active plan for offline access
+                if let plan = response {
+                    LocalStorage.shared.cacheTrip(plan)
+                }
             }
         } catch {
-            // If active plan endpoint fails, just set to nil
+            // If active plan endpoint fails, try to load from cache
             // Don't auto-signout - tokens last 30 days and user should stay signed in
             await MainActor.run {
-                self.activePlan = nil
+                // Try to load active plan from cache
+                let cachedTrips = LocalStorage.shared.getCachedTrips()
+                self.activePlan = cachedTrips.first { $0.status == "active" }
                 self.isLoadingPlan = false
+
+                if self.activePlan != nil {
+                    self.notice = "Loaded from cache (offline mode)"
+                }
+            }
+        }
+    }
+
+    /// Load all trips with caching for offline access
+    func loadAllTrips() async -> [PlanOut] {
+        do {
+            let trips: [PlanOut] = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/trips/"),
+                    bearer: bearer
+                )
+            }
+
+            // Cache trips for offline access (keeps last 5)
+            LocalStorage.shared.cacheTrips(trips)
+
+            // Sync any pending offline actions
+            await syncPendingActions()
+
+            return trips
+        } catch {
+            // Return cached trips when offline
+            let cachedTrips = LocalStorage.shared.getCachedTrips()
+            if !cachedTrips.isEmpty {
+                await MainActor.run {
+                    self.notice = "Showing cached trips (offline mode)"
+                }
+            }
+            return cachedTrips
+        }
+    }
+
+    /// Sync pending offline actions to server
+    private func syncPendingActions() async {
+        let pendingActions = LocalStorage.shared.getPendingActions()
+
+        for action in pendingActions {
+            do {
+                switch action.type {
+                case "extend":
+                    if let tripId = action.tripId,
+                       let minutes = action.payload["minutes"] as? Int {
+                        let _: GenericResponse = try await withAuth { bearer in
+                            try await self.api.post(
+                                self.url("/api/v1/trips/\(tripId)/extend?minutes=\(minutes)"),
+                                body: Empty(),
+                                bearer: bearer
+                            )
+                        }
+                    }
+                case "complete":
+                    if let tripId = action.tripId {
+                        let _: GenericResponse = try await withAuth { bearer in
+                            try await self.api.post(
+                                self.url("/api/v1/trips/\(tripId)/complete"),
+                                body: EmptyBody(),
+                                bearer: bearer
+                            )
+                        }
+                    }
+                default:
+                    break
+                }
+
+                // Remove successfully synced action
+                LocalStorage.shared.removePendingAction(id: action.id)
+            } catch {
+                // Keep action in queue for next sync attempt
+                print("[Session] Failed to sync action \(action.type): \(error)")
             }
         }
     }
 
     func checkIn() async -> Bool {
-        guard let plan = activePlan else { return false }
+        guard let plan = activePlan,
+              let token = plan.checkin_token else { return false }
 
         do {
             // Use token-based checkin endpoint (no auth required)
             let _: GenericResponse = try await api.get(
-                url("/t/\(plan.checkin_token)/checkin"),
+                url("/t/\(token)/checkin"),
                 bearer: nil
             )
 
@@ -800,6 +912,9 @@ final class Session: ObservableObject {
     func signOut() {
         // Clear keychain
         keychain.clearAll()
+
+        // Clear local storage
+        LocalStorage.shared.clearAll()
 
         // Clear session state
         accessToken = nil

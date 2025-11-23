@@ -86,6 +86,28 @@ struct SettingsView: View {
                     }
                 }
 
+                // Developer Section
+                Section("Developer") {
+                    Toggle(isOn: Binding(
+                        get: { session.useLocalServer },
+                        set: { newValue in
+                            session.useLocalServer = newValue
+                        }
+                    )) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Use Local Server")
+                                Text(session.useLocalServer ? "Local Mac" : "Render")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "server.rack")
+                                .foregroundStyle(session.useLocalServer ? .green : .purple)
+                        }
+                    }
+                }
+
                 // Support Section
                 Section("Support") {
                     Link(destination: URL(string: "https://homeboundapp.com/help")!) {

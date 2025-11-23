@@ -439,14 +439,15 @@ def extend_trip(trip_id: int, minutes: int, user_id: int = Depends(auth.get_curr
         connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO events (trip_id, kind, at, meta)
-                VALUES (:trip_id, 'extended', :at, :meta)
+                INSERT INTO events (user_id, trip_id, what, timestamp, extended_by)
+                VALUES (:user_id, :trip_id, 'extended', :timestamp, :extended_by)
                 """
             ),
             {
+                "user_id": user_id,
                 "trip_id": trip_id,
-                "at": datetime.now(timezone.utc).isoformat(),
-                "meta": f"Extended by {minutes} minutes"
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "extended_by": minutes
             }
         )
 

@@ -10,8 +10,9 @@ load_dotenv(dotenv_path=find_dotenv(".env"), override=True)
 
 
 class Settings:
-    # Database - use SQLite for local dev
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./homebound.db")
+    # Database - Docker PostgreSQL for local dev, Supabase for production
+    # Check DATABASE_URL first (Render sets this), then POSTGRES_URI, then default to local Docker
+    POSTGRES_URI: str = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI", "postgresql://myuser:mypassword@localhost:5432/mydatabase")
 
     # JWT settings for authentication
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
