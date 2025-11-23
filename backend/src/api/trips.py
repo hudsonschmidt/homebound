@@ -1,7 +1,7 @@
 """Trip management endpoints"""
 from datetime import datetime, timezone
 import secrets
-from typing import Optional, List
+from typing import Optional, List, Union
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from src import database as db
@@ -13,6 +13,24 @@ router = APIRouter(
     tags=["trips"],
     dependencies=[Depends(auth.get_current_user_id)]
 )
+
+
+def to_iso8601(dt: Union[datetime, str, None]) -> Optional[str]:
+    """Convert datetime to ISO8601 string format, handling both datetime objects and strings"""
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        return dt.isoformat()
+    if isinstance(dt, str):
+        # If already a string, try to parse and re-format to ensure ISO8601
+        try:
+            # Try parsing as datetime string (handles space-separated format)
+            parsed = datetime.fromisoformat(dt.replace(' ', 'T').replace('Z', '+00:00'))
+            return parsed.isoformat()
+        except (ValueError, AttributeError):
+            # If parsing fails, return as-is
+            return dt
+    return str(dt)
 
 
 class TripCreate(BaseModel):
@@ -184,17 +202,17 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
             user_id=trip.user_id,
             title=trip.title,
             activity=trip.activity,
-            start=str(trip.start),
-            eta=str(trip.eta),
+            start=to_iso8601(trip.start),
+            eta=to_iso8601(trip.eta),
             grace_min=trip.grace_min,
             location_text=trip.location_text,
             gen_lat=trip.gen_lat,
             gen_lon=trip.gen_lon,
             notes=trip.notes,
             status=trip.status,
-            completed_at=str(trip.completed_at) if trip.completed_at else None,
-            last_checkin=str(trip.last_checkin) if trip.last_checkin else None,
-            created_at=str(trip.created_at),
+            completed_at=to_iso8601(trip.completed_at),
+            last_checkin=to_iso8601(trip.last_checkin),
+            created_at=to_iso8601(trip.created_at),
             contact1=trip.contact1,
             contact2=trip.contact2,
             contact3=trip.contact3,
@@ -229,17 +247,17 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                 user_id=t.user_id,
                 title=t.title,
                 activity=t.activity,
-                start=str(t.start),
-                eta=str(t.eta),
+                start=to_iso8601(t.start),
+                eta=to_iso8601(t.eta),
                 grace_min=t.grace_min,
                 location_text=t.location_text,
                 gen_lat=t.gen_lat,
                 gen_lon=t.gen_lon,
                 notes=t.notes,
                 status=t.status,
-                completed_at=str(t.completed_at) if t.completed_at else None,
-                last_checkin=str(t.last_checkin) if t.last_checkin else None,
-                created_at=str(t.created_at),
+                completed_at=to_iso8601(t.completed_at),
+                last_checkin=to_iso8601(t.last_checkin),
+                created_at=to_iso8601(t.created_at),
                 contact1=t.contact1,
                 contact2=t.contact2,
                 contact3=t.contact3,
@@ -279,17 +297,17 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             user_id=trip.user_id,
             title=trip.title,
             activity=trip.activity,
-            start=str(trip.start),
-            eta=str(trip.eta),
+            start=to_iso8601(trip.start),
+            eta=to_iso8601(trip.eta),
             grace_min=trip.grace_min,
             location_text=trip.location_text,
             gen_lat=trip.gen_lat,
             gen_lon=trip.gen_lon,
             notes=trip.notes,
             status=trip.status,
-            completed_at=str(trip.completed_at) if trip.completed_at else None,
-            last_checkin=str(trip.last_checkin) if trip.last_checkin else None,
-            created_at=str(trip.created_at),
+            completed_at=to_iso8601(trip.completed_at),
+            last_checkin=to_iso8601(trip.last_checkin),
+            created_at=to_iso8601(trip.created_at),
             contact1=trip.contact1,
             contact2=trip.contact2,
             contact3=trip.contact3,
@@ -328,17 +346,17 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             user_id=trip.user_id,
             title=trip.title,
             activity=trip.activity,
-            start=str(trip.start),
-            eta=str(trip.eta),
+            start=to_iso8601(trip.start),
+            eta=to_iso8601(trip.eta),
             grace_min=trip.grace_min,
             location_text=trip.location_text,
             gen_lat=trip.gen_lat,
             gen_lon=trip.gen_lon,
             notes=trip.notes,
             status=trip.status,
-            completed_at=str(trip.completed_at) if trip.completed_at else None,
-            last_checkin=str(trip.last_checkin) if trip.last_checkin else None,
-            created_at=str(trip.created_at),
+            completed_at=to_iso8601(trip.completed_at),
+            last_checkin=to_iso8601(trip.last_checkin),
+            created_at=to_iso8601(trip.created_at),
             contact1=trip.contact1,
             contact2=trip.contact2,
             contact3=trip.contact3,

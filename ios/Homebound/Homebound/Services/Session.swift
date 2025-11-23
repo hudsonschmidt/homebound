@@ -1,15 +1,12 @@
 import Foundation
 import Combine
 
-/// Routes: adjust these to match your backend if different.
+// MARK: Routes
 private enum Routes {
     static let sendCode  = "/api/v1/auth/request-magic-link"
     static let verify    = "/api/v1/auth/verify"
     static let refresh   = "/api/v1/auth/refresh"
-    // add more here as you build out
 }
-
-// MARK: - DTOs (keep fields optional to be decoding-tolerant)
 
 private struct SendCodeRequest: Encodable {
     let email: String
@@ -76,7 +73,7 @@ final class Session: ObservableObject {
         useLocalServer ? Self.localURL : Self.productionURL
     }
 
-    /// Use your real API client from `API.swift`
+    /// Use real API client from `API.swift`
     let api = API()
     let keychain = KeychainHelper.shared
 
@@ -134,9 +131,18 @@ final class Session: ObservableObject {
     @Published var activePlan: PlanOut? = nil
     @Published var isLoadingPlan: Bool = false
 
+    // Activities
+    @Published var activities: [Activity] = []
+    @Published var isLoadingActivities: Bool = false
+
     init() {
         // Load saved tokens and user data on init
         loadFromKeychain()
+
+        // Load activities on app launch
+        Task {
+            await loadActivities()
+        }
     }
 
     private func loadFromKeychain() {
@@ -907,6 +913,44 @@ final class Session: ObservableObject {
         }
     }
 
+    // MARK: - Activities Management
+    @MainActor
+    func loadActivities() async {
+        do {
+            let response: [Activity] = try await api.get(
+                url("/api/v1/activities"),
+                bearer: nil  // Activities endpoint doesn't require auth
+            )
+
+            await MainActor.run {
+                self.activities = response.sorted { $0.order < $1.order }
+
+                // Cache for offline access
+                LocalStorage.shared.cacheActivities(response)
+            }
+        } catch {
+            // Fall back to cached activities on error
+            let cachedActivities = LocalStorage.shared.getCachedActivities()
+            await MainActor.run {
+                if !cachedActivities.isEmpty {
+                    self.activities = cachedActivities
+                    self.notice = "Showing cached activities (offline mode)"
+                } else {
+                    // Ultimate fallback: use hardcoded ActivityTypes
+                    self.activities = ActivityType.fallbackActivities()
+                    self.notice = "Using offline activities (no connection)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func refreshActivities() async {
+        isLoadingActivities = true
+        await loadActivities()
+        isLoadingActivities = false
+    }
+
     // MARK: - Sign Out
     @MainActor
     func signOut() {
@@ -931,5 +975,6 @@ final class Session: ObservableObject {
         userPhone = nil
         profileCompleted = false
         activePlan = nil
+        activities = []
     }
 }

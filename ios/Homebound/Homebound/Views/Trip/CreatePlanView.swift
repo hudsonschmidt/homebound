@@ -38,8 +38,10 @@ struct CreatePlanView: View {
     @State private var contactsToConfirm: [EmergencyContact] = []
     @State private var contactsToSave: [EmergencyContact] = []
 
-    // Activities array for the selector
-    let activities = ActivityType.allCases
+    // Activities from session (dynamic from database)
+    var activities: [ActivityTypeAdapter] {
+        session.activities.toAdapters()
+    }
 
     var body: some View {
         NavigationStack {
@@ -360,7 +362,7 @@ struct Step1TripDetails: View {
     @Binding var location: String
     @Binding var locationCoordinates: CLLocationCoordinate2D?
     @Binding var showingLocationSearch: Bool
-    let activities: [ActivityType]
+    let activities: [ActivityTypeAdapter]
 
     var body: some View {
         ScrollView {
@@ -396,7 +398,7 @@ struct Step1TripDetails: View {
                         .foregroundStyle(.secondary)
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 12) {
-                        ForEach(activities, id: \.self) { activity in
+                        ForEach(activities, id: \.id) { activity in
                             ActivityTypeButton(
                                 activity: activity,
                                 isSelected: selectedActivity == activity.rawValue,
@@ -469,6 +471,7 @@ struct Step2TimeSettings: View {
     @State private var selectedStartDate = Date()
     @State private var selectedEndDate = Date()
     @State private var showingTimeSelection = false
+    @State private var isStartingNow = true // New: toggle for starting now vs later
     @State private var departureHour = 9
     @State private var departureMinute = 0
     @State private var departureAMPM = 0 // 0 = AM, 1 = PM
@@ -498,6 +501,13 @@ struct Step2TimeSettings: View {
         } else {
             return "\(days + 1) day trip"
         }
+    }
+
+    var isSelectedDateToday: Bool {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let selectedDay = calendar.startOfDay(for: selectedStartDate)
+        return today == selectedDay
     }
 
     var body: some View {
@@ -636,53 +646,104 @@ struct Step2TimeSettings: View {
 
                         // Departure Time
                         VStack(alignment: .leading, spacing: 12) {
-                            Label("Departure Time", systemImage: "airplane.departure")
-                                .font(.headline)
-                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
-
-                            HStack(spacing: 4) {
-                                // Hour Picker (12-hour format)
-                                Picker("Hour", selection: $departureHour) {
-                                    ForEach(1...12, id: \.self) { hour in
-                                        Text("\(hour)")
-                                            .tag(hour)
-                                    }
-                                }
-                                .pickerStyle(.wheel)
-                                .frame(width: 50, height: 100)
-                                .clipped()
-
-                                Text(":")
-                                    .font(.title2)
-                                    .fontWeight(.medium)
-
-                                // Minute Picker
-                                Picker("Minute", selection: $departureMinute) {
-                                    ForEach([0, 15, 30, 45], id: \.self) { minute in
-                                        Text(String(format: "%02d", minute))
-                                            .tag(minute)
-                                    }
-                                }
-                                .pickerStyle(.wheel)
-                                .frame(width: 60, height: 100)
-                                .clipped()
-
-                                // AM/PM Picker
-                                Picker("AM/PM", selection: $departureAMPM) {
-                                    Text("AM").tag(0)
-                                    Text("PM").tag(1)
-                                }
-                                .pickerStyle(.wheel)
-                                .frame(width: 60, height: 100)
-                                .clipped()
+                            HStack {
+                                Label("Departure Time", systemImage: "airplane.departure")
+                                    .font(.headline)
+                                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
 
                                 Spacer()
-                            }
-                            .padding(.horizontal)
 
-                            Text("\(selectedStartDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(departureHour):\(String(format: "%02d", departureMinute)) \(departureAMPM == 0 ? "AM" : "PM")")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                // Only show "Starting Now" toggle if selected date is today
+                                if isSelectedDateToday {
+                                    Button(isStartingNow ? "Start Later" : "Starting Now") {
+                                        isStartingNow.toggle()
+                                    }
+                                    .font(.caption)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(isStartingNow ? Color(.tertiarySystemFill) : (Color(hex: "#6C63FF") ?? .purple))
+                                    .foregroundStyle(isStartingNow ? (Color(hex: "#6C63FF") ?? .purple) : .white)
+                                    .cornerRadius(6)
+                                }
+                            }
+
+                            if isStartingNow && isSelectedDateToday {
+                                // Starting Now UI (only shown when today is selected)
+                                HStack {
+                                    Image(systemName: "clock.fill")
+                                        .font(.title2)
+                                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Starting Now")
+                                            .font(.headline)
+                                        Text("Trip will begin immediately when created")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .padding()
+                                .background(Color(hex: "#6C63FF")?.opacity(0.1) ?? Color.purple.opacity(0.1))
+                                .cornerRadius(8)
+                            } else {
+                                // Show helpful message for future dates
+                                if !isSelectedDateToday {
+                                    HStack {
+                                        Image(systemName: "info.circle")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("Set departure time for \(selectedStartDate.formatted(date: .abbreviated, time: .omitted))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.bottom, 4)
+                                }
+
+                                // Custom time picker
+                                HStack(spacing: 4) {
+                                    // Hour Picker (12-hour format)
+                                    Picker("Hour", selection: $departureHour) {
+                                        ForEach(1...12, id: \.self) { hour in
+                                            Text("\(hour)")
+                                                .tag(hour)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 50, height: 100)
+                                    .clipped()
+
+                                    Text(":")
+                                        .font(.title2)
+                                        .fontWeight(.medium)
+
+                                    // Minute Picker (every minute)
+                                    Picker("Minute", selection: $departureMinute) {
+                                        ForEach(0..<60, id: \.self) { minute in
+                                            Text(String(format: "%02d", minute))
+                                                .tag(minute)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 60, height: 100)
+                                    .clipped()
+
+                                    // AM/PM Picker
+                                    Picker("AM/PM", selection: $departureAMPM) {
+                                        Text("AM").tag(0)
+                                        Text("PM").tag(1)
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 60, height: 100)
+                                    .clipped()
+
+                                    Spacer()
+                                }
+                                .padding(.horizontal)
+
+                                Text("\(selectedStartDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(departureHour):\(String(format: "%02d", departureMinute)) \(departureAMPM == 0 ? "AM" : "PM")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .padding()
                         .background(Color(.secondarySystemFill))
@@ -710,9 +771,9 @@ struct Step2TimeSettings: View {
                                     .font(.title2)
                                     .fontWeight(.medium)
 
-                                // Minute Picker
+                                // Minute Picker (every minute)
                                 Picker("Minute", selection: $returnMinute) {
-                                    ForEach([0, 15, 30, 45], id: \.self) { minute in
+                                    ForEach(0..<60, id: \.self) { minute in
                                         Text(String(format: "%02d", minute))
                                             .tag(minute)
                                     }
@@ -853,6 +914,7 @@ struct Step2TimeSettings: View {
             departureMinute = calendar.component(.minute, from: startTime)
             returnMinute = calendar.component(.minute, from: etaTime)
         }
+        .onChange(of: isStartingNow) { _, _ in updateDates() }
         .onChange(of: departureHour) { _, _ in updateDates() }
         .onChange(of: departureMinute) { _, _ in updateDates() }
         .onChange(of: departureAMPM) { _, _ in updateDates() }
@@ -871,21 +933,39 @@ struct Step2TimeSettings: View {
 
     private func updateDates() {
         let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let selectedDay = calendar.startOfDay(for: selectedStartDate)
+        let isSelectedDateToday = today == selectedDay
 
-        // Convert 12-hour to 24-hour for departure
-        var departureHour24: Int
-        if departureHour == 12 && departureAMPM == 0 {
-            // 12 AM = 0
-            departureHour24 = 0
-        } else if departureHour == 12 && departureAMPM == 1 {
-            // 12 PM = 12
-            departureHour24 = 12
-        } else if departureAMPM == 0 {
-            // AM hours (1-11 AM)
-            departureHour24 = departureHour
+        // Update start time
+        // Only use "Starting Now" if the selected date is today
+        if isStartingNow && isSelectedDateToday {
+            // When starting now and date is today, use current time
+            startTime = Date()
         } else {
-            // PM hours (1-11 PM)
-            departureHour24 = departureHour + 12
+            // For future dates or when "Start Later" is selected, use the selected time
+            // Convert 12-hour to 24-hour for departure
+            var departureHour24: Int
+            if departureHour == 12 && departureAMPM == 0 {
+                // 12 AM = 0
+                departureHour24 = 0
+            } else if departureHour == 12 && departureAMPM == 1 {
+                // 12 PM = 12
+                departureHour24 = 12
+            } else if departureAMPM == 0 {
+                // AM hours (1-11 AM)
+                departureHour24 = departureHour
+            } else {
+                // PM hours (1-11 PM)
+                departureHour24 = departureHour + 12
+            }
+
+            var startComponents = calendar.dateComponents([.year, .month, .day], from: selectedStartDate)
+            startComponents.hour = departureHour24
+            startComponents.minute = departureMinute
+            if let newStart = calendar.date(from: startComponents) {
+                startTime = newStart
+            }
         }
 
         // Convert 12-hour to 24-hour for return
@@ -902,14 +982,6 @@ struct Step2TimeSettings: View {
         } else {
             // PM hours (1-11 PM)
             returnHour24 = returnHour + 12
-        }
-
-        // Update start time
-        var startComponents = calendar.dateComponents([.year, .month, .day], from: selectedStartDate)
-        startComponents.hour = departureHour24
-        startComponents.minute = departureMinute
-        if let newStart = calendar.date(from: startComponents) {
-            startTime = newStart
         }
 
         // Update end time
@@ -1471,7 +1543,7 @@ struct Step4AdditionalNotes: View {
 
 // MARK: - Supporting Views
 struct ActivityTypeButton: View {
-    let activity: ActivityType
+    let activity: ActivityTypeAdapter
     let isSelected: Bool
     let action: () -> Void
 

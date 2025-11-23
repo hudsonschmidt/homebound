@@ -78,6 +78,21 @@ final class LocalStorage {
                     updated_at TEXT NOT NULL
                 )
             """)
+
+            // Create cached_activities table
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS cached_activities (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    default_grace_minutes INTEGER NOT NULL,
+                    colors TEXT NOT NULL,
+                    messages TEXT NOT NULL,
+                    safety_tips TEXT NOT NULL,
+                    "order" INTEGER NOT NULL,
+                    cached_at TEXT NOT NULL
+                )
+            """)
         }
 
         print("[LocalStorage] Database initialized at \(dbURL.path)")
@@ -433,6 +448,91 @@ final class LocalStorage {
         }
     }
 
+    // MARK: - Activity Caching
+
+    /// Cache activities from the server
+    func cacheActivities(_ activities: [Activity]) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                // Clear existing cache
+                try db.execute(sql: "DELETE FROM cached_activities")
+
+                // Insert activities
+                for activity in activities {
+                    let colorsJSON = try JSONEncoder().encode(activity.colors)
+                    let messagesJSON = try JSONEncoder().encode(activity.messages)
+                    let tipsJSON = try JSONEncoder().encode(activity.safety_tips)
+
+                    try db.execute(sql: """
+                        INSERT INTO cached_activities
+                        (id, name, icon, default_grace_minutes, colors, messages, safety_tips, "order", cached_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, arguments: [
+                        activity.id,
+                        activity.name,
+                        activity.icon,
+                        activity.default_grace_minutes,
+                        String(data: colorsJSON, encoding: .utf8),
+                        String(data: messagesJSON, encoding: .utf8),
+                        String(data: tipsJSON, encoding: .utf8),
+                        activity.order,
+                        ISO8601DateFormatter().string(from: Date())
+                    ])
+                }
+            }
+            print("[LocalStorage] Cached \(activities.count) activities")
+        } catch {
+            print("[LocalStorage] Failed to cache activities: \(error)")
+        }
+    }
+
+    /// Get cached activities
+    func getCachedActivities() -> [Activity] {
+        guard let dbQueue = dbQueue else { return [] }
+
+        do {
+            return try dbQueue.read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT * FROM cached_activities ORDER BY "order" ASC
+                """)
+
+                return rows.compactMap { row -> Activity? in
+                    guard let id = row["id"] as? Int,
+                          let name = row["name"] as? String,
+                          let icon = row["icon"] as? String,
+                          let graceMin = row["default_grace_minutes"] as? Int,
+                          let colorsStr = row["colors"] as? String,
+                          let messagesStr = row["messages"] as? String,
+                          let tipsStr = row["safety_tips"] as? String,
+                          let order = row["order"] as? Int,
+                          let colorsData = colorsStr.data(using: .utf8),
+                          let messagesData = messagesStr.data(using: .utf8),
+                          let tipsData = tipsStr.data(using: .utf8),
+                          let colors = try? JSONDecoder().decode(Activity.ActivityColors.self, from: colorsData),
+                          let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
+                          let tips = try? JSONDecoder().decode([String].self, from: tipsData)
+                    else { return nil }
+
+                    return Activity(
+                        id: id,
+                        name: name,
+                        icon: icon,
+                        default_grace_minutes: graceMin,
+                        colors: colors,
+                        messages: messages,
+                        safety_tips: tips,
+                        order: order
+                    )
+                }
+            }
+        } catch {
+            print("[LocalStorage] Failed to get cached activities: \(error)")
+            return []
+        }
+    }
+
     // MARK: - Clear All Data
 
     /// Clear all local storage (for logout)
@@ -444,6 +544,7 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM cached_trips")
                 try db.execute(sql: "DELETE FROM pending_actions")
                 try db.execute(sql: "DELETE FROM auth_tokens")
+                try db.execute(sql: "DELETE FROM cached_activities")
             }
             print("[LocalStorage] Cleared all data")
         } catch {

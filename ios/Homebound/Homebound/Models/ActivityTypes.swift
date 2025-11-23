@@ -398,6 +398,61 @@ enum ActivityType: String, CaseIterable, Codable {
             ]
         }
     }
+
+    // MARK: - Fallback Activities (for offline use when database is unavailable)
+
+    /// Convert hardcoded ActivityTypes to Activity models for fallback
+    /// DEPRECATED: Activities are now loaded from database via Session.loadActivities()
+    /// This method is kept only for fallback when API is unavailable
+    static func fallbackActivities() -> [Activity] {
+        return allCases.enumerated().map { (index, activityType) in
+            // Get primary color hex for this activity type
+            func getPrimaryColorHex() -> String {
+                switch activityType {
+                case .hiking: return "#2D5016"
+                case .biking: return "#FF6B35"
+                case .running: return "#E74C3C"
+                case .climbing: return "#7F8C8D"
+                case .camping: return "#1A237E"
+                case .backpacking: return "#795548"
+                case .skiing: return "#00BCD4"
+                case .snowboarding: return "#039BE5"
+                case .kayaking: return "#006064"
+                case .sailing: return "#1976D2"
+                case .fishing: return "#004D40"
+                case .surfing: return "#00ACC1"
+                case .scubaDiving: return "#01579B"
+                case .freeDiving: return "#0277BD"
+                case .snorkeling: return "#0097A7"
+                case .horsebackRiding: return "#5D4037"
+                case .driving: return "#2C3E50"
+                case .flying: return "#3498DB"
+                case .other: return "#6C63FF"
+                }
+            }
+
+            return Activity(
+                id: index,  // Temporary ID for fallback
+                name: activityType.displayName,
+                icon: activityType.icon,
+                default_grace_minutes: activityType.defaultGraceMinutes,
+                colors: Activity.ActivityColors(
+                    primary: getPrimaryColorHex(),
+                    secondary: "#A8A8A8",
+                    accent: "#4ECDC4"
+                ),
+                messages: Activity.ActivityMessages(
+                    start: activityType.startMessage,
+                    checkin: activityType.checkinMessage,
+                    checkout: activityType.checkoutMessage,
+                    overdue: "Haven't heard from you - everything OK?",
+                    encouragement: activityType.encouragementMessages
+                ),
+                safety_tips: activityType.safetyTips,
+                order: index
+            )
+        }
+    }
 }
 
 // MARK: - Color Extension for Hex Support
@@ -428,21 +483,6 @@ extension Color {
     }
 }
 
-// MARK: - Activity Response Models
-struct ActivityInfo: Codable {
-    var id: String
-    var name: String
-    var icon: String
-    var default_grace_minutes: Int
-    var colors: ActivityColors
-}
-
-struct ActivityColors: Codable {
-    var primary: String
-    var secondary: String
-    var accent: String
-}
-
-struct ActivitiesResponse: Codable {
-    var activities: [ActivityInfo]
-}
+// MARK: - DEPRECATED: Legacy Activity Response Models
+// These models are deprecated. Use Activity from Models.swift instead.
+// Kept for backward compatibility only.

@@ -8,7 +8,7 @@ enum HB {
 extension Color {
     static let hbBackground = Color(UIColor.systemBackground)
     static let hbPrimary = Color.primary
-    static let hbAccent = Color.black // button background (matches your mock)
+    static let hbAccent = Color.black 
 }
 
 struct HBPrimaryButtonStyle: ButtonStyle {

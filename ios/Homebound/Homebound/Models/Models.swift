@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 struct ContactIn: Codable {
     var name: String
@@ -80,14 +81,12 @@ struct PlanOut: Codable, Identifiable, Equatable {
         title = try container.decode(String.self, forKey: .title)
         activity = try container.decode(String.self, forKey: .activity)
 
-        // Parse date strings
+        // Parse date strings with fallback for different ISO8601 formats
         let startString = try container.decode(String.self, forKey: .start)
         let etaString = try container.decode(String.self, forKey: .eta)
 
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        start_at = formatter.date(from: startString) ?? Date()
-        eta_at = formatter.date(from: etaString) ?? Date()
+        start_at = Self.parseISO8601Date(startString) ?? Date()
+        eta_at = Self.parseISO8601Date(etaString) ?? Date()
 
         grace_minutes = try container.decode(Int.self, forKey: .grace_min)
         location_text = try container.decodeIfPresent(String.self, forKey: .location_text)
@@ -127,6 +126,51 @@ struct PlanOut: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(contact3, forKey: .contact3)
         try container.encodeIfPresent(checkin_token, forKey: .checkin_token)
         try container.encodeIfPresent(checkout_token, forKey: .checkout_token)
+    }
+
+    /// Parse ISO8601 date string with fallback for different formats
+    private static func parseISO8601Date(_ dateString: String) -> Date? {
+        // First, normalize the string - replace space with 'T' if needed (backend uses str() which produces space)
+        let normalizedString = dateString.replacingOccurrences(of: " ", with: "T")
+
+        // Try with fractional seconds first
+        let formatterWithFractional = ISO8601DateFormatter()
+        formatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatterWithFractional.date(from: normalizedString) {
+            return date
+        }
+
+        // Try without fractional seconds
+        let formatterWithoutFractional = ISO8601DateFormatter()
+        formatterWithoutFractional.formatOptions = [.withInternetDateTime]
+        if let date = formatterWithoutFractional.date(from: normalizedString) {
+            return date
+        }
+
+        // Try with timezone
+        let formatterWithTimezone = ISO8601DateFormatter()
+        formatterWithTimezone.formatOptions = [.withInternetDateTime, .withTimeZone]
+        if let date = formatterWithTimezone.date(from: normalizedString) {
+            return date
+        }
+
+        // Try custom DateFormatter for format: "yyyy-MM-dd HH:mm:ss" (Python str() format)
+        let customFormatter = DateFormatter()
+        customFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        customFormatter.timeZone = TimeZone(identifier: "UTC")
+        if let date = customFormatter.date(from: dateString) {
+            return date
+        }
+
+        // Try with milliseconds: "yyyy-MM-dd HH:mm:ss.SSSSSS"
+        customFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
+        if let date = customFormatter.date(from: dateString) {
+            return date
+        }
+
+        // Last resort: try basic ISO8601 format
+        let formatterBasic = ISO8601DateFormatter()
+        return formatterBasic.date(from: normalizedString)
     }
 
     /// Memberwise initializer for local storage
@@ -185,4 +229,78 @@ struct TimelineEvent: Codable, Identifiable {
     var kind: String
     var at: Date
     var meta: String?
+}
+
+// MARK: - Activity Models (from database)
+
+struct Activity: Codable, Identifiable, Equatable {
+    let id: Int
+    let name: String
+    let icon: String
+    let default_grace_minutes: Int
+    let colors: ActivityColors
+    let messages: ActivityMessages
+    let safety_tips: [String]
+    let order: Int
+
+    struct ActivityColors: Codable, Equatable {
+        let primary: String
+        let secondary: String
+        let accent: String
+    }
+
+    struct ActivityMessages: Codable, Equatable {
+        let start: String
+        let checkin: String
+        let checkout: String
+        let overdue: String
+        let encouragement: [String]
+    }
+}
+
+// MARK: - ActivityTypeAdapter (backward compatibility wrapper)
+
+/// Adapter to make database Activity compatible with existing ActivityType enum usage
+struct ActivityTypeAdapter: Identifiable, Hashable {
+    let activity: Activity
+
+    var id: Int { activity.id }
+    var rawValue: String { activity.name.lowercased().replacingOccurrences(of: " ", with: "_") }
+    var displayName: String { activity.name }
+    var icon: String { activity.icon }
+    var defaultGraceMinutes: Int { activity.default_grace_minutes }
+
+    var primaryColor: Color {
+        Color(hex: activity.colors.primary) ?? .purple
+    }
+
+    var secondaryColor: Color {
+        Color(hex: activity.colors.secondary) ?? .gray
+    }
+
+    var accentColor: Color {
+        Color(hex: activity.colors.accent) ?? .blue
+    }
+
+    var startMessage: String { activity.messages.start }
+    var checkinMessage: String { activity.messages.checkin }
+    var checkoutMessage: String { activity.messages.checkout }
+    var overdueMessage: String { activity.messages.overdue }
+    var encouragementMessages: [String] { activity.messages.encouragement }
+    var safetyTips: [String] { activity.safety_tips }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(activity.id)
+    }
+
+    static func == (lhs: ActivityTypeAdapter, rhs: ActivityTypeAdapter) -> Bool {
+        lhs.activity.id == rhs.activity.id
+    }
+}
+
+// Extension for easy conversion
+extension Array where Element == Activity {
+    func toAdapters() -> [ActivityTypeAdapter] {
+        map { ActivityTypeAdapter(activity: $0) }
+    }
 }

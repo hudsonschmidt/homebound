@@ -88,10 +88,14 @@ struct HeaderSection: View {
     @Binding var showingSettings: Bool
     @EnvironmentObject var session: Session
 
+    var firstName: String? {
+        session.userName?.components(separatedBy: " ").first
+    }
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(greeting)\(session.userName != nil ? ", \(session.userName!)" : "")")
+                Text("\(greeting)\(firstName != nil ? ", \(firstName!)" : "")")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundStyle(

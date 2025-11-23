@@ -213,7 +213,7 @@ struct OldCreatePlanView: View {
     @EnvironmentObject var session: Session
 
     @State private var title = ""
-    @State private var selectedActivity = ActivityType.other
+    @State private var selectedActivity: ActivityTypeAdapter?
     @State private var location = ""
     @State private var departureTime = Date()
     @State private var returnTime = Date().addingTimeInterval(3600)
@@ -221,6 +221,10 @@ struct OldCreatePlanView: View {
     @State private var showingDetailedMode = false
     @State private var notes = ""
     @State private var contacts: [ContactIn] = []
+
+    var defaultActivity: ActivityTypeAdapter? {
+        session.activities.toAdapters().first { $0.rawValue == "other" }
+    }
 
     var body: some View {
         NavigationStack {
@@ -231,15 +235,22 @@ struct OldCreatePlanView: View {
                         .font(.title3)
 
                     Picker("Activity", selection: $selectedActivity) {
-                        ForEach(ActivityType.allCases, id: \.self) { activity in
+                        ForEach(session.activities.toAdapters(), id: \.id) { activity in
                             Label(activity.displayName, systemImage: "")
-                                .tag(activity)
+                                .tag(activity as ActivityTypeAdapter?)
                         }
                     }
                     .onChange(of: selectedActivity) { _, newValue in
-                        graceMinutes = newValue.defaultGraceMinutes
-                        if title.isEmpty {
-                            title = "\(newValue.displayName) Trip"
+                        if let newValue = newValue {
+                            graceMinutes = newValue.defaultGraceMinutes
+                            if title.isEmpty {
+                                title = "\(newValue.displayName) Trip"
+                            }
+                        }
+                    }
+                    .onAppear {
+                        if selectedActivity == nil {
+                            selectedActivity = defaultActivity
                         }
                     }
                 } header: {
@@ -259,18 +270,20 @@ struct OldCreatePlanView: View {
                 }
 
                 // Activity-specific tips
-                Section {
-                    ForEach(selectedActivity.safetyTips, id: \.self) { tip in
-                        Label(tip, systemImage: "checkmark.circle")
+                if let selectedActivity = selectedActivity {
+                    Section {
+                        ForEach(selectedActivity.safetyTips, id: \.self) { tip in
+                            Label(tip, systemImage: "checkmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Safety Reminders")
+                    } footer: {
+                        Text(selectedActivity.startMessage)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .italic()
                     }
-                } header: {
-                    Text("Safety Reminders")
-                } footer: {
-                    Text(selectedActivity.startMessage)
-                        .font(.caption)
-                        .italic()
                 }
 
                 // Advanced Options
@@ -296,7 +309,7 @@ struct OldCreatePlanView: View {
 
                 Section {
                     Toggle("Show More Options", isOn: $showingDetailedMode)
-                        .tint(selectedActivity.primaryColor)
+                        .tint(selectedActivity?.primaryColor ?? .purple)
                 }
 
                 // Create Button
@@ -309,7 +322,7 @@ struct OldCreatePlanView: View {
                             Spacer()
                         }
                     }
-                    .buttonStyle(ActivityButtonStyle(color: selectedActivity.primaryColor))
+                    .buttonStyle(ActivityButtonStyle(color: selectedActivity?.primaryColor ?? .purple))
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 }
@@ -325,6 +338,8 @@ struct OldCreatePlanView: View {
     }
 
     func createPlan() {
+        guard let selectedActivity = selectedActivity else { return }
+
         Task {
             _ = PlanCreate(
                 title: title,

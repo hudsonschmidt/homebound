@@ -35,6 +35,10 @@ struct NewHomeView: View {
     @State private var timeline: [TimelineEvent] = []
     @State private var refreshID = UUID()
 
+    var firstName: String? {
+        session.userName?.components(separatedBy: " ").first
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -54,7 +58,7 @@ struct NewHomeView: View {
                         // Header with greeting and settings
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("\(greeting)\(session.userName != nil ? ", \(session.userName!)" : "")")
+                                Text("\(greeting)\(firstName != nil ? ", \(firstName!)" : "")")
                                     .font(.largeTitle)
                                     .fontWeight(.bold)
                                     .foregroundStyle(
@@ -454,7 +458,7 @@ struct ActivePlanCardCompact: View {
 struct UpcomingTripsSection: View {
     @EnvironmentObject var session: Session
     @State private var upcomingPlans: [PlanOut] = []
-    @State private var countdowns: [Int: String] = [:]
+    @State private var currentTime = Date()
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -478,12 +482,12 @@ struct UpcomingTripsSection: View {
                 .cornerRadius(12)
             } else {
                 ForEach(upcomingPlans) { plan in
-                    UpcomingTripCard(plan: plan, countdown: countdowns[plan.id] ?? "")
+                    UpcomingTripCard(plan: plan, currentTime: currentTime)
                 }
             }
         }
-        .onReceive(timer) { _ in
-            updateCountdowns()
+        .onReceive(timer) { time in
+            currentTime = time
         }
         .task {
             await loadUpcomingPlans()
@@ -505,34 +509,6 @@ struct UpcomingTripsSection: View {
                 .sorted { $0.start_at < $1.start_at }
                 .prefix(3) // Show max 3 upcoming trips
                 .map { $0 }
-
-            updateCountdowns()
-        }
-    }
-
-    func updateCountdowns() {
-        let now = Date()
-        for plan in upcomingPlans {
-            let interval = plan.start_at.timeIntervalSince(now)
-            if interval > 0 {
-                countdowns[plan.id] = formatCountdown(interval)
-            } else {
-                countdowns[plan.id] = "Starting now"
-            }
-        }
-    }
-
-    func formatCountdown(_ interval: TimeInterval) -> String {
-        let days = Int(interval) / 86400
-        let hours = (Int(interval) % 86400) / 3600
-        let minutes = (Int(interval) % 3600) / 60
-
-        if days > 0 {
-            return "\(days)d \(hours)h"
-        } else if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else {
-            return "\(minutes) minutes"
         }
     }
 }
@@ -540,10 +516,40 @@ struct UpcomingTripsSection: View {
 // MARK: - Upcoming Trip Card
 struct UpcomingTripCard: View {
     let plan: PlanOut
-    let countdown: String
+    let currentTime: Date
+
+    var activity: ActivityType {
+        // Try exact match first
+        if let matched = ActivityType(rawValue: plan.activity_type.lowercased()) {
+            return matched
+        }
+
+        // Try converting spaces to underscores and lowercasing
+        let normalized = plan.activity_type.lowercased().replacingOccurrences(of: " ", with: "_")
+        return ActivityType(rawValue: normalized) ?? .other
+    }
+
+    var countdown: String {
+        let interval = plan.start_at.timeIntervalSince(currentTime)
+
+        if interval <= 0 {
+            return "Starting now"
+        }
+
+        return formatCountdown(interval)
+    }
 
     var body: some View {
         HStack {
+            // Activity icon
+            Circle()
+                .fill(activity.primaryColor.opacity(0.2))
+                .frame(width: 40, height: 40)
+                .overlay(
+                    Text(activity.icon)
+                        .font(.title3)
+                )
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(plan.title)
                     .font(.subheadline)
@@ -558,6 +564,15 @@ struct UpcomingTripCard: View {
                     }
                     .foregroundStyle(.secondary)
                 }
+
+                // Show actual start date/time
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.caption2)
+                    Text(plan.start_at.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -576,6 +591,23 @@ struct UpcomingTripCard: View {
         .padding()
         .background(Color(.tertiarySystemBackground))
         .cornerRadius(12)
+    }
+
+    private func formatCountdown(_ interval: TimeInterval) -> String {
+        let days = Int(interval) / 86400
+        let hours = (Int(interval) % 86400) / 3600
+        let minutes = (Int(interval) % 3600) / 60
+        let seconds = Int(interval) % 60
+
+        if days > 0 {
+            return "\(days)d \(hours)h"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else if minutes > 0 {
+            return "\(minutes)m \(seconds)s"
+        } else {
+            return "\(seconds)s"
+        }
     }
 }
 
@@ -597,13 +629,24 @@ struct HistoryTabView: View {
                     EmptyHistoryView()
                 } else {
                     List {
-                        ForEach(plans) { plan in
-                            HistoryRowView(plan: plan)
-                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        // Stats Section
+                        Section {
+                            TripStatsView(plans: plans)
                         }
-                        .onDelete(perform: deletePlans)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+
+                        // Trips List
+                        Section {
+                            ForEach(plans) { plan in
+                                HistoryRowView(plan: plan)
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                            }
+                            .onDelete(perform: deletePlans)
+                        }
                     }
-                    .listStyle(PlainListStyle())
+                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Trip History")
@@ -728,6 +771,17 @@ struct EmptyHistoryView: View {
 struct HistoryRowView: View {
     let plan: PlanOut
 
+    var activity: ActivityType {
+        // Try exact match first
+        if let matched = ActivityType(rawValue: plan.activity_type.lowercased()) {
+            return matched
+        }
+
+        // Try converting spaces to underscores and lowercasing
+        let normalized = plan.activity_type.lowercased().replacingOccurrences(of: " ", with: "_")
+        return ActivityType(rawValue: normalized) ?? .other
+    }
+
     var statusColor: Color {
         switch plan.status {
         case "completed": return .green
@@ -746,60 +800,120 @@ struct HistoryRowView: View {
         }
     }
 
+    var statusText: String {
+        switch plan.status {
+        case "completed": return "Completed"
+        case "cancelled": return "Cancelled"
+        case "overdue": return "Overdue"
+        case "planned": return "Planned"
+        case "active": return "Active"
+        default: return plan.status.capitalized
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            HStack(spacing: 12) {
+                // Activity icon with colored background
+                Circle()
+                    .fill(activity.primaryColor.opacity(0.2))
+                    .frame(width: 50, height: 50)
+                    .overlay(
+                        Text(activity.icon)
+                            .font(.title2)
+                    )
+
+                // Title and activity
                 VStack(alignment: .leading, spacing: 4) {
                     Text(plan.title)
-                        .font(.headline)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
 
-                    if let location = plan.location_text {
-                        HStack(spacing: 4) {
-                            Image(systemName: "location.fill")
-                                .font(.caption)
-                            Text(location)
-                                .font(.caption)
-                        }
+                    Text(activity.displayName)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Status indicator
+                VStack(spacing: 2) {
+                    Image(systemName: statusIcon)
+                        .font(.title3)
+                        .foregroundStyle(statusColor)
+
+                    Text(statusText)
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .foregroundStyle(statusColor)
+                }
+            }
+
+            // Time details section
+            VStack(alignment: .leading, spacing: 8) {
+                // Start time
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                    Text("Start:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    Text(plan.start_at.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // End time
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Text("Finish:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    Text(plan.eta_at.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Duration
+                if let duration = calculateDuration(from: plan.start_at, to: plan.eta_at) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                        Text("Duration:")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Text(duration)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
-                Spacer()
-
-                // Status badge
-                HStack(spacing: 4) {
-                    Image(systemName: statusIcon)
-                        .font(.caption)
-                    Text(plan.status.capitalized)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                }
-                .foregroundStyle(statusColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(statusColor.opacity(0.1))
-                .cornerRadius(8)
-            }
-
-            // Date and duration
-            HStack {
-                Image(systemName: "calendar")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(plan.start_at.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                if let duration = calculateDuration(from: plan.start_at, to: plan.eta_at) {
-                    Text(duration)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // Location
+                if let location = plan.location_text {
+                    HStack(spacing: 6) {
+                        Image(systemName: "location.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        Text("Location:")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Text(location)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
+            .padding(.leading, 62) // Align with title
         }
-        .padding(.vertical, 8)
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
     }
 
     func calculateDuration(from start: Date, to end: Date) -> String? {
@@ -810,9 +924,174 @@ struct HistoryRowView: View {
         if hours > 0 {
             return "\(hours)h \(minutes)m"
         } else if minutes > 0 {
-            return "\(minutes) minutes"
+            return "\(minutes)m"
         }
         return nil
+    }
+}
+
+// MARK: - Trip Stats View
+struct TripStatsView: View {
+    let plans: [PlanOut]
+
+    var totalTrips: Int {
+        plans.count
+    }
+
+    var completedTrips: Int {
+        plans.filter { $0.status == "completed" }.count
+    }
+
+    var totalAdventureTime: String {
+        let totalSeconds = plans.reduce(0.0) { total, plan in
+            total + plan.eta_at.timeIntervalSince(plan.start_at)
+        }
+        let hours = Int(totalSeconds) / 3600
+        let days = hours / 24
+
+        if days > 0 {
+            return "\(days)d \(hours % 24)h"
+        } else if hours > 0 {
+            return "\(hours)h"
+        } else {
+            return "\(Int(totalSeconds) / 60)m"
+        }
+    }
+
+    var favoriteActivity: (icon: String, name: String, count: Int)? {
+        let activityCounts = Dictionary(grouping: plans) { plan in
+            plan.activity_type
+        }.mapValues { $0.count }
+
+        guard let mostCommon = activityCounts.max(by: { $0.value < $1.value }) else {
+            return nil
+        }
+
+        let activity = ActivityType(rawValue: mostCommon.key) ?? .other
+        return (activity.icon, activity.displayName, mostCommon.value)
+    }
+
+    var completionRate: Int {
+        guard totalTrips > 0 else { return 0 }
+        return Int((Double(completedTrips) / Double(totalTrips)) * 100)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Your Adventure Stats")
+                    .font(.headline)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                Spacer()
+            }
+
+            // Stats Grid
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                // Total Trips
+                StatCardImproved(
+                    value: "\(totalTrips)",
+                    label: "Total Trips",
+                    icon: "map.fill",
+                    color: Color(hex: "#6C63FF") ?? .purple
+                )
+
+                // Completed Trips
+                StatCardImproved(
+                    value: "\(completedTrips)",
+                    label: "Completed",
+                    icon: "checkmark.circle.fill",
+                    color: .green
+                )
+
+                // Total Adventure Time
+                StatCardImproved(
+                    value: totalAdventureTime,
+                    label: "Adventure Time",
+                    icon: "clock.fill",
+                    color: .orange
+                )
+
+                // Completion Rate
+                StatCardImproved(
+                    value: "\(completionRate)%",
+                    label: "Success Rate",
+                    icon: "chart.line.uptrend.xyaxis",
+                    color: Color(hex: "#4ECDC4") ?? .teal
+                )
+            }
+
+            // Favorite Activity (if available)
+            if let favorite = favoriteActivity {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color(hex: "#6C63FF")?.opacity(0.2) ?? .purple.opacity(0.2))
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Text(favorite.icon)
+                                .font(.title3)
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Favorite Activity")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(favorite.name)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+
+                    Spacer()
+
+                    Text("\(favorite.count) trips")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(hex: "#6C63FF")?.opacity(0.1) ?? .purple.opacity(0.1))
+                        .cornerRadius(8)
+                }
+                .padding()
+                .background(Color(.tertiarySystemBackground))
+                .cornerRadius(12)
+            }
+        }
+    }
+}
+
+// MARK: - Improved Stat Card
+struct StatCardImproved: View {
+    let value: String
+    let label: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(color)
+
+            Text(value)
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundStyle(.primary)
+
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
     }
 }
 
