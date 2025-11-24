@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 // MARK: - Main Authentication View
 struct AuthenticationView: View {
@@ -8,6 +9,7 @@ struct AuthenticationView: View {
     @State private var showingVerification = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var appleSignInCoordinator: AppleSignInCoordinator?
 
     var body: some View {
         ZStack {
@@ -98,21 +100,33 @@ struct AuthenticationView: View {
                         }
                         .padding(.vertical, 8)
 
-                        // Apple Sign In (Placeholder)
-                        Button(action: {}) {
+                        // Apple Sign In
+                        Button {
+                            print("🍎 Apple Sign In button tapped")
+                            let provider = ASAuthorizationAppleIDProvider()
+                            let request = provider.createRequest()
+                            request.requestedScopes = [.email, .fullName]
+
+                            let controller = ASAuthorizationController(authorizationRequests: [request])
+                            appleSignInCoordinator = AppleSignInCoordinator(session: session) {}
+                            controller.delegate = appleSignInCoordinator
+
+                            print("🍎 Calling performRequests()")
+                            controller.performRequests()
+                        } label: {
                             HStack {
                                 Image(systemName: "apple.logo")
+                                    .font(.title3)
                                 Text("Continue with Apple")
                                     .fontWeight(.medium)
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 56)
-                            .background(Color(.systemGray6))
-                            .foregroundStyle(.primary)
+                            .background(Color.black)
+                            .foregroundStyle(.white)
                             .cornerRadius(12)
                         }
-                        .disabled(true)
-                        .opacity(0.5)
+                        .buttonStyle(.plain)
 
                     } else {
                         // Verification Code Entry
@@ -222,6 +236,23 @@ struct AuthenticationView: View {
             // Auto-dismiss when authenticated
             if newValue != nil {
                 // Authentication successful - the main app will handle navigation
+            }
+        }
+        .alert("Link Apple Account?", isPresented: $session.showAppleLinkAlert) {
+            Button("Link Account") {
+                Task {
+                    await session.linkAppleAccount()
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                // Clear pending Apple credentials
+                session.pendingAppleUserID = nil
+                session.pendingAppleEmail = nil
+                session.pendingAppleIdentityToken = nil
+            }
+        } message: {
+            if let email = session.pendingAppleEmail {
+                Text("An account with \(email) already exists. Would you like to link it to Sign in with Apple?")
             }
         }
     }

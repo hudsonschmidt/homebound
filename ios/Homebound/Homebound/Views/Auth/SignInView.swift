@@ -102,29 +102,33 @@ struct SignInView: View {
                         Rectangle().frame(height: 1).foregroundStyle(.tertiary)
                     }
 
-                    Button(action: {
+                    // Simple button to test tap detection
+                    Button {
+                        print("🔴 APPLE BUTTON TAPPED!")
                         let provider = ASAuthorizationAppleIDProvider()
                         let request = provider.createRequest()
                         request.requestedScopes = [.email, .fullName]
 
                         let controller = ASAuthorizationController(authorizationRequests: [request])
-                        appleSignInCoordinator = AppleSignInCoordinator(session: session) {
-                            // Success callback - coordinator will handle auth
-                        }
+                        appleSignInCoordinator = AppleSignInCoordinator(session: session) {}
                         controller.delegate = appleSignInCoordinator
+
+                        print("🔴 About to call performRequests()")
                         controller.performRequests()
-                    }) {
+                    } label: {
                         HStack {
                             Image(systemName: "apple.logo")
+                                .font(.title3)
                             Text("Continue with Apple")
+                                .font(.headline)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .foregroundColor(.white)
+                        .background(Color.black)
+                        .cornerRadius(10)
                     }
-                    .disabled(session.isRequesting)
-                    .background(Color(.secondarySystemBackground))
-                    .foregroundStyle(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .buttonStyle(.plain)
                 }
 
                 Text("By clicking continue, you agree to our **Terms of Service** and **Privacy Policy**.")

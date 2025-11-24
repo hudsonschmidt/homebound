@@ -7,6 +7,7 @@ from pydantic import BaseModel, EmailStr
 from src import database as db
 from src import config
 from src.api.apple_auth import validate_apple_identity_token
+from src.services.notifications import send_magic_link_email
 import sqlalchemy
 
 router = APIRouter(
@@ -69,7 +70,7 @@ def create_jwt_pair(user_id: int, email: str) -> tuple[str, str]:
 
 
 @router.post("/request-magic-link")
-def request_magic_link(body: MagicLinkRequest):
+async def request_magic_link(body: MagicLinkRequest):
     """Request a magic link code to be sent to email"""
     with db.engine.begin() as connection:
         # Check if user exists
@@ -138,6 +139,9 @@ def request_magic_link(body: MagicLinkRequest):
         # In dev mode, print the code
         if settings.DEV_MODE:
             print(f"[DEV MAGIC CODE] email={body.email} code={code}")
+
+        # Send email with magic link code
+        await send_magic_link_email(body.email, code)
 
         return {"ok": True, "message": "Magic link sent to your email"}
 
