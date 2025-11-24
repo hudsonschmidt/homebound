@@ -152,6 +152,14 @@ final class Session: ObservableObject {
         }
     }
 
+    // Apple Sign In
+    @Published var showAppleLinkAlert: Bool = false
+    @Published var pendingAppleUserID: String? = nil
+    @Published var pendingAppleEmail: String? = nil
+    @Published var pendingAppleIdentityToken: String? = nil
+    @Published var appleFirstName: String? = nil
+    @Published var appleLastName: String? = nil
+
     // Active plan
     @Published var activePlan: PlanOut? = nil
     @Published var isLoadingPlan: Bool = false
@@ -352,6 +360,183 @@ final class Session: ObservableObject {
         await MainActor.run { self.isVerifying = true }
         defer { Task { await MainActor.run { self.isVerifying = false } } }
         await verify()
+    }
+
+    /// Sign in with Apple
+    @MainActor
+    func signInWithApple(
+        userID: String,
+        email: String?,
+        firstName: String?,
+        lastName: String?,
+        identityToken: Data?
+    ) async {
+        self.error = nil
+        self.isRequesting = true
+        defer { self.isRequesting = false }
+
+        // Convert identity token to string
+        guard let tokenData = identityToken,
+              let tokenString = String(data: tokenData, encoding: .utf8) else {
+            self.error = "Invalid Apple Sign In token"
+            return
+        }
+
+        struct AppleSignInRequest: Encodable {
+            let identity_token: String
+            let user_id: String
+            let email: String?
+            let first_name: String?
+            let last_name: String?
+        }
+
+        struct AppleSignInResponse: Decodable {
+            let account_exists: Bool
+            let email: String
+            let access: String?
+            let refresh: String?
+            let user: UserSummary?
+
+            struct UserSummary: Decodable {
+                let id: Int?
+                let email: String?
+                let first_name: String?
+                let last_name: String?
+                let age: Int?
+                let profile_completed: Bool?
+            }
+        }
+
+        do {
+            let resp: AppleSignInResponse = try await api.post(
+                url("/api/v1/auth/apple"),
+                body: AppleSignInRequest(
+                    identity_token: tokenString,
+                    user_id: userID,
+                    email: email,
+                    first_name: firstName,
+                    last_name: lastName
+                ),
+                bearer: nil
+            )
+
+            // Check if account exists and needs linking
+            if resp.account_exists {
+                print("[Session] ⚠️  Account exists with email \(resp.email) - prompting for linking")
+                // Store Apple credentials for linking later
+                self.pendingAppleUserID = userID
+                self.pendingAppleEmail = resp.email
+                self.pendingAppleIdentityToken = tokenString
+                self.showAppleLinkAlert = true
+                return
+            }
+
+            // Normal sign in - store tokens and user data
+            if let access = resp.access {
+                accessToken = access
+            }
+
+            if let refresh = resp.refresh {
+                keychain.saveRefreshToken(refresh)
+                LocalStorage.shared.saveAuthTokens(access: accessToken, refresh: refresh)
+            }
+
+            // Store user profile data
+            if let user = resp.user {
+                if let firstName = user.first_name, let lastName = user.last_name {
+                    userName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces)
+                    // Store individual names for onboarding pre-fill
+                    self.appleFirstName = firstName
+                    self.appleLastName = lastName
+                } else {
+                    userName = nil
+                    self.appleFirstName = nil
+                    self.appleLastName = nil
+                }
+
+                userAge = user.age
+                userEmail = user.email ?? email ?? ""
+                profileCompleted = user.profile_completed ?? false
+            }
+
+            isAuthenticated = true
+            print("[Session] ✅ Apple Sign In successful")
+
+        } catch let API.APIError.server(msg) {
+            self.error = msg
+        } catch {
+            self.error = "Apple Sign In failed. Please try again."
+        }
+    }
+
+    /// Link Apple ID to existing account
+    @MainActor
+    func linkAppleAccount() async {
+        guard let userID = pendingAppleUserID,
+              let email = pendingAppleEmail,
+              let token = pendingAppleIdentityToken else {
+            self.error = "No pending Apple account to link"
+            return
+        }
+
+        self.error = nil
+        self.isRequesting = true
+        defer { self.isRequesting = false }
+
+        struct AppleLinkRequest: Encodable {
+            let identity_token: String
+            let user_id: String
+            let email: String
+        }
+
+        do {
+            let resp: VerifyResponse = try await api.post(
+                url("/api/v1/auth/apple/link"),
+                body: AppleLinkRequest(
+                    identity_token: token,
+                    user_id: userID,
+                    email: email
+                ),
+                bearer: nil
+            )
+
+            // Store tokens and user data (same as regular sign in)
+            if let t = resp.access ?? resp.access_token ?? resp.token {
+                accessToken = t
+            }
+
+            if let refresh = resp.refresh {
+                keychain.saveRefreshToken(refresh)
+                LocalStorage.shared.saveAuthTokens(access: accessToken, refresh: refresh)
+            }
+
+            if let user = resp.user {
+                if let firstName = user.first_name, let lastName = user.last_name {
+                    userName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces)
+                } else if let name = user.name {
+                    userName = name
+                }
+
+                userAge = user.age
+                userEmail = user.email ?? email
+                profileCompleted = user.profile_completed ?? false
+            }
+
+            isAuthenticated = true
+
+            // Clear pending Apple credentials
+            self.pendingAppleUserID = nil
+            self.pendingAppleEmail = nil
+            self.pendingAppleIdentityToken = nil
+            self.showAppleLinkAlert = false
+
+            print("[Session] ✅ Apple account linked successfully")
+
+        } catch let API.APIError.server(msg) {
+            self.error = msg
+        } catch {
+            self.error = "Account linking failed. Please try again."
+        }
     }
 
     /// Refresh the access token using the stored refresh token

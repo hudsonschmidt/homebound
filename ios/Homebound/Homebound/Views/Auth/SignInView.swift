@@ -1,8 +1,59 @@
 import SwiftUI
+import AuthenticationServices
+
+// MARK: - Apple Sign In Coordinator
+class AppleSignInCoordinator: NSObject, ASAuthorizationControllerDelegate {
+    let session: Session
+    let onSuccess: () -> Void
+
+    init(session: Session, onSuccess: @escaping () -> Void) {
+        self.session = session
+        self.onSuccess = onSuccess
+    }
+
+    func authorizationController(controller: ASAuthorizationController,
+                                didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+            return
+        }
+
+        Task {
+            await session.signInWithApple(
+                userID: credential.user,
+                email: credential.email,
+                firstName: credential.fullName?.givenName,
+                lastName: credential.fullName?.familyName,
+                identityToken: credential.identityToken
+            )
+
+            // Call success callback on main actor
+            await MainActor.run {
+                onSuccess()
+            }
+        }
+    }
+
+    func authorizationController(controller: ASAuthorizationController,
+                                didCompleteWithError error: Error) {
+        Task {
+            await MainActor.run {
+                // Check if user cancelled
+                if let authError = error as? ASAuthorizationError,
+                   authError.code == .canceled {
+                    print("[AppleAuth] User cancelled")
+                    return
+                }
+
+                session.error = "Apple Sign In failed: \(error.localizedDescription)"
+            }
+        }
+    }
+}
 
 struct SignInView: View {
     @EnvironmentObject var session: Session
     @State private var localEmail: String = ""
+    @State private var appleSignInCoordinator: AppleSignInCoordinator?
 
     var body: some View {
         NavigationStack {
@@ -52,7 +103,16 @@ struct SignInView: View {
                     }
 
                     Button(action: {
-                        // TODO: Sign in with Apple flow (ASAuthorizationController)
+                        let provider = ASAuthorizationAppleIDProvider()
+                        let request = provider.createRequest()
+                        request.requestedScopes = [.email, .fullName]
+
+                        let controller = ASAuthorizationController(authorizationRequests: [request])
+                        appleSignInCoordinator = AppleSignInCoordinator(session: session) {
+                            // Success callback - coordinator will handle auth
+                        }
+                        controller.delegate = appleSignInCoordinator
+                        controller.performRequests()
                     }) {
                         HStack {
                             Image(systemName: "apple.logo")
@@ -61,6 +121,7 @@ struct SignInView: View {
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .font(.headline)
                     }
+                    .disabled(session.isRequesting)
                     .background(Color(.secondarySystemBackground))
                     .foregroundStyle(.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -76,6 +137,23 @@ struct SignInView: View {
             .sheet(isPresented: Binding(get: { session.showCodeSheet }, set: { session.showCodeSheet = $0 })) {
                 VerifyCodeSheet()
                     .presentationDetents([.height(280)])
+            }
+            .alert("Link Apple Account?", isPresented: $session.showAppleLinkAlert) {
+                Button("Link Account") {
+                    Task {
+                        await session.linkAppleAccount()
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    // Clear pending Apple credentials
+                    session.pendingAppleUserID = nil
+                    session.pendingAppleEmail = nil
+                    session.pendingAppleIdentityToken = nil
+                }
+            } message: {
+                if let email = session.pendingAppleEmail {
+                    Text("An account with \(email) already exists. Would you like to link it to Sign in with Apple?")
+                }
             }
             .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)

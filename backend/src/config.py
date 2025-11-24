@@ -40,6 +40,9 @@ class Settings:
     APNS_BUNDLE_ID: str = os.getenv("APNS_BUNDLE_ID", "com.homeboundapp.Homebound")
     APNS_AUTH_KEY_PATH: str = os.getenv("APNS_AUTH_KEY_PATH", "")
 
+    # Apple Sign In settings
+    APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID", "com.hudsonschmidt.Homebound")
+
     # Development settings
     DEV_MODE: bool = os.getenv("DEV_MODE", "true").lower() == "true"
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")

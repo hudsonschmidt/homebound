@@ -197,9 +197,23 @@ struct OnboardingView: View {
         }
         .onAppear {
             animationAmount = 1.1
-            // Auto-focus first name field after a brief delay
+
+            // Pre-fill name fields from Apple Sign In if available
+            if let appleFirst = session.appleFirstName, !appleFirst.isEmpty {
+                firstName = appleFirst
+            }
+            if let appleLast = session.appleLastName, !appleLast.isEmpty {
+                lastName = appleLast
+            }
+
+            // Auto-focus appropriate field after a brief delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                focusedField = .firstName
+                // If name is pre-filled from Apple, focus on age field
+                if session.appleFirstName != nil && session.appleLastName != nil {
+                    focusedField = .age
+                } else {
+                    focusedField = .firstName
+                }
             }
         }
         .alert("Oops!", isPresented: $showError) {

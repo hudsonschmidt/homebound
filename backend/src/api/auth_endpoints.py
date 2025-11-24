@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from src import database as db
 from src import config
+from src.api.apple_auth import validate_apple_identity_token
 import sqlalchemy
 
 router = APIRouter(
@@ -303,5 +304,235 @@ def refresh_token(body: RefreshRequest):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
+        )
+
+
+# MARK: - Sign in with Apple Endpoints
+
+class AppleSignInRequest(BaseModel):
+    identity_token: str
+    user_id: str
+    email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+class AppleSignInResponse(BaseModel):
+    account_exists: bool
+    email: str
+    access: str | None = None
+    refresh: str | None = None
+    user: dict | None = None
+
+
+@router.post("/apple", response_model=AppleSignInResponse)
+def apple_sign_in(body: AppleSignInRequest):
+    """
+    Authenticate or create user via Sign in with Apple
+
+    Flow:
+    1. Validate identity_token with Apple's public keys
+    2. Check if apple_user_id exists in database
+    3. If exists: Return JWT tokens for existing user
+    4. If not exists + email matches existing user: Return account_exists=True
+    5. If not exists + no email match: Create new user and return tokens
+    """
+    # Validate the Apple identity token
+    token_payload = validate_apple_identity_token(
+        identity_token=body.identity_token,
+        expected_audience=settings.APPLE_BUNDLE_ID,
+        expected_user_id=body.user_id
+    )
+
+    print(f"[AppleAuth] ✅ Token validated for user: {token_payload.get('sub')}")
+
+    with db.engine.begin() as connection:
+        # Check if Apple user ID already exists
+        existing_user = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, email, first_name, last_name, age
+                FROM users
+                WHERE apple_user_id = :apple_user_id
+                """
+            ),
+            {"apple_user_id": body.user_id}
+        ).fetchone()
+
+        if existing_user:
+            # User exists with this Apple ID - sign them in
+            print(f"[AppleAuth] ✅ Existing Apple user found: user_id={existing_user.id}")
+
+            access, refresh = create_jwt_pair(existing_user.id, existing_user.email)
+
+            profile_completed = (
+                bool(existing_user.first_name and existing_user.first_name.strip()) and
+                bool(existing_user.last_name and existing_user.last_name.strip()) and
+                existing_user.age > 0
+            )
+
+            return AppleSignInResponse(
+                account_exists=False,
+                email=existing_user.email,
+                access=access,
+                refresh=refresh,
+                user={
+                    "id": existing_user.id,
+                    "email": existing_user.email,
+                    "first_name": existing_user.first_name,
+                    "last_name": existing_user.last_name,
+                    "age": existing_user.age,
+                    "profile_completed": profile_completed
+                }
+            )
+
+        # Check if email matches an existing account (without Apple ID)
+        if body.email:
+            email_match = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id, email
+                    FROM users
+                    WHERE email = :email AND apple_user_id IS NULL
+                    """
+                ),
+                {"email": body.email}
+            ).fetchone()
+
+            if email_match:
+                # Account exists with this email - prompt user to link
+                print(f"[AppleAuth] ⚠️  Email {body.email} matches existing account - requiring user confirmation")
+                return AppleSignInResponse(
+                    account_exists=True,
+                    email=body.email,
+                    access=None,
+                    refresh=None,
+                    user=None
+                )
+
+        # No existing account - create new user
+        print(f"[AppleAuth] 🆕 Creating new account for Apple user_id={body.user_id}")
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age, apple_user_id)
+                VALUES (:email, :first_name, :last_name, :age, :apple_user_id)
+                RETURNING id, email, first_name, last_name, age
+                """
+            ),
+            {
+                "email": body.email or f"{body.user_id}@appleid.private",
+                "first_name": body.first_name or "",
+                "last_name": body.last_name or "",
+                "age": 0,
+                "apple_user_id": body.user_id
+            }
+        )
+        new_user = result.fetchone()
+
+        access, refresh = create_jwt_pair(new_user.id, new_user.email)
+
+        # New users always need to complete profile (age required)
+        profile_completed = False
+
+        return AppleSignInResponse(
+            account_exists=False,
+            email=new_user.email,
+            access=access,
+            refresh=refresh,
+            user={
+                "id": new_user.id,
+                "email": new_user.email,
+                "first_name": new_user.first_name,
+                "last_name": new_user.last_name,
+                "age": new_user.age,
+                "profile_completed": profile_completed
+            }
+        )
+
+
+class AppleLinkRequest(BaseModel):
+    identity_token: str
+    user_id: str
+    email: str
+
+
+@router.post("/apple/link")
+def link_apple_account(body: AppleLinkRequest):
+    """
+    Link Apple ID to existing account (user must first authenticate with magic link)
+
+    This endpoint is called after user confirms they want to link their Apple ID
+    to an existing email-based account.
+    """
+    # Validate the Apple identity token
+    token_payload = validate_apple_identity_token(
+        identity_token=body.identity_token,
+        expected_audience=settings.APPLE_BUNDLE_ID,
+        expected_user_id=body.user_id
+    )
+
+    print(f"[AppleAuth] ✅ Linking validated token for user: {token_payload.get('sub')}")
+
+    with db.engine.begin() as connection:
+        # Find user by email (they should have authenticated via magic link first)
+        user = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, email, first_name, last_name, age, apple_user_id
+                FROM users
+                WHERE email = :email
+                """
+            ),
+            {"email": body.email}
+        ).fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if user.apple_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This account is already linked to an Apple ID"
+            )
+
+        # Link the Apple ID to this account
+        connection.execute(
+            sqlalchemy.text(
+                """
+                UPDATE users
+                SET apple_user_id = :apple_user_id
+                WHERE id = :user_id
+                """
+            ),
+            {"apple_user_id": body.user_id, "user_id": user.id}
+        )
+
+        print(f"[AppleAuth] 🔗 Linked Apple ID to user_id={user.id}, email={user.email}")
+
+        # Generate new tokens
+        access, refresh = create_jwt_pair(user.id, user.email)
+
+        profile_completed = (
+            bool(user.first_name and user.first_name.strip()) and
+            bool(user.last_name and user.last_name.strip()) and
+            user.age > 0
+        )
+
+        return TokenResponse(
+            access=access,
+            refresh=refresh,
+            user={
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "age": user.age,
+                "profile_completed": profile_completed
+            }
         )
 
