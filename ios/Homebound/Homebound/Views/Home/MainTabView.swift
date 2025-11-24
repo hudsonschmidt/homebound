@@ -49,16 +49,9 @@ struct NewHomeView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background gradient
-                LinearGradient(
-                    colors: [
-                        Color(.systemBackground),
-                        Color(.systemBackground).opacity(0.95)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                // Plain background - adapts to system light/dark mode
+                Color(.systemBackground)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -220,13 +213,7 @@ struct BigNewTripCard: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .background(Color.hbAccent)
                     .cornerRadius(12)
                 }
             }
@@ -269,37 +256,61 @@ struct ActivePlanCardCompact: View {
     @State private var isPerformingAction = false
     @State private var showingExtendOptions = false
     @State private var selectedExtendMinutes = 30
+    @State private var appeared = false
 
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let extendOptions = [
-        (15, "15 minutes"),
-        (30, "30 minutes"),
-        (60, "1 hour"),
-        (120, "2 hours"),
-        (180, "3 hours")
+        (15, "15 min"),
+        (30, "30 min"),
+        (60, "1 hr"),
+        (120, "2 hrs"),
+        (180, "3 hrs")
     ]
 
     var body: some View {
         VStack(spacing: 20) {
-            // Status badge
+            // Status badge with pulse animation
             HStack {
                 Circle()
                     .fill(isOverdue ? Color.red : Color.green)
                     .frame(width: 12, height: 12)
+                    .overlay(
+                        Circle()
+                            .stroke(isOverdue ? Color.red : Color.green, lineWidth: 2)
+                            .scaleEffect(isOverdue ? 1.4 : 1.0)
+                            .opacity(isOverdue ? 0.0 : 1.0)
+                            .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false), value: isOverdue)
+                    )
 
                 Text(isOverdue ? "OVERDUE" : "ACTIVE TRIP")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(isOverdue ? Color.red : Color.green)
+                    .foregroundStyle(.white.opacity(0.9))
 
                 Spacer()
             }
 
-            // Plan info
+            // Plan info with activity icon
             VStack(alignment: .leading, spacing: 12) {
-                Text(plan.title)
-                    .font(.title2)
-                    .fontWeight(.bold)
+                HStack(alignment: .top, spacing: 12) {
+                    // Activity icon
+                    Text(plan.activity.icon)
+                        .font(.system(size: 32))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(plan.title)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.white)
+
+                        Text(plan.activity.name)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+
+                    Spacer()
+                }
 
                 if let location = plan.location_text {
                     HStack {
@@ -308,29 +319,37 @@ struct ActivePlanCardCompact: View {
                         Text(location)
                             .font(.subheadline)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.8))
                 }
 
                 // Time remaining
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Expected return")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.7))
                     Text(timeRemaining)
                         .font(.title3)
                         .fontWeight(.semibold)
-                        .foregroundStyle(isOverdue ? Color.red : Color.primary)
+                        .foregroundStyle(isOverdue ? Color.red.opacity(0.9) : .white)
                 }
             }
 
-            // Action buttons
-            HStack(spacing: 16) {
+            // Action buttons with haptic feedback
+            HStack(spacing: 12) {
                 // Check-in button
                 Button(action: {
+                    let impact = UIImpactFeedbackGenerator(style: .medium)
+                    impact.impactOccurred()
+
                     if let token = plan.checkin_token {
                         Task {
                             isPerformingAction = true
                             await session.performTokenAction(token, action: "checkin")
+
+                            // Success haptic
+                            let success = UINotificationFeedbackGenerator()
+                            success.notificationOccurred(.success)
+
                             isPerformingAction = false
                         }
                     }
@@ -341,17 +360,26 @@ struct ActivePlanCardCompact: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(Color.green)
-                        .cornerRadius(10)
+                        .background(Color.green.opacity(0.9))
+                        .cornerRadius(12)
+                        .shadow(color: Color.green.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(plan.checkin_token == nil || isPerformingAction)
 
                 // I'm safe button
                 Button(action: {
+                    let impact = UIImpactFeedbackGenerator(style: .medium)
+                    impact.impactOccurred()
+
                     if let token = plan.checkout_token {
                         Task {
                             isPerformingAction = true
                             await session.performTokenAction(token, action: "checkout")
+
+                            // Success haptic with confetti effect
+                            let success = UINotificationFeedbackGenerator()
+                            success.notificationOccurred(.success)
+
                             // Reload active plan to update UI
                             await session.loadActivePlan()
                             isPerformingAction = false
@@ -364,14 +392,9 @@ struct ActivePlanCardCompact: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(
-                            LinearGradient(
-                                colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .cornerRadius(10)
+                        .background(Color.hbAccent)
+                        .cornerRadius(12)
+                        .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(plan.checkout_token == nil || isPerformingAction)
             }
@@ -383,33 +406,41 @@ struct ActivePlanCardCompact: View {
                     VStack(spacing: 8) {
                         Text("Extend trip by:")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.7))
 
-                        HStack(spacing: 8) {
-                            ForEach(extendOptions, id: \.0) { minutes, label in
-                                Button(action: {
-                                    Task {
-                                        isPerformingAction = true
-                                        _ = await session.extendPlan(minutes: minutes)
-                                        showingExtendOptions = false
-                                        isPerformingAction = false
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(extendOptions, id: \.0) { minutes, label in
+                                    Button(action: {
+                                        let impact = UIImpactFeedbackGenerator(style: .light)
+                                        impact.impactOccurred()
+
+                                        Task {
+                                            isPerformingAction = true
+                                            _ = await session.extendPlan(minutes: minutes)
+                                            showingExtendOptions = false
+                                            isPerformingAction = false
+                                        }
+                                    }) {
+                                        Text(label)
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .glassmorphicButton(cornerRadius: 8)
                                     }
-                                }) {
-                                    Text(label)
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(Color(hex: "#6C63FF") ?? .purple)
-                                        .cornerRadius(6)
                                 }
                             }
+                            .padding(.horizontal, 2)
                         }
                     }
                     .transition(.scale.combined(with: .opacity))
                 } else {
                     Button(action: {
+                        let impact = UIImpactFeedbackGenerator(style: .light)
+                        impact.impactOccurred()
+
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             showingExtendOptions = true
                         }
@@ -417,20 +448,37 @@ struct ActivePlanCardCompact: View {
                         Label("Extend Time", systemImage: "clock.arrow.circlepath")
                             .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(.white.opacity(0.9))
                     }
                 }
             }
+
+            // Safety Tips Carousel
+            SafetyTipsCarousel(safetyTips: plan.activity.safety_tips)
         }
         .padding(24)
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(20)
-        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+        .glassmorphic(cornerRadius: 32, borderOpacity: 0.0)
+        // Prominent glow effect using activity's primary color
+        .shadow(
+            color: Color(hex: plan.activity.colors.primary)?.opacity(0.4) ?? .clear,
+            radius: 20,
+            y: 10
+        )
+        .shadow(
+            color: Color(hex: plan.activity.colors.primary)?.opacity(0.6) ?? .clear,
+            radius: 12,
+            y: 6
+        )
+        .opacity(appeared ? 1.0 : 0.0)
+        .offset(y: appeared ? 0 : 20)
         .onReceive(timer) { _ in
             updateTimeRemaining()
         }
         .onAppear {
             updateTimeRemaining()
+            withAnimation(.easeOut(duration: 0.5)) {
+                appeared = true
+            }
         }
     }
 
@@ -703,6 +751,26 @@ struct HistoryTabView: View {
                     self.isLoading = false
                 }
             } catch {
+                print("[MainTabView] ❌ Failed to load trips: \(error)")
+                if let decodingError = error as? DecodingError {
+                    switch decodingError {
+                    case .typeMismatch(let type, let context):
+                        print("[MainTabView] Type mismatch: \(type) at \(context.codingPath)")
+                        print("[MainTabView] Debug: \(context.debugDescription)")
+                    case .valueNotFound(let type, let context):
+                        print("[MainTabView] Value not found: \(type) at \(context.codingPath)")
+                        print("[MainTabView] Debug: \(context.debugDescription)")
+                    case .keyNotFound(let key, let context):
+                        print("[MainTabView] Key not found: \(key) at \(context.codingPath)")
+                        print("[MainTabView] Debug: \(context.debugDescription)")
+                    case .dataCorrupted(let context):
+                        print("[MainTabView] Data corrupted at \(context.codingPath)")
+                        print("[MainTabView] Debug: \(context.debugDescription)")
+                    @unknown default:
+                        print("[MainTabView] Unknown decoding error: \(decodingError)")
+                    }
+                }
+
                 // Only show error if not cancelled
                 if !Task.isCancelled {
                     let errorText = error.localizedDescription
@@ -872,7 +940,7 @@ struct HistoryRowView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // End time
+                // End time - show actual completion time for completed trips
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
@@ -880,9 +948,18 @@ struct HistoryRowView: View {
                     Text("Finish:")
                         .font(.caption)
                         .fontWeight(.medium)
-                    Text(plan.eta_at.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+                    // For completed trips, show actual completion time; otherwise show ETA
+                    if plan.status == "completed", let completedAtStr = plan.completed_at,
+                       let completedDate = parseCompletedDate(completedAtStr) {
+                        Text(completedDate.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(plan.eta_at.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 // Duration
@@ -933,6 +1010,31 @@ struct HistoryRowView: View {
         } else if minutes > 0 {
             return "\(minutes)m"
         }
+        return nil
+    }
+
+    func parseCompletedDate(_ dateString: String) -> Date? {
+        // Try ISO8601 format first (backend sends this)
+        let iso8601Formatter = ISO8601DateFormatter()
+        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        // Try without fractional seconds
+        iso8601Formatter.formatOptions = [.withInternetDateTime]
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        // Try custom format for backend timestamps
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+
         return nil
     }
 }

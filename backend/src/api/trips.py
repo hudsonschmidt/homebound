@@ -534,7 +534,8 @@ def extend_trip(trip_id: int, minutes: int, user_id: int = Depends(auth.get_curr
 
         # Parse current ETA and add minutes
         from datetime import timedelta
-        current_eta = datetime.fromisoformat(trip.eta)
+        # trip.eta is already a datetime object from the database
+        current_eta = trip.eta if isinstance(trip.eta, datetime) else datetime.fromisoformat(trip.eta)
         new_eta = current_eta + timedelta(minutes=minutes)
 
         # Update trip ETA

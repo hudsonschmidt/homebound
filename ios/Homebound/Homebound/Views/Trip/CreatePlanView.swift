@@ -124,15 +124,7 @@ struct CreatePlanView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 50)
-                                .background(
-                                    LinearGradient(
-                                        colors: canProceedFromCurrentStep() ?
-                                            [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal] :
-                                            [Color.gray, Color.gray.opacity(0.8)],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
+                                .background(canProceedFromCurrentStep() ? Color.hbAccent : Color.gray)
                                 .foregroundStyle(.white)
                                 .cornerRadius(12)
                             }
@@ -335,18 +327,7 @@ struct ProgressIndicator: View {
         HStack(spacing: 8) {
             ForEach(1...totalSteps, id: \.self) { step in
                 Circle()
-                    .fill(step <= currentStep ?
-                        LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ) :
-                        LinearGradient(
-                            colors: [Color(.systemGray4), Color(.systemGray4)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .fill(step <= currentStep ? Color.hbAccent : Color(.systemGray4))
                     .frame(width: 8, height: 8)
                     .animation(.easeInOut, value: currentStep)
             }
@@ -475,9 +456,9 @@ struct Step2TimeSettings: View {
     @State private var departureHour = 9
     @State private var departureMinute = 0
     @State private var departureAMPM = 0 // 0 = AM, 1 = PM
-    @State private var returnHour = 5
+    @State private var returnHour = 11  // 11:00 AM (2 hours after default 9:00 AM departure)
     @State private var returnMinute = 0
-    @State private var returnAMPM = 1 // 0 = AM, 1 = PM
+    @State private var returnAMPM = 0 // 0 = AM (changed from 1 PM to match default 2-hour trip)
 
     // For the date range visualization
     var dateRangeString: String {
@@ -1100,7 +1081,7 @@ struct CalendarView: View {
 
             // Weekday headers
             HStack {
-                ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
+                ForEach(Array(["S", "M", "T", "W", "T", "F", "S"].enumerated()), id: \.offset) { index, day in
                     Text(day)
                         .font(.caption)
                         .fontWeight(.medium)
@@ -1363,13 +1344,7 @@ struct Step3EmergencyContacts: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(
-                            LinearGradient(
-                                colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .background(Color.hbAccent)
                         .foregroundStyle(.white)
                         .cornerRadius(12)
                     }
@@ -1488,13 +1463,7 @@ struct Step4AdditionalNotes: View {
                 VStack(spacing: 16) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 48))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .foregroundStyle(Color.hbAccent)
 
                     Text("Ready to start your adventure?")
                         .font(.headline)
@@ -1522,13 +1491,7 @@ struct Step4AdditionalNotes: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .background(Color.hbAccent)
                     .foregroundStyle(.white)
                     .cornerRadius(16)
                 }
@@ -1581,13 +1544,7 @@ struct ContactCard: View {
     var body: some View {
         HStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(Color.hbAccent)
                 .frame(width: 44, height: 44)
                 .overlay(
                     Text(contact.name.prefix(1).uppercased())
@@ -1795,13 +1752,7 @@ struct SavedContactSelectionRow: View {
             HStack {
                 // Contact Icon
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color.hbAccent)
                     .frame(width: 40, height: 40)
                     .overlay(
                         Text(contact.name.prefix(1).uppercased())

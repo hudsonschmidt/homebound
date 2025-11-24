@@ -342,6 +342,9 @@ final class Session: ObservableObject {
 
             isAuthenticated = true
             showCodeSheet = false
+
+            // Load activities after successful authentication
+            await loadActivities()
         } catch let API.APIError.server(msg) {
             self.error = msg
         } catch {
@@ -461,6 +464,9 @@ final class Session: ObservableObject {
 
             isAuthenticated = true
             print("[Session] ✅ Apple Sign In successful")
+
+            // Load activities after successful authentication
+            await loadActivities()
 
         } catch let API.APIError.server(msg) {
             self.error = msg
@@ -813,9 +819,13 @@ final class Session: ObservableObject {
                 case "extend":
                     if let tripId = action.tripId,
                        let minutes = action.payload["minutes"] as? Int {
+                        // Construct URL with query parameters properly
+                        var urlComponents = URLComponents(url: url("/api/v1/trips/\(tripId)/extend"), resolvingAgainstBaseURL: false)!
+                        urlComponents.queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+
                         let _: GenericResponse = try await withAuth { bearer in
                             try await self.api.post(
-                                self.url("/api/v1/trips/\(tripId)/extend?minutes=\(minutes)"),
+                                urlComponents.url!,
                                 body: Empty(),
                                 bearer: bearer
                             )
@@ -911,9 +921,13 @@ final class Session: ObservableObject {
                 let new_eta: String
             }
 
+            // Construct URL with query parameters properly
+            var urlComponents = URLComponents(url: url("/api/v1/trips/\(plan.id)/extend"), resolvingAgainstBaseURL: false)!
+            urlComponents.queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+
             let _: ExtendResponse = try await withAuth { bearer in
                 try await self.api.post(
-                    self.url("/api/v1/trips/\(plan.id)/extend?minutes=\(minutes)"),
+                    urlComponents.url!,
                     body: Empty(),
                     bearer: bearer
                 )
@@ -1203,6 +1217,7 @@ final class Session: ObservableObject {
     // MARK: - Activities Management
     @MainActor
     func loadActivities() async {
+        print("[Session] 🔄 Loading activities from backend...")
         do {
             let response: [Activity] = try await api.get(
                 url("/api/v1/activities/"),
@@ -1211,21 +1226,27 @@ final class Session: ObservableObject {
 
             await MainActor.run {
                 self.activities = response.sorted { $0.order < $1.order }
+                print("[Session] ✅ Loaded \(response.count) activities from backend")
 
                 // Cache for offline access
                 LocalStorage.shared.cacheActivities(response)
+                print("[Session] 💾 Activities cached to local storage")
             }
         } catch {
+            print("[Session] ❌ Failed to load activities from backend: \(error)")
+
             // Fall back to cached activities on error
             let cachedActivities = LocalStorage.shared.getCachedActivities()
             await MainActor.run {
                 if !cachedActivities.isEmpty {
                     self.activities = cachedActivities
                     self.notice = "Showing cached activities (offline mode)"
+                    print("[Session] 📦 Using \(cachedActivities.count) cached activities")
                 } else {
                     // Ultimate fallback: use hardcoded ActivityTypes
                     self.activities = ActivityType.fallbackActivities()
                     self.notice = "Using offline activities (no connection)"
+                    print("[Session] 🔧 Using \(self.activities.count) fallback activities")
                 }
             }
         }

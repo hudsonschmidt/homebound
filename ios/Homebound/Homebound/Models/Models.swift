@@ -42,7 +42,7 @@ struct PlanOut: Codable, Identifiable, Equatable {
     var id: Int
     var user_id: Int
     var title: String
-    var activity: String
+    var activity: Activity  // Full activity object with colors, safety tips, messages
     var start_at: Date  // Computed from backend 'start'
     var eta_at: Date    // Computed from backend 'eta'
     var grace_minutes: Int  // Maps from backend 'grace_min'
@@ -61,7 +61,7 @@ struct PlanOut: Codable, Identifiable, Equatable {
     var checkout_token: String?
 
     // Legacy field name for backward compatibility
-    var activity_type: String { activity }
+    var activity_type: String { activity.name }
 
     enum CodingKeys: String, CodingKey {
         case id, user_id, title, activity, status, notes
@@ -79,7 +79,7 @@ struct PlanOut: Codable, Identifiable, Equatable {
         id = try container.decode(Int.self, forKey: .id)
         user_id = try container.decode(Int.self, forKey: .user_id)
         title = try container.decode(String.self, forKey: .title)
-        activity = try container.decode(String.self, forKey: .activity)
+        activity = try container.decode(Activity.self, forKey: .activity)
 
         // Parse date strings with fallback for different ISO8601 formats
         let startString = try container.decode(String.self, forKey: .start)
@@ -178,7 +178,7 @@ struct PlanOut: Codable, Identifiable, Equatable {
         id: Int,
         user_id: Int,
         title: String,
-        activity: String,
+        activity: Activity,
         start_at: Date,
         eta_at: Date,
         grace_minutes: Int,

@@ -6,6 +6,7 @@ struct API {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .iso8601)
         f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")  // Encode dates in UTC for backend
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         e.dateEncodingStrategy = .formatted(f)
         return e
@@ -35,6 +36,7 @@ struct API {
             let f = DateFormatter()
             f.calendar = Calendar(identifier: .iso8601)
             f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = TimeZone(identifier: "UTC")  // Parse dates from backend as UTC
             f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
             if let date = f.date(from: dateString) {
                 return date

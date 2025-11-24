@@ -15,7 +15,52 @@ struct HistoryView: View {
             }
             return true
         }
-        return filtered.sorted { $0.start_at > $1.start_at }
+        // Sort by completion time for completed trips, start time for others
+        return filtered.sorted { plan1, plan2 in
+            let date1: Date
+            if plan1.status == "completed", let completedStr = plan1.completed_at,
+               let completedDate = parseDate(completedStr) {
+                date1 = completedDate
+            } else {
+                date1 = plan1.start_at
+            }
+
+            let date2: Date
+            if plan2.status == "completed", let completedStr = plan2.completed_at,
+               let completedDate = parseDate(completedStr) {
+                date2 = completedDate
+            } else {
+                date2 = plan2.start_at
+            }
+
+            return date1 > date2
+        }
+    }
+
+    // Helper function for parsing dates (used in sorting and display)
+    private func parseDate(_ dateString: String) -> Date? {
+        // Try ISO8601 format first
+        let iso8601Formatter = ISO8601DateFormatter()
+        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        // Try without fractional seconds
+        iso8601Formatter.formatOptions = [.withInternetDateTime]
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        // Try custom format for backend timestamps
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+
+        return nil
     }
 
     var body: some View {
@@ -114,13 +159,24 @@ struct HistoryView: View {
                 bearer: bearer
             )
 
+            print("[HistoryView] 📥 Loaded \(plans.count) total trips from backend")
+            plans.forEach { plan in
+                print("[HistoryView] - '\(plan.title)': status=\(plan.status), completed_at=\(plan.completed_at ?? "nil")")
+            }
+
             await MainActor.run {
                 self.allPlans = plans
                 self.isLoading = false
             }
         } catch {
+            print("[HistoryView] ❌ Failed to load history: \(error)")
+            if let decodingError = error as? DecodingError {
+                print("[HistoryView] Decoding error details: \(decodingError)")
+            }
+
             await MainActor.run {
                 self.isLoading = false
+                session.lastError = "Failed to load history: \(error.localizedDescription)"
             }
         }
     }
@@ -139,8 +195,16 @@ struct HistoryView: View {
 struct TripHistoryCard: View {
     let plan: PlanOut
 
-    var activity: ActivityType {
-        ActivityType(rawValue: plan.activity_type) ?? .other
+    var primaryColor: Color {
+        Color(hex: plan.activity.colors.primary) ?? .purple
+    }
+
+    var activityIcon: String {
+        plan.activity.icon
+    }
+
+    var activityName: String {
+        plan.activity.name
     }
 
     var statusColor: Color {
@@ -159,10 +223,10 @@ struct TripHistoryCard: View {
             HStack {
                 // Activity Icon
                 Circle()
-                    .fill(activity.primaryColor.opacity(0.2))
+                    .fill(primaryColor.opacity(0.2))
                     .frame(width: 50, height: 50)
                     .overlay(
-                        Text(activity.icon)
+                        Text(activityIcon)
                             .font(.title2)
                     )
 
@@ -172,17 +236,45 @@ struct TripHistoryCard: View {
                         .lineLimit(1)
 
                     HStack(spacing: 4) {
-                        Image(systemName: "calendar")
-                            .font(.caption)
-                        Text(plan.start_at, style: .date)
+                        Image(systemName: plan.status == "completed" ? "checkmark.circle" : "calendar")
                             .font(.caption)
 
-                        Text("•")
-                            .foregroundStyle(.secondary)
+                        // Show completion time for completed trips, otherwise show start time
+                        if plan.status == "completed" {
+                            if let completedAtStr = plan.completed_at, !completedAtStr.isEmpty {
+                                if let completedDate = parseDate(completedAtStr) {
+                                    // Show actual completion time
+                                    Text("Finished:")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(completedDate, style: .date)
+                                        .font(.caption)
+                                    Text("at")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(completedDate, style: .time)
+                                        .font(.caption)
+                                } else {
+                                    Text("Parse error")
+                                        .font(.caption2)
+                                        .foregroundStyle(.red)
+                                }
+                            } else {
+                                Text("No completion time")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                        } else {
+                            Text(plan.start_at, style: .date)
+                                .font(.caption)
 
-                        Text(formatDuration(from: plan.start_at, to: plan.eta_at))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            Text("•")
+                                .foregroundStyle(.secondary)
+
+                            Text(formatDuration(from: plan.start_at, to: plan.eta_at))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -216,10 +308,10 @@ struct TripHistoryCard: View {
             HStack {
                 Image(systemName: "figure.walk")
                     .font(.caption)
-                    .foregroundStyle(activity.primaryColor)
-                Text(activity.displayName)
+                    .foregroundStyle(primaryColor)
+                Text(activityName)
                     .font(.caption)
-                    .foregroundStyle(activity.primaryColor)
+                    .foregroundStyle(primaryColor)
                     .fontWeight(.medium)
             }
         }
@@ -239,6 +331,31 @@ struct TripHistoryCard: View {
         } else {
             return "\(minutes)m"
         }
+    }
+
+    func parseDate(_ dateString: String) -> Date? {
+        // Try ISO8601 format first
+        let iso8601Formatter = ISO8601DateFormatter()
+        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        // Try without fractional seconds
+        iso8601Formatter.formatOptions = [.withInternetDateTime]
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        // Try custom format for backend timestamps
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+
+        return nil
     }
 }
 
