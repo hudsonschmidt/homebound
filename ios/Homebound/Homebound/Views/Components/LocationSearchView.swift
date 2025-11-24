@@ -10,10 +10,13 @@ struct LocationSearchView: View {
     @Binding var isPresented: Bool
 
     @StateObject private var searchCompleter = LocationSearchCompleter()
+    @StateObject private var locationManager = LocationManager.shared
     @State private var searchText = ""
     @State private var showingNearby = true
     @State private var nearbyPlaces: [MKMapItem] = []
     @State private var isLoadingNearby = true
+    @State private var isGettingCurrentLocation = false
+    @State private var showLocationDeniedAlert = false
 
     var body: some View {
         NavigationStack {
@@ -52,20 +55,22 @@ struct LocationSearchView: View {
                     if showingNearby {
                         // Current Location Option
                         Section {
-                            Button(action: {
-                                selectedLocation = "Current Location"
-                                selectedCoordinates = searchCompleter.currentLocation
-                                isPresented = false
-                            }) {
+                            Button(action: handleCurrentLocationTap) {
                                 HStack {
                                     ZStack {
                                         Circle()
                                             .fill(Color(hex: "#6C63FF") ?? .purple)
                                             .frame(width: 40, height: 40)
 
-                                        Image(systemName: "location.fill")
-                                            .foregroundStyle(.white)
-                                            .font(.system(size: 18))
+                                        if isGettingCurrentLocation {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                .scaleEffect(0.8)
+                                        } else {
+                                            Image(systemName: locationManager.isAuthorized ? "location.fill" : "location.slash.fill")
+                                                .foregroundStyle(.white)
+                                                .font(.system(size: 18))
+                                        }
                                     }
 
                                     VStack(alignment: .leading, spacing: 4) {
@@ -74,14 +79,29 @@ struct LocationSearchView: View {
                                             .fontWeight(.medium)
                                             .foregroundStyle(.primary)
 
-                                        Text("Use your current location")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        if let error = locationManager.locationError {
+                                            Text(error)
+                                                .font(.caption)
+                                                .foregroundStyle(.red)
+                                        } else if isGettingCurrentLocation {
+                                            Text("Getting your location...")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        } else if locationManager.isAuthorized {
+                                            Text("Use your current location")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Text("Tap to enable location")
+                                                .font(.caption)
+                                                .foregroundStyle(.orange)
+                                        }
                                     }
 
                                     Spacer()
                                 }
                             }
+                            .disabled(isGettingCurrentLocation)
                         }
 
                         // Nearby Places
@@ -155,9 +175,122 @@ struct LocationSearchView: View {
                     }
                 }
             }
+            .alert("Location Access Denied", isPresented: $showLocationDeniedAlert) {
+                Button("Open Settings") {
+                    locationManager.openSettings()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Please enable location access in Settings to use your current location.")
+            }
         }
         .task {
+            // Start location services when view appears
+            locationManager.startUpdatingLocation()
             await loadNearbyPlaces()
+        }
+    }
+
+    private func handleCurrentLocationTap() {
+        Task {
+            // Check authorization status
+            switch locationManager.authorizationStatus {
+            case .notDetermined:
+                // Request permission
+                print("[LocationSearch] Requesting location permission...")
+                locationManager.requestPermission()
+                // Wait a moment for permission to be granted
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+
+            case .denied, .restricted:
+                // Show alert to open settings
+                print("[LocationSearch] Location denied/restricted - showing alert")
+                await MainActor.run {
+                    showLocationDeniedAlert = true
+                }
+                return
+
+            case .authorizedWhenInUse, .authorizedAlways:
+                break
+
+            @unknown default:
+                break
+            }
+
+            // Get current location
+            guard locationManager.isAuthorized else {
+                print("[LocationSearch] Not authorized after permission request")
+                return
+            }
+
+            await MainActor.run {
+                isGettingCurrentLocation = true
+            }
+
+            if let location = await locationManager.getCurrentLocation() {
+                // Reverse geocode to get actual address using modern MapKit API
+                let request = MKLocalSearch.Request()
+                request.resultTypes = .pointOfInterest
+                request.region = MKCoordinateRegion(
+                    center: location,
+                    span: MKCoordinateSpan(latitudeDelta: 0.001, longitudeDelta: 0.001)
+                )
+
+                let search = MKLocalSearch(request: request)
+
+                do {
+                    let response = try await search.start()
+
+                    if let item = response.mapItems.first {
+                        // Use the map item name and address
+                        var addressComponents: [String] = []
+
+                        if let name = item.name, !name.isEmpty {
+                            addressComponents.append(name)
+                        }
+
+                        if let locality = item.placemark.locality {
+                            addressComponents.append(locality)
+                        }
+
+                        if let state = item.placemark.administrativeArea {
+                            addressComponents.append(state)
+                        }
+
+                        let address = addressComponents.joined(separator: ", ")
+
+                        await MainActor.run {
+                            selectedLocation = address.isEmpty ? "Current Location" : address
+                            selectedCoordinates = location
+                            isGettingCurrentLocation = false
+                            isPresented = false
+                            print("[LocationSearch] ✅ Current location: \(address)")
+                        }
+                    } else {
+                        // Fallback if no items found
+                        await MainActor.run {
+                            selectedLocation = "Current Location"
+                            selectedCoordinates = location
+                            isGettingCurrentLocation = false
+                            isPresented = false
+                        }
+                    }
+                } catch {
+                    print("[LocationSearch] Reverse geocoding failed: \(error)")
+                    // Fallback to "Current Location" if geocoding fails
+                    await MainActor.run {
+                        selectedLocation = "Current Location"
+                        selectedCoordinates = location
+                        isGettingCurrentLocation = false
+                        isPresented = false
+                    }
+                }
+            } else {
+                await MainActor.run {
+                    isGettingCurrentLocation = false
+                    print("[LocationSearch] ❌ Failed to get current location")
+                }
+            }
         }
     }
 
@@ -185,7 +318,7 @@ struct LocationSearchView: View {
     }
 
     private func loadNearbyPlaces() async {
-        guard let location = searchCompleter.currentLocation else {
+        guard let location = locationManager.currentLocation else {
             await MainActor.run {
                 isLoadingNearby = false
             }
@@ -220,7 +353,7 @@ struct LocationSearchView: View {
 struct LocationRow: View {
     let mapItem: MKMapItem
     let onSelect: () -> Void
-    @StateObject private var locationManager = LocationHelper()
+    @ObservedObject private var locationManager = LocationManager.shared
 
     private var categoryIcon: String {
         guard let category = mapItem.pointOfInterestCategory else {
@@ -383,31 +516,9 @@ struct SearchResultRow: View {
     }
 }
 
-// MARK: - Location Helper (for LocationRow)
-class LocationHelper: NSObject, ObservableObject {
-    @Published var currentLocation: CLLocationCoordinate2D?
-    private let locationManager = CLLocationManager()
-
-    override init() {
-        super.init()
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.requestWhenInUseAuthorization()
-        locationManager.startUpdatingLocation()
-    }
-}
-
-extension LocationHelper: CLLocationManagerDelegate {
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
-        currentLocation = location.coordinate
-    }
-}
-
 // MARK: - Location Search Completer
 class LocationSearchCompleter: NSObject, ObservableObject {
     @Published var searchResults: [MKLocalSearchCompletion] = []
-    @Published var currentLocation: CLLocationCoordinate2D?
 
     var searchQuery = "" {
         didSet {
@@ -420,17 +531,11 @@ class LocationSearchCompleter: NSObject, ObservableObject {
     }
 
     private let searchCompleter = MKLocalSearchCompleter()
-    private let locationManager = CLLocationManager()
 
     override init() {
         super.init()
         searchCompleter.delegate = self
         searchCompleter.resultTypes = [.address, .pointOfInterest]
-
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.requestWhenInUseAuthorization()
-        locationManager.startUpdatingLocation()
     }
 }
 
@@ -444,18 +549,6 @@ extension LocationSearchCompleter: MKLocalSearchCompleterDelegate {
 
     func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
         print("Search completer error: \(error)")
-    }
-}
-
-// MARK: - CLLocationManager Delegate
-extension LocationSearchCompleter: CLLocationManagerDelegate {
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
-        currentLocation = location.coordinate
-    }
-
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location manager error: \(error)")
     }
 }
 

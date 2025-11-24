@@ -4,14 +4,18 @@ import MapKit
 // MARK: - Trip Map View
 struct TripMapView: View {
     @EnvironmentObject var session: Session
+    @ObservedObject private var locationManager = LocationManager.shared
     @State private var trips: [PlanOut] = []
     @State private var isLoading = false
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
         span: MKCoordinateSpan(latitudeDelta: 50, longitudeDelta: 50)
     )
+    @State private var mapPosition: MapCameraPosition = .automatic
     @State private var selectedActivity: String? = nil
     @State private var selectedTrip: PlanOut? = nil
+    @State private var showLocationDeniedAlert = false
+    @State private var hasLoadedInitialView = false
 
     var tripsWithLocations: [PlanOut] {
         trips.filter { trip in
@@ -41,15 +45,32 @@ struct TripMapView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Map
-                Map(coordinateRegion: $region, annotationItems: annotations) { annotation in
-                    MapAnnotation(coordinate: annotation.coordinate) {
-                        TripMapPin(annotation: annotation, isSelected: selectedTrip?.id == annotation.trip.id)
-                            .onTapGesture {
-                                withAnimation {
-                                    selectedTrip = annotation.trip
+                // Map - Using modern iOS 17+ API
+                Map(position: $mapPosition) {
+                    // User location
+                    if locationManager.isAuthorized, let userLocation = locationManager.currentLocation {
+                        Annotation("My Location", coordinate: userLocation) {
+                            Circle()
+                                .fill(Color.blue)
+                                .frame(width: 20, height: 20)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white, lineWidth: 3)
+                                )
+                                .shadow(radius: 3)
+                        }
+                    }
+
+                    // Trip annotations
+                    ForEach(annotations) { annotation in
+                        Annotation(annotation.trip.title, coordinate: annotation.coordinate) {
+                            TripMapPin(annotation: annotation, isSelected: selectedTrip?.id == annotation.trip.id)
+                                .onTapGesture {
+                                    withAnimation {
+                                        selectedTrip = annotation.trip
+                                    }
                                 }
-                            }
+                        }
                     }
                 }
                 .ignoresSafeArea(edges: .top)
@@ -121,14 +142,38 @@ struct TripMapView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: centerOnTrips) {
-                        Image(systemName: "scope")
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                    HStack(spacing: 12) {
+                        // Center on user location button
+                        Button(action: centerOnUserLocation) {
+                            Image(systemName: locationManager.isAuthorized ? "location.fill" : "location.slash.fill")
+                                .foregroundStyle(locationManager.isAuthorized ? Color(hex: "#6C63FF") ?? .purple : .gray)
+                        }
+
+                        // Center on trips button
+                        Button(action: centerOnTrips) {
+                            Image(systemName: "scope")
+                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        }
                     }
                 }
             }
+            .alert("Location Access Denied", isPresented: $showLocationDeniedAlert) {
+                Button("Open Settings") {
+                    locationManager.openSettings()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Please enable location access in Settings to see your location on the map.")
+            }
             .task {
+                // Load trips first (faster)
                 await loadTrips()
+
+                // Delay location services slightly to reduce initial lag
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                locationManager.startUpdatingLocation()
+
+                hasLoadedInitialView = true
             }
         }
     }
@@ -145,7 +190,11 @@ struct TripMapView: View {
 
             await MainActor.run {
                 trips = loadedTrips
-                centerOnTrips()
+
+                // Only auto-center on first load if there are trips
+                if !hasLoadedInitialView && !loadedTrips.isEmpty {
+                    centerOnTrips()
+                }
             }
         } catch {
             print("Failed to load trips: \(error)")
@@ -177,8 +226,11 @@ struct TripMapView: View {
             longitudeDelta: max((maxLon - minLon) * 1.3, 0.1)
         )
 
+        let newRegion = MKCoordinateRegion(center: center, span: span)
+
         withAnimation {
-            region = MKCoordinateRegion(center: center, span: span)
+            mapPosition = .region(newRegion)
+            region = newRegion
         }
     }
 
@@ -188,6 +240,43 @@ struct TripMapView: View {
         }
         let normalized = activityString.lowercased().replacingOccurrences(of: " ", with: "_")
         return ActivityType(rawValue: normalized) ?? .other
+    }
+
+    func centerOnUserLocation() {
+        // Check authorization status
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            // Request permission
+            print("[TripMap] Requesting location permission...")
+            locationManager.requestPermission()
+
+        case .denied, .restricted:
+            // Show alert to open settings
+            print("[TripMap] Location denied/restricted - showing alert")
+            showLocationDeniedAlert = true
+
+        case .authorizedWhenInUse, .authorizedAlways:
+            // Center on user location if available
+            if let userLocation = locationManager.currentLocation {
+                let newRegion = MKCoordinateRegion(
+                    center: userLocation,
+                    span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+                )
+
+                withAnimation {
+                    mapPosition = .region(newRegion)
+                    region = newRegion
+                }
+                print("[TripMap] ✅ Centered on user location: \(userLocation)")
+            } else {
+                print("[TripMap] ⚠️  User location not available yet")
+                // Start updates if not already running
+                locationManager.startUpdatingLocation()
+            }
+
+        @unknown default:
+            break
+        }
     }
 }
 
