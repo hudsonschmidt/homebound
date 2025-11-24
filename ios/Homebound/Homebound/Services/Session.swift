@@ -32,7 +32,9 @@ private struct VerifyResponse: Decodable {
     struct UserSummary: Decodable {
         let id: Int?
         let email: String?
-        let name: String?
+        let first_name: String?
+        let last_name: String?
+        let name: String?  // Fallback for compatibility
         let age: Int?
         let phone: String?
         let profile_completed: Bool?
@@ -52,6 +54,18 @@ private struct RefreshResponse: Decodable {
     let access: String?
     let refresh: String?
     let access_token: String?  // Fallback for compatibility
+    let user: UserSummary?  // Include user data from refresh
+
+    struct UserSummary: Decodable {
+        let id: Int?
+        let email: String?
+        let first_name: String?
+        let last_name: String?
+        let name: String?  // Fallback for compatibility
+        let age: Int?
+        let phone: String?
+        let profile_completed: Bool?
+    }
 }
 
 private struct EmptyBody: Encodable {}
@@ -65,6 +79,11 @@ final class Session: ObservableObject {
 
     @Published var useLocalServer: Bool = UserDefaults.standard.bool(forKey: "useLocalServer") {
         didSet {
+            // When switching databases, sign out and clear all cached data
+            // This prevents data mismatch between local and production databases
+            if oldValue != useLocalServer {
+                signOut()
+            }
             UserDefaults.standard.set(useLocalServer, forKey: "useLocalServer")
         }
     }
@@ -268,7 +287,15 @@ final class Session: ObservableObject {
 
             // Store user profile data
             if let user = resp.user {
-                userName = user.name
+                // Handle both separate first_name/last_name and combined name field
+                if let firstName = user.first_name, let lastName = user.last_name {
+                    userName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces)
+                } else if let name = user.name {
+                    userName = name
+                } else {
+                    userName = nil
+                }
+
                 userAge = user.age
                 userEmail = user.email ?? email
                 profileCompleted = user.profile_completed ?? false
@@ -324,6 +351,28 @@ final class Session: ObservableObject {
             // Update refresh token if a new one was provided
             if let newRefresh = resp.refresh {
                 keychain.saveRefreshToken(newRefresh)
+            }
+
+            // Update user profile data if provided
+            if let user = resp.user {
+                // Handle both separate first_name/last_name and combined name field
+                if let firstName = user.first_name, let lastName = user.last_name {
+                    userName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces)
+                } else if let name = user.name {
+                    userName = name
+                }
+
+                if let age = user.age {
+                    userAge = age
+                }
+
+                if let email = user.email {
+                    userEmail = email
+                }
+
+                if let completed = user.profile_completed {
+                    profileCompleted = completed
+                }
             }
 
             return true

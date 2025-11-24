@@ -209,6 +209,13 @@ def verify_magic_code(body: VerifyRequest):
         # Create JWT pair
         access, refresh = create_jwt_pair(user.id, user.email)
 
+        # Determine if profile is completed (has name and valid age)
+        profile_completed = (
+            bool(user.first_name and user.first_name.strip()) and
+            bool(user.last_name and user.last_name.strip()) and
+            user.age > 0
+        )
+
         return TokenResponse(
             access=access,
             refresh=refresh,
@@ -217,7 +224,8 @@ def verify_magic_code(body: VerifyRequest):
                 "email": user.email,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
-                "age": user.age
+                "age": user.age,
+                "profile_completed": profile_completed
             }
         )
 
@@ -262,6 +270,13 @@ def refresh_token(body: RefreshRequest):
             # Create new JWT pair
             access, refresh = create_jwt_pair(user.id, user.email)
 
+            # Determine if profile is completed (has name and valid age)
+            profile_completed = (
+                bool(user.first_name and user.first_name.strip()) and
+                bool(user.last_name and user.last_name.strip()) and
+                user.age > 0
+            )
+
             return TokenResponse(
                 access=access,
                 refresh=refresh,
@@ -270,7 +285,8 @@ def refresh_token(body: RefreshRequest):
                     "email": user.email,
                     "first_name": user.first_name,
                     "last_name": user.last_name,
-                    "age": user.age
+                    "age": user.age,
+                    "profile_completed": profile_completed
                 }
             )
 
