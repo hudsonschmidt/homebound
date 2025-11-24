@@ -40,10 +40,10 @@ enum StatType: String, CaseIterable, Codable {
 
     var color: Color {
         switch self {
-        case .totalTrips: return Color(hex: "#6C63FF") ?? .purple
+        case .totalTrips: return Color.hbBrand
         case .adventureTime: return .orange
         case .longestAdventure: return .yellow
-        case .activitiesTried: return Color(hex: "#4ECDC4") ?? .teal
+        case .activitiesTried: return Color.hbTeal
         case .thisMonth: return .green
         case .uniqueLocations: return .red
         case .mostAdventurousMonth: return .blue
@@ -82,7 +82,7 @@ struct StatsPreferences: Codable {
 
 // MARK: - Stats Calculator
 struct TripStatsCalculator {
-    let trips: [PlanOut]
+    let trips: [Trip]
 
     // MARK: - Individual Stat Calculations
 

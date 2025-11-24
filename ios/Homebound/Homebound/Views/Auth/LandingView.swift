@@ -3,7 +3,7 @@ import Combine
 
 enum TripStatus: String { case planned, inProgress, overdue, done }
 
-struct Trip: Identifiable, Equatable {
+struct DemoTrip: Identifiable, Equatable {
     let id: UUID
     var title: String
     var activity: String
@@ -16,22 +16,22 @@ struct Trip: Identifiable, Equatable {
 }
 
 final class HomeViewModel: ObservableObject {
-    @Published var currentTrip: Trip?
-    @Published var recent: [Trip] = []
+    @Published var currentTrip: DemoTrip?
+    @Published var recent: [DemoTrip] = []
     @Published var now: Date = .now
     private var tick: AnyCancellable?
 
     init() {
         let start = Calendar.current.date(byAdding: .hour, value: -2, to: .now)!
         let eta   = Calendar.current.date(byAdding: .hour, value:  2, to: .now)!
-        self.currentTrip = Trip(id: .init(), title: "Skyline Loop", activity: "Hike",
+        self.currentTrip = DemoTrip(id: .init(), title: "Skyline Loop", activity: "Hike",
                                 start: start, eta: eta, location: "TNF trailhead",
                                 status: .inProgress)
         self.recent = [
-            Trip(id: .init(), title: "Crystal Cove Dive", activity: "Dive",
+            DemoTrip(id: .init(), title: "Crystal Cove Dive", activity: "Dive",
                  start: .now.addingTimeInterval(-86400),
                  eta:   .now.addingTimeInterval(-82800), status: .done),
-            Trip(id: .init(), title: "Bishop Bouldering", activity: "Climb",
+            DemoTrip(id: .init(), title: "Bishop Bouldering", activity: "Climb",
                  start: .now, eta: .now.addingTimeInterval(14400), status: .planned)
         ]
         startTicker()
@@ -43,8 +43,8 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] in self?.now = $0 }
     }
 
-    func timeRemaining(for trip: Trip) -> TimeInterval {
-        max(0, trip.etaPlusGrace.timeIntervalSince(now))
+    func timeRemaining(for demoTrip: DemoTrip) -> TimeInterval {
+        max(0, demoTrip.etaPlusGrace.timeIntervalSince(now))
     }
 
     var isOverdue: Bool {
@@ -80,7 +80,7 @@ struct LandingView: View {
                     }
 
                     if let trip = vm.currentTrip {
-                        CurrentTripCard(trip: trip)
+                        CurrentTripCard(demoTrip: trip)
                             .environmentObject(vm)
                     }
 
@@ -146,29 +146,29 @@ private struct EmptyHero: View {
 
 private struct CurrentTripCard: View {
     @EnvironmentObject var vm: HomeViewModel
-    let trip: Trip
+    let demoTrip: DemoTrip
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                SwiftUI.Label(trip.title, systemImage: "map")
+                SwiftUI.Label(demoTrip.title, systemImage: "map")
                     .font(.headline)
                 Spacer()
-                StatusChip(status: vm.isOverdue ? .overdue : trip.status)
+                StatusChip(status: vm.isOverdue ? .overdue : demoTrip.status)
             }
 
             HStack(spacing: 8) {
-                Meta(title: "Start", date: trip.start)
+                Meta(title: "Start", date: demoTrip.start)
                 Divider().frame(height: 18)
-                Meta(title: "ETA", date: trip.eta)
+                Meta(title: "ETA", date: demoTrip.eta)
                 Divider().frame(height: 18)
-                CountdownView(remaining: vm.timeRemaining(for: trip),
+                CountdownView(remaining: vm.timeRemaining(for: demoTrip),
                               isOverdue: vm.isOverdue)
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
 
-            if let loc = trip.location {
+            if let loc = demoTrip.location {
                 SwiftUI.Label(loc, systemImage: "mappin.and.ellipse")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -181,7 +181,7 @@ private struct CurrentTripCard: View {
 
                 Spacer()
 
-                if trip.status == .inProgress {
+                if demoTrip.status == .inProgress {
                     Button(action: { vm.checkOut() }) {
                         SwiftUI.Label("I’m Safe", systemImage: "checkmark.seal")
                     }
@@ -290,7 +290,7 @@ private struct Tile: View {
 }
 
 private struct RecentList: View {
-    let trips: [Trip]
+    let trips: [DemoTrip]
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Recent Plans").font(.headline)

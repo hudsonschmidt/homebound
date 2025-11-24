@@ -293,7 +293,7 @@ struct ProfileHeaderSection: View {
             Circle()
                 .fill(
                     LinearGradient(
-                        colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                        colors: [Color.hbBrand, Color.hbTeal],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
@@ -353,7 +353,7 @@ struct EditableField: View {
                 }
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                .foregroundStyle(Color.hbBrand)
 
                 Button("Cancel") {
                     isEditing = false
@@ -373,7 +373,7 @@ struct EditableField: View {
                 }) {
                     Text("Edit")
                         .font(.caption)
-                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .foregroundStyle(Color.hbBrand)
                 }
             }
         }

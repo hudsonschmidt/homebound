@@ -1,15 +1,8 @@
 import Foundation
 import SwiftUI
 
-struct ContactIn: Codable {
-    var name: String
-    var phone: String?
-    var email: String?
-    var notify_on_overdue: Bool = true
-}
-
-// MARK: - Saved Contact Model (for user's saved contacts)
-struct SavedContact: Identifiable, Codable {
+// MARK: - Contact Model (for user's saved contacts)
+struct Contact: Identifiable, Codable {
     let id: Int
     let user_id: Int
     let name: String
@@ -17,13 +10,13 @@ struct SavedContact: Identifiable, Codable {
     let email: String?
 }
 
-struct ContactCreate: Codable {
+struct ContactCreateRequest: Codable {
     var name: String
     var phone: String?
     var email: String?
 }
 
-struct PlanCreate: Codable {
+struct TripCreateRequest: Codable {
     var title: String
     var activity: String = "other"
     var start: Date
@@ -38,7 +31,7 @@ struct PlanCreate: Codable {
     var contact3: Int?
 }
 
-struct PlanOut: Codable, Identifiable, Equatable {
+struct Trip: Codable, Identifiable, Equatable {
     var id: Int
     var user_id: Int
     var title: String

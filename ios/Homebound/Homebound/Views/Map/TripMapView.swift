@@ -5,7 +5,7 @@ import MapKit
 struct TripMapView: View {
     @EnvironmentObject var session: Session
     @ObservedObject private var locationManager = LocationManager.shared
-    @State private var trips: [PlanOut] = []
+    @State private var trips: [Trip] = []
     @State private var isLoading = false
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
@@ -13,18 +13,18 @@ struct TripMapView: View {
     )
     @State private var mapPosition: MapCameraPosition = .automatic
     @State private var selectedActivity: String? = nil
-    @State private var selectedTrip: PlanOut? = nil
+    @State private var selectedTrip: Trip? = nil
     @State private var showLocationDeniedAlert = false
     @State private var hasLoadedInitialView = false
 
-    var tripsWithLocations: [PlanOut] {
+    var tripsWithLocations: [Trip] {
         trips.filter { trip in
             guard let lat = trip.location_lat, let lon = trip.location_lng else { return false }
             return lat != 0.0 && lon != 0.0
         }
     }
 
-    var filteredTrips: [PlanOut] {
+    var filteredTrips: [Trip] {
         if let selectedActivity = selectedActivity {
             return tripsWithLocations.filter { $0.activity_type.lowercased() == selectedActivity.lowercased() }
         }
@@ -37,9 +37,10 @@ struct TripMapView: View {
         }
     }
 
-    var activityFilters: [String] {
-        let activities = Set(tripsWithLocations.map { $0.activity_type })
-        return Array(activities).sorted()
+    var activityFilters: [Activity] {
+        let uniqueActivities = Dictionary(grouping: tripsWithLocations) { $0.activity.id }
+            .compactMap { $0.value.first?.activity }
+        return uniqueActivities.sorted { $0.name < $1.name }
     }
 
     var body: some View {
@@ -96,18 +97,17 @@ struct TripMapView: View {
                                 }
 
                                 // Activity filters
-                                ForEach(activityFilters, id: \.self) { activity in
-                                    let activityType = getActivityType(for: activity)
-                                    let count = tripsWithLocations.filter { $0.activity_type == activity }.count
+                                ForEach(activityFilters, id: \.id) { activity in
+                                    let count = tripsWithLocations.filter { $0.activity.id == activity.id }.count
 
                                     FilterChip(
-                                        label: activityType.displayName,
-                                        icon: activityType.icon,
-                                        isSelected: selectedActivity == activity,
+                                        label: activity.name,
+                                        icon: activity.icon,
+                                        isSelected: selectedActivity == activity.name,
                                         count: count
                                     ) {
                                         withAnimation {
-                                            selectedActivity = selectedActivity == activity ? nil : activity
+                                            selectedActivity = selectedActivity == activity.name ? nil : activity.name
                                         }
                                     }
                                 }
@@ -146,13 +146,13 @@ struct TripMapView: View {
                         // Center on user location button
                         Button(action: centerOnUserLocation) {
                             Image(systemName: locationManager.isAuthorized ? "location.fill" : "location.slash.fill")
-                                .foregroundStyle(locationManager.isAuthorized ? Color(hex: "#6C63FF") ?? .purple : .gray)
+                                .foregroundStyle(locationManager.isAuthorized ? Color.hbBrand : .gray)
                         }
 
                         // Center on trips button
                         Button(action: centerOnTrips) {
                             Image(systemName: "scope")
-                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                .foregroundStyle(Color.hbBrand)
                         }
                     }
                 }
@@ -183,7 +183,7 @@ struct TripMapView: View {
         defer { isLoading = false }
 
         do {
-            let loadedTrips: [PlanOut] = try await session.api.get(
+            let loadedTrips: [Trip] = try await session.api.get(
                 session.url("/api/v1/trips/"),
                 bearer: session.accessToken
             )
@@ -234,14 +234,6 @@ struct TripMapView: View {
         }
     }
 
-    func getActivityType(for activityString: String) -> ActivityType {
-        if let matched = ActivityType(rawValue: activityString.lowercased()) {
-            return matched
-        }
-        let normalized = activityString.lowercased().replacingOccurrences(of: " ", with: "_")
-        return ActivityType(rawValue: normalized) ?? .other
-    }
-
     func centerOnUserLocation() {
         // Check authorization status
         switch locationManager.authorizationStatus {
@@ -283,10 +275,10 @@ struct TripMapView: View {
 // MARK: - Trip Annotation
 struct TripAnnotation: Identifiable {
     let id: Int
-    let trip: PlanOut
+    let trip: Trip
     let coordinate: CLLocationCoordinate2D
 
-    init(trip: PlanOut) {
+    init(trip: Trip) {
         self.id = trip.id
         self.trip = trip
         self.coordinate = CLLocationCoordinate2D(
@@ -301,12 +293,8 @@ struct TripMapPin: View {
     let annotation: TripAnnotation
     let isSelected: Bool
 
-    var activity: ActivityType {
-        if let matched = ActivityType(rawValue: annotation.trip.activity_type.lowercased()) {
-            return matched
-        }
-        let normalized = annotation.trip.activity_type.lowercased().replacingOccurrences(of: " ", with: "_")
-        return ActivityType(rawValue: normalized) ?? .other
+    var activity: ActivityTypeAdapter {
+        ActivityTypeAdapter(activity: annotation.trip.activity)
     }
 
     var body: some View {
@@ -357,7 +345,7 @@ struct FilterChip: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isSelected ? (Color(hex: "#6C63FF") ?? .purple) : Color(.systemBackground))
+            .background(isSelected ? (Color.hbBrand) : Color(.systemBackground))
             .foregroundStyle(isSelected ? .white : .primary)
             .cornerRadius(20)
             .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
@@ -367,15 +355,11 @@ struct FilterChip: View {
 
 // MARK: - Trip Detail Card
 struct TripDetailCard: View {
-    let trip: PlanOut
+    let trip: Trip
     let onDismiss: () -> Void
 
-    var activity: ActivityType {
-        if let matched = ActivityType(rawValue: trip.activity_type.lowercased()) {
-            return matched
-        }
-        let normalized = trip.activity_type.lowercased().replacingOccurrences(of: " ", with: "_")
-        return ActivityType(rawValue: normalized) ?? .other
+    var activity: ActivityTypeAdapter {
+        ActivityTypeAdapter(activity: trip.activity)
     }
 
     var body: some View {

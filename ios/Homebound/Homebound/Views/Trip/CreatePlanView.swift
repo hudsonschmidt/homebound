@@ -260,7 +260,7 @@ struct CreatePlanView: View {
                     contactIds.append(savedId)
                 } else if contactsToSave.contains(where: { $0.id == contact.id }) {
                     // User confirmed to save this new contact
-                    if let savedContact = await session.addSavedContact(name: contact.name, phone: contact.phone, email: nil) {
+                    if let savedContact = await session.addContact(name: contact.name, phone: contact.phone, email: nil) {
                         contactIds.append(savedContact.id)
                     } else {
                         await MainActor.run {
@@ -274,7 +274,7 @@ struct CreatePlanView: View {
                     // New contact that user chose not to save - we still need to handle this
                     // For now, we'll create it temporarily to get an ID
                     // TODO: Backend should support ephemeral contacts for trips
-                    if let savedContact = await session.addSavedContact(name: contact.name, phone: contact.phone, email: nil) {
+                    if let savedContact = await session.addContact(name: contact.name, phone: contact.phone, email: nil) {
                         contactIds.append(savedContact.id)
                     } else {
                         await MainActor.run {
@@ -288,7 +288,7 @@ struct CreatePlanView: View {
             }
 
             // Step 2: Create plan with contact IDs
-            let plan = PlanCreate(
+            let plan = TripCreateRequest(
                 title: planTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 activity: selectedActivity,
                 start: startTime,
@@ -511,7 +511,7 @@ struct Step2TimeSettings: View {
                         // Instructions
                         HStack {
                             Image(systemName: "info.circle.fill")
-                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                .foregroundStyle(Color.hbBrand)
                             Text("Tap departure date, then tap return date")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
@@ -565,7 +565,7 @@ struct Step2TimeSettings: View {
                         // Selected dates summary
                         HStack {
                             Image(systemName: "calendar.badge.checkmark")
-                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                .foregroundStyle(Color.hbBrand)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(dateRangeString)
                                     .font(.subheadline)
@@ -583,7 +583,7 @@ struct Step2TimeSettings: View {
                             .fontWeight(.medium)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
-                            .background(Color(hex: "#6C63FF") ?? .purple)
+                            .background(Color.hbBrand)
                             .foregroundStyle(.white)
                             .cornerRadius(8)
                         }
@@ -598,7 +598,7 @@ struct Step2TimeSettings: View {
                         HStack {
                             Image(systemName: "calendar.circle.fill")
                                 .font(.title2)
-                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                .foregroundStyle(Color.hbBrand)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(dateRangeString)
@@ -618,7 +618,7 @@ struct Step2TimeSettings: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(Color(.tertiarySystemFill))
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(Color.hbBrand)
                             .cornerRadius(6)
                         }
                         .padding()
@@ -630,7 +630,7 @@ struct Step2TimeSettings: View {
                             HStack {
                                 Label("Departure Time", systemImage: "airplane.departure")
                                     .font(.headline)
-                                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                    .foregroundStyle(Color.hbBrand)
 
                                 Spacer()
 
@@ -642,8 +642,8 @@ struct Step2TimeSettings: View {
                                     .font(.caption)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(isStartingNow ? Color(.tertiarySystemFill) : (Color(hex: "#6C63FF") ?? .purple))
-                                    .foregroundStyle(isStartingNow ? (Color(hex: "#6C63FF") ?? .purple) : .white)
+                                    .background(isStartingNow ? Color(.tertiarySystemFill) : (Color.hbBrand))
+                                    .foregroundStyle(isStartingNow ? (Color.hbBrand) : .white)
                                     .cornerRadius(6)
                                 }
                             }
@@ -653,7 +653,7 @@ struct Step2TimeSettings: View {
                                 HStack {
                                     Image(systemName: "clock.fill")
                                         .font(.title2)
-                                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                        .foregroundStyle(Color.hbBrand)
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("Starting Now")
                                             .font(.headline)
@@ -664,7 +664,7 @@ struct Step2TimeSettings: View {
                                     Spacer()
                                 }
                                 .padding()
-                                .background(Color(hex: "#6C63FF")?.opacity(0.1) ?? Color.purple.opacity(0.1))
+                                .background(Color.hbBrand.opacity(0.1))
                                 .cornerRadius(8)
                             } else {
                                 // Show helpful message for future dates
@@ -1006,7 +1006,7 @@ struct MultiDatePicker: View {
                         Text("Reset Dates")
                     }
                     .font(.caption)
-                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                    .foregroundStyle(Color.hbBrand)
                 }
                 .padding(.top, 8)
             }
@@ -1059,7 +1059,7 @@ struct CalendarView: View {
                     displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth
                 }) {
                     Image(systemName: "chevron.left")
-                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .foregroundStyle(Color.hbBrand)
                 }
 
                 Spacer()
@@ -1073,7 +1073,7 @@ struct CalendarView: View {
                     displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth
                 }) {
                     Image(systemName: "chevron.right")
-                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .foregroundStyle(Color.hbBrand)
                 }
             }
             .padding(.horizontal)
@@ -1195,7 +1195,7 @@ struct DayView: View {
                     if isStart && isEnd {
                         // Single day selection
                         Circle()
-                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .fill(Color.hbBrand)
                             .opacity(0.2)
                     } else if isStart {
                         // Start of range
@@ -1203,19 +1203,19 @@ struct DayView: View {
                             Color.clear
                                 .frame(maxWidth: .infinity)
                             Rectangle()
-                                .fill(Color(hex: "#6C63FF") ?? .purple)
+                                .fill(Color.hbBrand)
                                 .opacity(0.1)
                                 .frame(maxWidth: .infinity)
                         }
 
                         Circle()
-                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .fill(Color.hbBrand)
                             .opacity(0.2)
                     } else if isEnd {
                         // End of range
                         HStack(spacing: 0) {
                             Rectangle()
-                                .fill(Color(hex: "#6C63FF") ?? .purple)
+                                .fill(Color.hbBrand)
                                 .opacity(0.1)
                                 .frame(maxWidth: .infinity)
                             Color.clear
@@ -1223,12 +1223,12 @@ struct DayView: View {
                         }
 
                         Circle()
-                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .fill(Color.hbBrand)
                             .opacity(0.2)
                     } else {
                         // Middle of range
                         Rectangle()
-                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                            .fill(Color.hbBrand)
                             .opacity(0.1)
                     }
                 }
@@ -1239,8 +1239,8 @@ struct DayView: View {
                     .foregroundStyle(
                         isPast ? .secondary :
                         (isStart || isEnd) ? .white :
-                        isInRange ? Color(hex: "#6C63FF") ?? .purple :
-                        isToday ? Color(hex: "#6C63FF") ?? .purple :
+                        isInRange ? Color.hbBrand :
+                        isToday ? Color.hbBrand :
                         .primary
                     )
                     .frame(width: 35, height: 35)
@@ -1248,10 +1248,10 @@ struct DayView: View {
                         Group {
                             if isStart || isEnd {
                                 Circle()
-                                    .fill(Color(hex: "#6C63FF") ?? .purple)
+                                    .fill(Color.hbBrand)
                             } else if isToday && !isInRange {
                                 Circle()
-                                    .stroke(Color(hex: "#6C63FF") ?? .purple, lineWidth: 1)
+                                    .stroke(Color.hbBrand, lineWidth: 1)
                             }
                         }
                     )
@@ -1287,9 +1287,9 @@ struct Step3EmergencyContacts: View {
     @Binding var newContactName: String
     @Binding var newContactPhone: String
 
-    @State private var savedContacts: [SavedContact] = []
+    @State private var savedContacts: [Contact] = []
     @State private var isLoadingSaved = false
-    @State private var showingSavedContacts = false
+    @State private var showingContacts = false
 
     var body: some View {
         ScrollView {
@@ -1311,8 +1311,8 @@ struct Step3EmergencyContacts: View {
                     Button(action: {
                         Task {
                             isLoadingSaved = true
-                            await loadSavedContacts()
-                            showingSavedContacts = true
+                            await loadContacts()
+                            showingContacts = true
                         }
                     }) {
                         HStack {
@@ -1329,7 +1329,7 @@ struct Step3EmergencyContacts: View {
                         .frame(maxWidth: .infinity)
                         .padding()
                         .background(Color(.secondarySystemFill))
-                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .foregroundStyle(Color.hbBrand)
                         .cornerRadius(12)
                     }
                     .disabled(isLoadingSaved)
@@ -1400,19 +1400,19 @@ struct Step3EmergencyContacts: View {
             .padding(.horizontal)
         }
         .task {
-            await loadSavedContacts()
+            await loadContacts()
         }
-        .sheet(isPresented: $showingSavedContacts) {
-            SavedContactsSelectionSheet(
+        .sheet(isPresented: $showingContacts) {
+            ContactsSelectionSheet(
                 savedContacts: savedContacts,
                 selectedContacts: $contacts,
-                isPresented: $showingSavedContacts
+                isPresented: $showingContacts
             )
         }
     }
 
-    private func loadSavedContacts() async {
-        let loaded = await session.loadSavedContacts()
+    private func loadContacts() async {
+        let loaded = await session.loadContacts()
         await MainActor.run {
             self.savedContacts = loaded
             self.isLoadingSaved = false
@@ -1624,8 +1624,8 @@ struct AddContactSheet: View {
 }
 
 // MARK: - Saved Contacts Selection Sheet
-struct SavedContactsSelectionSheet: View {
-    let savedContacts: [SavedContact]
+struct ContactsSelectionSheet: View {
+    let savedContacts: [Contact]
     @Binding var selectedContacts: [EmergencyContact]
     @Binding var isPresented: Bool
     @State private var tempSelection: Set<Int> = []
@@ -1653,7 +1653,7 @@ struct SavedContactsSelectionSheet: View {
                 } else {
                     List {
                         ForEach(savedContacts) { contact in
-                            SavedContactSelectionRow(
+                            ContactSelectionRow(
                                 contact: contact,
                                 isSelected: tempSelection.contains(contact.id),
                                 canSelect: tempSelection.count < 3 || tempSelection.contains(contact.id)
@@ -1737,8 +1737,8 @@ struct SavedContactsSelectionSheet: View {
     }
 }
 
-struct SavedContactSelectionRow: View {
-    let contact: SavedContact
+struct ContactSelectionRow: View {
+    let contact: Contact
     let isSelected: Bool
     let canSelect: Bool
     let onToggle: (Bool) -> Void
@@ -1781,7 +1781,7 @@ struct SavedContactSelectionRow: View {
 
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
-                    .foregroundStyle(isSelected ? (Color(hex: "#6C63FF") ?? .purple) : Color(.tertiaryLabel))
+                    .foregroundStyle(isSelected ? (Color.hbBrand) : Color(.tertiaryLabel))
                     .opacity(canSelect ? 1.0 : 0.5)
             }
             .padding(.vertical, 4)

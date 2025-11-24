@@ -7,7 +7,7 @@ struct ImprovedHomeView: View {
     @State private var showingCreatePlan = false
     @State private var showingSettings = false
     @State private var showingHistory = false
-    @State private var recentPlans: [PlanOut] = []
+    @State private var recentPlans: [Trip] = []
     @State private var timeline: [TimelineEvent] = []
     @State private var greeting = "Good morning"
 
@@ -15,12 +15,12 @@ struct ImprovedHomeView: View {
         NavigationStack {
             ZStack {
                 // Background gradient - activity-based when there's an active plan
-                if let activePlan = session.activePlan {
+                if let activeTrip = session.activeTrip {
                     LinearGradient(
                         colors: [
-                            Color(hex: activePlan.activity.colors.primary) ?? .purple,
-                            Color(hex: activePlan.activity.colors.secondary) ?? .teal,
-                            Color(hex: activePlan.activity.colors.accent) ?? .blue
+                            Color(hex: activeTrip.activity.colors.primary) ?? .purple,
+                            Color(hex: activeTrip.activity.colors.secondary) ?? .teal,
+                            Color(hex: activeTrip.activity.colors.accent) ?? .blue
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -29,8 +29,8 @@ struct ImprovedHomeView: View {
                 } else {
                     LinearGradient(
                         colors: [
-                            Color(hex: "#6C63FF") ?? .purple,
-                            Color(hex: "#4ECDC4") ?? .teal
+                            Color.hbBrand,
+                            Color.hbTeal
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -46,19 +46,19 @@ struct ImprovedHomeView: View {
                             .padding(.top, 8)
 
                         // Active Plan Card (if exists) - Takes up significant space
-                        if let plan = session.activePlan {
+                        if let plan = session.activeTrip {
                             ImprovedActivePlanCard(plan: plan, timeline: $timeline)
                                 .frame(minHeight: 400)
                                 .transition(.asymmetric(
                                     insertion: .move(edge: .top).combined(with: .opacity),
                                     removal: .scale.combined(with: .opacity)
                                 ))
-                                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: session.activePlan)
+                                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: session.activeTrip)
                         }
 
                         // Quick Actions Grid
                         QuickActionsGrid(
-                            hasActivePlan: session.activePlan != nil,
+                            hasActivePlan: session.activeTrip != nil,
                             showingCreatePlan: $showingCreatePlan,
                             showingHistory: $showingHistory,
                             onHomeSafe: { Task { await session.completePlan() } }
@@ -66,7 +66,7 @@ struct ImprovedHomeView: View {
                         .padding(.horizontal)
 
                         // Recent Activities (only show if no active plan)
-                        if session.activePlan == nil && !recentPlans.isEmpty {
+                        if session.activeTrip == nil && !recentPlans.isEmpty {
                             RecentActivitiesSection(plans: recentPlans)
                         }
                     }
@@ -120,7 +120,7 @@ struct HeaderSection: View {
                     .fontWeight(.bold)
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            colors: [Color.hbBrand, Color.hbTeal],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -136,7 +136,7 @@ struct HeaderSection: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            colors: [Color.hbBrand, Color.hbTeal],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -154,7 +154,7 @@ struct HeaderSection: View {
 
 // MARK: - Improved Active Plan Card
 struct ImprovedActivePlanCard: View {
-    let plan: PlanOut
+    let plan: Trip
     @Binding var timeline: [TimelineEvent]
     @EnvironmentObject var session: Session
     @State private var timeRemaining = ""
@@ -514,7 +514,7 @@ struct QuickActionCard: View {
 
 // MARK: - Recent Activities Section
 struct RecentActivitiesSection: View {
-    let plans: [PlanOut]
+    let plans: [Trip]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -542,16 +542,12 @@ struct RecentActivitiesSection: View {
 
 // MARK: - Recent Activity Card
 struct RecentActivityCard: View {
-    let plan: PlanOut
-
-    var activity: ActivityType {
-        ActivityType(rawValue: plan.activity_type) ?? .other
-    }
+    let plan: Trip
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(activity.icon)
+                Text(plan.activity.icon)
                     .font(.title2)
                 Spacer()
                 Image(systemName: "checkmark.circle.fill")
@@ -576,7 +572,7 @@ struct RecentActivityCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(activity.primaryColor.opacity(0.3), lineWidth: 1)
+                .stroke((Color(hex: plan.activity.colors.primary) ?? .purple).opacity(0.3), lineWidth: 1)
         )
     }
 }

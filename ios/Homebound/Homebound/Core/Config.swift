@@ -1,1 +1,0 @@
-let BASE_URL = "https://homebound.onrender.com"

@@ -3,11 +3,11 @@ import SwiftUI
 struct HistoryView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
-    @State private var allPlans: [PlanOut] = []
+    @State private var allPlans: [Trip] = []
     @State private var isLoading = true
     @State private var searchText = ""
 
-    var filteredPlans: [PlanOut] {
+    var filteredPlans: [Trip] {
         let filtered = allPlans.filter { plan in
             if !searchText.isEmpty {
                 return plan.title.localizedCaseInsensitiveContains(searchText) ||
@@ -19,7 +19,7 @@ struct HistoryView: View {
         return filtered.sorted { plan1, plan2 in
             let date1: Date
             if plan1.status == "completed", let completedStr = plan1.completed_at,
-               let completedDate = parseDate(completedStr) {
+               let completedDate = DateUtils.parseDate(completedStr) {
                 date1 = completedDate
             } else {
                 date1 = plan1.start_at
@@ -27,7 +27,7 @@ struct HistoryView: View {
 
             let date2: Date
             if plan2.status == "completed", let completedStr = plan2.completed_at,
-               let completedDate = parseDate(completedStr) {
+               let completedDate = DateUtils.parseDate(completedStr) {
                 date2 = completedDate
             } else {
                 date2 = plan2.start_at
@@ -35,32 +35,6 @@ struct HistoryView: View {
 
             return date1 > date2
         }
-    }
-
-    // Helper function for parsing dates (used in sorting and display)
-    private func parseDate(_ dateString: String) -> Date? {
-        // Try ISO8601 format first
-        let iso8601Formatter = ISO8601DateFormatter()
-        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        // Try without fractional seconds
-        iso8601Formatter.formatOptions = [.withInternetDateTime]
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        // Try custom format for backend timestamps
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        if let date = formatter.date(from: dateString) {
-            return date
-        }
-
-        return nil
     }
 
     var body: some View {
@@ -154,7 +128,7 @@ struct HistoryView: View {
         isLoading = true
         do {
             // Backend returns all trips ordered by created_at DESC (most recent first)
-            let plans: [PlanOut] = try await session.api.get(
+            let plans: [Trip] = try await session.api.get(
                 session.url("/api/v1/trips/"),
                 bearer: bearer
             )
@@ -181,7 +155,7 @@ struct HistoryView: View {
         }
     }
 
-    func deletePlan(_ plan: PlanOut) async {
+    func deletePlan(_ plan: Trip) async {
         let success = await session.deletePlan(plan.id)
         if success {
             await MainActor.run {
@@ -193,7 +167,7 @@ struct HistoryView: View {
 }
 
 struct TripHistoryCard: View {
-    let plan: PlanOut
+    let plan: Trip
 
     var primaryColor: Color {
         Color(hex: plan.activity.colors.primary) ?? .purple
@@ -242,7 +216,7 @@ struct TripHistoryCard: View {
                         // Show completion time for completed trips, otherwise show start time
                         if plan.status == "completed" {
                             if let completedAtStr = plan.completed_at, !completedAtStr.isEmpty {
-                                if let completedDate = parseDate(completedAtStr) {
+                                if let completedDate = DateUtils.parseDate(completedAtStr) {
                                     // Show actual completion time
                                     Text("Finished:")
                                         .font(.caption)
@@ -271,7 +245,7 @@ struct TripHistoryCard: View {
                             Text("•")
                                 .foregroundStyle(.secondary)
 
-                            Text(formatDuration(from: plan.start_at, to: plan.eta_at))
+                            Text(DateUtils.formatDuration(from: plan.start_at, to: plan.eta_at) ?? "")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -319,43 +293,6 @@ struct TripHistoryCard: View {
         .background(Color(.secondarySystemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
-    }
-
-    func formatDuration(from start: Date, to end: Date) -> String {
-        let interval = end.timeIntervalSince(start)
-        let hours = Int(interval) / 3600
-        let minutes = Int(interval) % 3600 / 60
-
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else {
-            return "\(minutes)m"
-        }
-    }
-
-    func parseDate(_ dateString: String) -> Date? {
-        // Try ISO8601 format first
-        let iso8601Formatter = ISO8601DateFormatter()
-        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        // Try without fractional seconds
-        iso8601Formatter.formatOptions = [.withInternetDateTime]
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        // Try custom format for backend timestamps
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        if let date = formatter.date(from: dateString) {
-            return date
-        }
-
-        return nil
     }
 }
 

@@ -137,7 +137,7 @@ struct API {
         throw APIError.server(msg)
     }
 
-    struct Empty: Decodable {}
+    struct Empty: Codable {}  // Used for requests/responses with no body
     enum APIError: Error {
         case badResponse
         case unauthorized

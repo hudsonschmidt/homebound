@@ -22,8 +22,8 @@ struct OnboardingView: View {
             // Dynamic gradient background
             LinearGradient(
                 colors: [
-                    Color(hex: "#6C63FF") ?? .purple,
-                    Color(hex: "#4ECDC4") ?? .teal,
+                    Color.hbBrand,
+                    Color.hbTeal,
                     Color(hex: "#FF6B6B") ?? .pink
                 ],
                 startPoint: .topLeading,
@@ -147,7 +147,7 @@ struct OnboardingView: View {
                                     endPoint: .trailing
                                 )
                             )
-                            .foregroundStyle(isButtonDisabled ? .white.opacity(0.5) : Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(isButtonDisabled ? .white.opacity(0.5) : Color.hbBrand)
                             .cornerRadius(28)
                             .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
                         }

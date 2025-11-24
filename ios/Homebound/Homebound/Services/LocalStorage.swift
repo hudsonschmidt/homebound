@@ -276,7 +276,7 @@ final class LocalStorage {
     // MARK: - Trip Caching
 
     /// Cache a trip from the server
-    func cacheTrip(_ trip: PlanOut) {
+    func cacheTrip(_ trip: Trip) {
         guard let dbQueue = dbQueue else { return }
 
         do {
@@ -351,7 +351,7 @@ final class LocalStorage {
     }
 
     /// Cache multiple trips (replaces all cached trips)
-    func cacheTrips(_ trips: [PlanOut]) {
+    func cacheTrips(_ trips: [Trip]) {
         guard let dbQueue = dbQueue else { return }
 
         do {
@@ -400,7 +400,7 @@ final class LocalStorage {
     }
 
     /// Get all cached trips
-    func getCachedTrips() -> [PlanOut] {
+    func getCachedTrips() -> [Trip] {
         guard let dbQueue = dbQueue else { return [] }
 
         do {
@@ -415,7 +415,7 @@ final class LocalStorage {
                     ORDER BY ct.cached_at DESC
                 """)
 
-                return rows.compactMap { row -> PlanOut? in
+                return rows.compactMap { row -> Trip? in
                     // Check for orphaned trip (missing activity)
                     guard let activityId = row["act_id"] as? Int else {
                         let tripId = row["id"] as? Int ?? -1
@@ -463,7 +463,7 @@ final class LocalStorage {
                         order: activityOrder
                     )
 
-                    return PlanOut(
+                    return Trip(
                         id: id,
                         user_id: userId,
                         title: title,
@@ -494,11 +494,11 @@ final class LocalStorage {
     }
 
     /// Get a specific cached trip
-    func getCachedTrip(id: Int) -> PlanOut? {
+    func getCachedTrip(id: Int) -> Trip? {
         guard let dbQueue = dbQueue else { return nil }
 
         do {
-            return try dbQueue.read { db in
+            return try dbQueue.read { db -> Trip? in
                 guard let row = try Row.fetchOne(db, sql: """
                     SELECT ct.*, ca.id as act_id, ca.name as act_name, ca.icon as act_icon,
                            ca.default_grace_minutes as act_grace, ca.colors as act_colors,
@@ -558,7 +558,7 @@ final class LocalStorage {
                     order: activityOrder
                 )
 
-                return PlanOut(
+                return Trip(
                     id: tripId,
                     user_id: userId,
                     title: title,

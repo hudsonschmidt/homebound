@@ -59,7 +59,7 @@ struct LocationSearchView: View {
                                 HStack {
                                     ZStack {
                                         Circle()
-                                            .fill(Color(hex: "#6C63FF") ?? .purple)
+                                            .fill(Color.hbBrand)
                                             .frame(width: 40, height: 40)
 
                                         if isGettingCurrentLocation {
@@ -407,7 +407,7 @@ struct LocationRow: View {
 
     private var categoryColor: Color {
         guard let category = mapItem.pointOfInterestCategory else {
-            return Color(hex: "#6C63FF") ?? .purple
+            return Color.hbBrand
         }
 
         switch category {
@@ -420,7 +420,7 @@ struct LocationRow: View {
         case .hospital, .pharmacy, .police, .fireStation:
             return .red
         case .museum, .theater, .movieTheater:
-            return Color(hex: "#6C63FF") ?? .purple
+            return Color.hbBrand
         default:
             return .gray
         }
@@ -488,11 +488,11 @@ struct SearchResultRow: View {
             HStack {
                 ZStack {
                     Circle()
-                        .fill(Color(hex: "#6C63FF")?.opacity(0.2) ?? Color.purple.opacity(0.2))
+                        .fill(Color.hbBrand.opacity(0.2))
                         .frame(width: 40, height: 40)
 
                     Image(systemName: "mappin.circle.fill")
-                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .foregroundStyle(Color.hbBrand)
                         .font(.system(size: 18))
                 }
 

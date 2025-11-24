@@ -67,9 +67,6 @@ private struct RefreshResponse: Decodable {
         let profile_completed: Bool?
     }
 }
-
-private struct EmptyBody: Encodable {}
-
 final class Session: ObservableObject {
 
     // MARK: API & Base URL
@@ -161,8 +158,8 @@ final class Session: ObservableObject {
     @Published var appleLastName: String? = nil
 
     // Active plan
-    @Published var activePlan: PlanOut? = nil
-    @Published var isLoadingPlan: Bool = false
+    @Published var activeTrip: Trip? = nil
+    @Published var isLoadingTrip: Bool = false
 
     // Activities
     @Published var activities: [Activity] = []
@@ -715,9 +712,9 @@ final class Session: ObservableObject {
     }
 
     // MARK: - Plan Management
-    func createPlan(_ plan: PlanCreate) async -> PlanOut? {
+    func createPlan(_ plan: TripCreateRequest) async -> Trip? {
         do {
-            let response: PlanOut = try await withAuth { bearer in
+            let response: Trip = try await withAuth { bearer in
                 try await self.api.post(
                     self.url("/api/v1/trips/"),
                     body: plan,
@@ -729,7 +726,7 @@ final class Session: ObservableObject {
             // Planned trips should not appear as active
             await MainActor.run {
                 if response.status == "active" {
-                    self.activePlan = response
+                    self.activeTrip = response
                 }
             }
 
@@ -744,11 +741,11 @@ final class Session: ObservableObject {
 
     func loadActivePlan() async {
         await MainActor.run {
-            self.isLoadingPlan = true
+            self.isLoadingTrip = true
         }
 
         do {
-            let response: PlanOut? = try await withAuth { bearer in
+            let response: Trip? = try await withAuth { bearer in
                 try await self.api.get(
                     self.url("/api/v1/trips/active"),
                     bearer: bearer
@@ -756,8 +753,8 @@ final class Session: ObservableObject {
             }
 
             await MainActor.run {
-                self.activePlan = response
-                self.isLoadingPlan = false
+                self.activeTrip = response
+                self.isLoadingTrip = false
 
                 // Cache the active plan for offline access
                 if let plan = response {
@@ -770,10 +767,10 @@ final class Session: ObservableObject {
             await MainActor.run {
                 // Try to load active plan from cache
                 let cachedTrips = LocalStorage.shared.getCachedTrips()
-                self.activePlan = cachedTrips.first { $0.status == "active" }
-                self.isLoadingPlan = false
+                self.activeTrip = cachedTrips.first { $0.status == "active" }
+                self.isLoadingTrip = false
 
-                if self.activePlan != nil {
+                if self.activeTrip != nil {
                     self.notice = "Loaded from cache (offline mode)"
                 }
             }
@@ -781,9 +778,9 @@ final class Session: ObservableObject {
     }
 
     /// Load all trips with caching for offline access
-    func loadAllTrips() async -> [PlanOut] {
+    func loadAllTrips() async -> [Trip] {
         do {
-            let trips: [PlanOut] = try await withAuth { bearer in
+            let trips: [Trip] = try await withAuth { bearer in
                 try await self.api.get(
                     self.url("/api/v1/trips/"),
                     bearer: bearer
@@ -826,7 +823,7 @@ final class Session: ObservableObject {
                         let _: GenericResponse = try await withAuth { bearer in
                             try await self.api.post(
                                 urlComponents.url!,
-                                body: Empty(),
+                                body: API.Empty(),
                                 bearer: bearer
                             )
                         }
@@ -836,7 +833,7 @@ final class Session: ObservableObject {
                         let _: GenericResponse = try await withAuth { bearer in
                             try await self.api.post(
                                 self.url("/api/v1/trips/\(tripId)/complete"),
-                                body: EmptyBody(),
+                                body: API.Empty(),
                                 bearer: bearer
                             )
                         }
@@ -855,7 +852,7 @@ final class Session: ObservableObject {
     }
 
     func checkIn() async -> Bool {
-        guard let plan = activePlan,
+        guard let plan = activeTrip,
               let token = plan.checkin_token else { return false }
 
         do {
@@ -878,19 +875,19 @@ final class Session: ObservableObject {
     }
 
     func completePlan() async -> Bool {
-        guard let plan = activePlan else { return false }
+        guard let plan = activeTrip else { return false }
 
         do {
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.post(
                     self.url("/api/v1/trips/\(plan.id)/complete"),
-                    body: EmptyBody(),
+                    body: API.Empty(),
                     bearer: bearer
                 )
             }
 
             await MainActor.run {
-                self.activePlan = nil
+                self.activeTrip = nil
                 self.notice = "Welcome back! Trip completed safely."
             }
 
@@ -907,7 +904,7 @@ final class Session: ObservableObject {
     }
 
     func extendPlan(minutes: Int = 30) async -> Bool {
-        guard let plan = activePlan else {
+        guard let plan = activeTrip else {
             await MainActor.run {
                 self.lastError = "No active plan to extend"
             }
@@ -928,7 +925,7 @@ final class Session: ObservableObject {
             let _: ExtendResponse = try await withAuth { bearer in
                 try await self.api.post(
                     urlComponents.url!,
-                    body: Empty(),
+                    body: API.Empty(),
                     bearer: bearer
                 )
             }
@@ -948,8 +945,6 @@ final class Session: ObservableObject {
         }
     }
 
-    struct Empty: Encodable {}
-
     func loadTimeline(planId: Int) async -> [TimelineEvent] {
         do {
             let response: TimelineResponse = try await withAuth { bearer in
@@ -968,54 +963,6 @@ final class Session: ObservableObject {
     }
 
     // MARK: - Profile Management
-    func updateProfile(firstName: String, lastName: String, age: Int) async -> Bool {
-        struct ProfileUpdateRequest: Encodable {
-            let first_name: String
-            let last_name: String
-            let age: Int
-        }
-
-        struct ProfileUpdateResponse: Decodable {
-            let ok: Bool
-            let user: UserInfo?
-
-            struct UserInfo: Decodable {
-                let first_name: String?
-                let last_name: String?
-                let age: Int?
-                let profile_completed: Bool?
-            }
-        }
-
-        do {
-            let response: ProfileUpdateResponse = try await withAuth { bearer in
-                try await self.api.put(
-                    self.url("/api/v1/profile"),
-                    body: ProfileUpdateRequest(first_name: firstName, last_name: lastName, age: age),
-                    bearer: bearer
-                )
-            }
-
-            if response.ok, let user = response.user {
-                await MainActor.run {
-                    if let first = user.first_name, let last = user.last_name {
-                        self.userName = "\(first) \(last)"
-                    }
-                    self.userAge = user.age
-                    self.profileCompleted = user.profile_completed ?? true
-                }
-                return true
-            }
-            return false
-        } catch {
-            await MainActor.run {
-                self.lastError = "Failed to update profile: \(error.localizedDescription)"
-            }
-            return false
-        }
-    }
-
-    // MARK: - Update Profile
     func updateProfile(firstName: String? = nil, lastName: String? = nil, age: Int? = nil, phone: String? = nil) async -> Bool {
         struct UpdateProfileRequest: Encodable {
             let first_name: String?
@@ -1142,9 +1089,9 @@ final class Session: ObservableObject {
     }
 
     // MARK: - Saved Contacts Management
-    func loadSavedContacts() async -> [SavedContact] {
+    func loadContacts() async -> [Contact] {
         do {
-            let contacts: [SavedContact] = try await withAuth { bearer in
+            let contacts: [Contact] = try await withAuth { bearer in
                 try await self.api.get(
                     self.url("/api/v1/contacts/"),
                     bearer: bearer
@@ -1157,8 +1104,8 @@ final class Session: ObservableObject {
         }
     }
 
-    func addSavedContact(name: String, phone: String?, email: String?) async -> SavedContact? {
-        print("DEBUG Session: addSavedContact called")
+    func addContact(name: String, phone: String?, email: String?) async -> Contact? {
+        print("DEBUG Session: addContact called")
         print("DEBUG Session: Contact to add - name: \(name), phone: \(phone ?? "nil"), email: \(email ?? "nil")")
 
         struct AddContactRequest: Encodable {
@@ -1178,7 +1125,7 @@ final class Session: ObservableObject {
 
         do {
             print("DEBUG Session: Making API call...")
-            let response: SavedContact = try await withAuth { bearer in
+            let response: Contact = try await withAuth { bearer in
                 try await self.api.post(
                     self.url("/api/v1/contacts/"),
                     body: requestBody,
@@ -1197,7 +1144,7 @@ final class Session: ObservableObject {
         }
     }
 
-    func deleteSavedContact(_ contactId: Int) async -> Bool {
+    func deleteContact(_ contactId: Int) async -> Bool {
         do {
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.delete(
@@ -1243,10 +1190,10 @@ final class Session: ObservableObject {
                     self.notice = "Showing cached activities (offline mode)"
                     print("[Session] 📦 Using \(cachedActivities.count) cached activities")
                 } else {
-                    // Ultimate fallback: use hardcoded ActivityTypes
-                    self.activities = ActivityType.fallbackActivities()
-                    self.notice = "Using offline activities (no connection)"
-                    print("[Session] 🔧 Using \(self.activities.count) fallback activities")
+                    // No activities available - user needs internet connection
+                    self.activities = []
+                    self.lastError = "Unable to load activities. Please check your internet connection."
+                    print("[Session] ❌ No activities available (no backend or cache)")
                 }
             }
         }
@@ -1284,7 +1231,7 @@ final class Session: ObservableObject {
         userEmail = nil
         userPhone = nil
         profileCompleted = false
-        activePlan = nil
+        activeTrip = nil
         activities = []
 
         print("[Session] ✅ Sign out complete")

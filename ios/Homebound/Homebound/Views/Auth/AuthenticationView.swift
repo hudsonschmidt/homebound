@@ -14,8 +14,8 @@ struct AuthenticationView: View {
             // Gradient Background
             LinearGradient(
                 colors: [
-                    Color(hex: "#6C63FF") ?? .purple,
-                    Color(hex: "#4ECDC4") ?? .teal
+                    Color.hbBrand,
+                    Color.hbTeal
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing

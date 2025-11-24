@@ -2,7 +2,7 @@ import SwiftUI
 
 struct EmergencyContactsView: View {
     @EnvironmentObject var session: Session
-    @State private var savedContacts: [SavedContact] = []
+    @State private var savedContacts: [Contact] = []
     @State private var showingAddContact = false
     @State private var newContactName = ""
     @State private var newContactPhone = ""
@@ -28,7 +28,7 @@ struct EmergencyContactsView: View {
                                 HStack {
                                     Image(systemName: "plus.circle.fill")
                                         .font(.title2)
-                                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                        .foregroundStyle(Color.hbBrand)
                                     Text("Add Emergency Contact")
                                         .fontWeight(.medium)
                                     Spacer()
@@ -42,7 +42,7 @@ struct EmergencyContactsView: View {
                     if !savedContacts.isEmpty {
                         Section("Saved Contacts") {
                             ForEach(savedContacts) { contact in
-                                SavedContactRow(
+                                ContactRow(
                                     contact: contact,
                                     onDelete: {
                                         deleteContact(contact)
@@ -61,7 +61,7 @@ struct EmergencyContactsView: View {
                                     .font(.headline)
                             } icon: {
                                 Image(systemName: "info.circle.fill")
-                                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                    .foregroundStyle(Color.hbBrand)
                             }
 
                             Text("Save frequently used emergency contacts for quick selection when creating trips. You can save up to 10 contacts.")
@@ -111,7 +111,7 @@ struct EmergencyContactsView: View {
     private func loadContacts() async {
         print("DEBUG loadContacts: Starting to load contacts")
         isLoading = true
-        let contacts = await session.loadSavedContacts()
+        let contacts = await session.loadContacts()
         print("DEBUG loadContacts: Loaded \(contacts.count) contacts from server")
         await MainActor.run {
             print("DEBUG loadContacts: Updating UI with contacts")
@@ -127,12 +127,12 @@ struct EmergencyContactsView: View {
         print("DEBUG: Contact Phone: \(newContactPhone)")
         print("DEBUG: Contact Email: \(newContactEmail)")
 
-        let savedContact = await session.addSavedContact(
+        let savedContact = await session.addContact(
             name: newContactName,
             phone: newContactPhone.isEmpty ? nil : newContactPhone,
             email: newContactEmail.isEmpty ? nil : newContactEmail
         )
-        print("DEBUG: addSavedContact returned: \(String(describing: savedContact))")
+        print("DEBUG: addContact returned: \(String(describing: savedContact))")
 
         if let savedContact = savedContact {
             print("DEBUG: Contact saved successfully, updating UI...")
@@ -161,9 +161,9 @@ struct EmergencyContactsView: View {
         }
     }
 
-    private func deleteContact(_ contact: SavedContact) {
+    private func deleteContact(_ contact: Contact) {
         Task {
-            let success = await session.deleteSavedContact(contact.id)
+            let success = await session.deleteContact(contact.id)
             if success {
                 await MainActor.run {
                     savedContacts.removeAll { $0.id == contact.id }
@@ -174,8 +174,8 @@ struct EmergencyContactsView: View {
 }
 
 // MARK: - Saved Contact Row
-struct SavedContactRow: View {
-    let contact: SavedContact
+struct ContactRow: View {
+    let contact: Contact
     let onDelete: () -> Void
     @State private var showDeleteAlert = false
 
@@ -185,7 +185,7 @@ struct SavedContactRow: View {
             Circle()
                 .fill(
                     LinearGradient(
-                        colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                        colors: [Color.hbBrand, Color.hbTeal],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )

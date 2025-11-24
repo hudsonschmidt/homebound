@@ -17,7 +17,7 @@ struct SettingsView: View {
                             Circle()
                                 .fill(
                                     LinearGradient(
-                                        colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                                        colors: [Color.hbBrand, Color.hbTeal],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
                                     )
@@ -121,7 +121,7 @@ struct SettingsView: View {
                             }
                         } icon: {
                             Image(systemName: "questionmark.circle.fill")
-                                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                .foregroundStyle(Color.hbBrand)
                         }
                     }
 
@@ -273,7 +273,7 @@ struct AccountView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                                            colors: [Color.hbBrand, Color.hbTeal],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
@@ -298,7 +298,7 @@ struct AccountView: View {
                                 .overlay(
                                     Image(systemName: "camera.fill")
                                         .font(.system(size: 16))
-                                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                                        .foregroundStyle(Color.hbBrand)
                                 )
                                 .offset(x: 40, y: 40)
                         }
@@ -331,7 +331,7 @@ struct AccountView: View {
                 // First Name
                 HStack {
                     Text("First Name")
-                        .foregroundStyle(editingFirstName ? Color(hex: "#6C63FF") ?? .purple : .primary)
+                        .foregroundStyle(editingFirstName ? Color.hbBrand : .primary)
                     Spacer()
                     if editingFirstName {
                         TextField("First Name", text: $tempFirstName)
@@ -355,14 +355,14 @@ struct AccountView: View {
                     }) {
                         Text(editingFirstName ? "Save" : "Edit")
                             .font(.subheadline)
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(Color.hbBrand)
                     }
                 }
 
                 // Last Name
                 HStack {
                     Text("Last Name")
-                        .foregroundStyle(editingLastName ? Color(hex: "#6C63FF") ?? .purple : .primary)
+                        .foregroundStyle(editingLastName ? Color.hbBrand : .primary)
                     Spacer()
                     if editingLastName {
                         TextField("Last Name", text: $tempLastName)
@@ -386,14 +386,14 @@ struct AccountView: View {
                     }) {
                         Text(editingLastName ? "Save" : "Edit")
                             .font(.subheadline)
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(Color.hbBrand)
                     }
                 }
 
                 // Age
                 HStack {
                     Text("Age")
-                        .foregroundStyle(editingAge ? Color(hex: "#6C63FF") ?? .purple : .primary)
+                        .foregroundStyle(editingAge ? Color.hbBrand : .primary)
                     Spacer()
                     if editingAge {
                         TextField("Age", text: $tempAge)
@@ -418,14 +418,14 @@ struct AccountView: View {
                     }) {
                         Text(editingAge ? "Save" : "Edit")
                             .font(.subheadline)
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(Color.hbBrand)
                     }
                 }
 
                 // Phone
                 HStack {
                     Text("Phone")
-                        .foregroundStyle(editingPhone ? Color(hex: "#6C63FF") ?? .purple : .primary)
+                        .foregroundStyle(editingPhone ? Color.hbBrand : .primary)
                     Spacer()
                     if editingPhone {
                         TextField("Phone", text: $tempPhone)
@@ -450,7 +450,7 @@ struct AccountView: View {
                     }) {
                         Text(editingPhone ? "Save" : "Edit")
                             .font(.subheadline)
-                            .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                            .foregroundStyle(Color.hbBrand)
                     }
                 }
             }

@@ -29,7 +29,7 @@ struct MainTabView: View {
                 }
                 .tag(2)
         }
-        .accentColor(Color(hex: "#6C63FF") ?? .purple)
+        .accentColor(Color.hbBrand)
     }
 }
 
@@ -63,7 +63,7 @@ struct NewHomeView: View {
                                     .fontWeight(.bold)
                                     .foregroundStyle(
                                         LinearGradient(
-                                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                                            colors: [Color.hbBrand, Color.hbTeal],
                                             startPoint: .leading,
                                             endPoint: .trailing
                                         )
@@ -80,7 +80,7 @@ struct NewHomeView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                                            colors: [Color.hbBrand, Color.hbTeal],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
@@ -97,9 +97,9 @@ struct NewHomeView: View {
                         .padding(.top, 8)
 
                         // Check for active plan first
-                        if let activePlan = session.activePlan {
+                        if let activeTrip = session.activeTrip {
                             // Show active plan card instead of new trip card
-                            ActivePlanCardCompact(plan: activePlan, timeline: $timeline)
+                            ActivePlanCardCompact(plan: activeTrip, timeline: $timeline)
                                 .padding(.horizontal)
                         } else {
                             // Big New Trip Card
@@ -171,7 +171,7 @@ struct BigNewTripCard: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                                colors: [Color.hbBrand, Color.hbTeal],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -234,7 +234,7 @@ struct FeatureRow: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 18))
-                .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                .foregroundStyle(Color.hbBrand)
                 .frame(width: 24)
 
             Text(text)
@@ -248,7 +248,7 @@ struct FeatureRow: View {
 
 // MARK: - Active Plan Card Compact
 struct ActivePlanCardCompact: View {
-    let plan: PlanOut
+    let plan: Trip
     @Binding var timeline: [TimelineEvent]
     @EnvironmentObject var session: Session
     @State private var timeRemaining = ""
@@ -512,7 +512,7 @@ struct ActivePlanCardCompact: View {
 // MARK: - Upcoming Trips Section
 struct UpcomingTripsSection: View {
     @EnvironmentObject var session: Session
-    @State private var upcomingPlans: [PlanOut] = []
+    @State private var upcomingPlans: [Trip] = []
     @State private var currentTime = Date()
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -570,18 +570,11 @@ struct UpcomingTripsSection: View {
 
 // MARK: - Upcoming Trip Card
 struct UpcomingTripCard: View {
-    let plan: PlanOut
+    let plan: Trip
     let currentTime: Date
 
-    var activity: ActivityType {
-        // Try exact match first
-        if let matched = ActivityType(rawValue: plan.activity_type.lowercased()) {
-            return matched
-        }
-
-        // Try converting spaces to underscores and lowercasing
-        let normalized = plan.activity_type.lowercased().replacingOccurrences(of: " ", with: "_")
-        return ActivityType(rawValue: normalized) ?? .other
+    var activity: ActivityTypeAdapter {
+        ActivityTypeAdapter(activity: plan.activity)
     }
 
     var countdown: String {
@@ -636,7 +629,7 @@ struct UpcomingTripCard: View {
                 Text(countdown)
                     .font(.caption)
                     .fontWeight(.semibold)
-                    .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                    .foregroundStyle(Color.hbBrand)
 
                 Text("until start")
                     .font(.caption2)
@@ -669,7 +662,7 @@ struct UpcomingTripCard: View {
 // MARK: - History Tab View
 struct HistoryTabView: View {
     @EnvironmentObject var session: Session
-    @State private var plans: [PlanOut] = []
+    @State private var plans: [Trip] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var loadTask: Task<Void, Never>?
@@ -737,7 +730,7 @@ struct HistoryTabView: View {
             }
 
             do {
-                let loadedPlans: [PlanOut] = try await session.api.get(
+                let loadedPlans: [Trip] = try await session.api.get(
                     session.url("/api/v1/trips/"),
                     bearer: session.accessToken
                 )
@@ -844,17 +837,10 @@ struct EmptyHistoryView: View {
 
 // MARK: - History Row View
 struct HistoryRowView: View {
-    let plan: PlanOut
+    let plan: Trip
 
-    var activity: ActivityType {
-        // Try exact match first
-        if let matched = ActivityType(rawValue: plan.activity_type.lowercased()) {
-            return matched
-        }
-
-        // Try converting spaces to underscores and lowercasing
-        let normalized = plan.activity_type.lowercased().replacingOccurrences(of: " ", with: "_")
-        return ActivityType(rawValue: normalized) ?? .other
+    var activity: ActivityTypeAdapter {
+        ActivityTypeAdapter(activity: plan.activity)
     }
 
     var statusColor: Color {
@@ -951,7 +937,7 @@ struct HistoryRowView: View {
 
                     // For completed trips, show actual completion time; otherwise show ETA
                     if plan.status == "completed", let completedAtStr = plan.completed_at,
-                       let completedDate = parseCompletedDate(completedAtStr) {
+                       let completedDate = DateUtils.parseDate(completedAtStr) {
                         Text(completedDate.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -963,7 +949,7 @@ struct HistoryRowView: View {
                 }
 
                 // Duration
-                if let duration = calculateDuration(from: plan.start_at, to: plan.eta_at) {
+                if let duration = DateUtils.formatDuration(from: plan.start_at, to: plan.eta_at) {
                     HStack(spacing: 6) {
                         Image(systemName: "clock.fill")
                             .font(.caption)
@@ -1000,48 +986,11 @@ struct HistoryRowView: View {
         .cornerRadius(12)
     }
 
-    func calculateDuration(from start: Date, to end: Date) -> String? {
-        let interval = end.timeIntervalSince(start)
-        let hours = Int(interval) / 3600
-        let minutes = (Int(interval) % 3600) / 60
-
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else if minutes > 0 {
-            return "\(minutes)m"
-        }
-        return nil
-    }
-
-    func parseCompletedDate(_ dateString: String) -> Date? {
-        // Try ISO8601 format first (backend sends this)
-        let iso8601Formatter = ISO8601DateFormatter()
-        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        // Try without fractional seconds
-        iso8601Formatter.formatOptions = [.withInternetDateTime]
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        // Try custom format for backend timestamps
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        if let date = formatter.date(from: dateString) {
-            return date
-        }
-
-        return nil
-    }
 }
 
 // MARK: - Trip Stats View
 struct TripStatsView: View {
-    let plans: [PlanOut]
+    let plans: [Trip]
     @State private var preferences = StatsPreferences.load()
     @State private var showingEditStats = false
     @State private var animatedValues: [StatType: Double] = [:]
@@ -1052,23 +1001,15 @@ struct TripStatsView: View {
 
     var favoriteActivity: (icon: String, name: String, count: Int)? {
         let activityCounts = Dictionary(grouping: plans) { plan in
-            plan.activity_type
-        }.mapValues { $0.count }
+            plan.activity.id
+        }
 
-        guard let mostCommon = activityCounts.max(by: { $0.value < $1.value }) else {
+        guard let mostCommon = activityCounts.max(by: { $0.value.count < $1.value.count }) else {
             return nil
         }
 
-        // Try exact match first
-        var activity: ActivityType = .other
-        if let matched = ActivityType(rawValue: mostCommon.key.lowercased()) {
-            activity = matched
-        } else {
-            let normalized = mostCommon.key.lowercased().replacingOccurrences(of: " ", with: "_")
-            activity = ActivityType(rawValue: normalized) ?? .other
-        }
-
-        return (activity.icon, activity.displayName, mostCommon.value)
+        let activity = mostCommon.value.first!.activity
+        return (activity.icon, activity.name, mostCommon.value.count)
     }
 
     var useScrolling: Bool {
@@ -1083,7 +1024,7 @@ struct TripStatsView: View {
                     .font(.headline)
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [Color(hex: "#6C63FF") ?? .purple, Color(hex: "#4ECDC4") ?? .teal],
+                            colors: [Color.hbBrand, Color.hbTeal],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -1092,7 +1033,7 @@ struct TripStatsView: View {
                 Button(action: { showingEditStats = true }) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.title3)
-                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .foregroundStyle(Color.hbBrand)
                 }
             }
 
@@ -1128,7 +1069,7 @@ struct TripStatsView: View {
             if let favorite = favoriteActivity {
                 HStack(spacing: 12) {
                     Circle()
-                        .fill(Color(hex: "#6C63FF")?.opacity(0.2) ?? .purple.opacity(0.2))
+                        .fill(Color.hbBrand.opacity(0.2))
                         .frame(width: 44, height: 44)
                         .overlay(
                             Text(favorite.icon)
@@ -1149,10 +1090,10 @@ struct TripStatsView: View {
                     Text("\(favorite.count) trips")
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundStyle(Color(hex: "#6C63FF") ?? .purple)
+                        .foregroundStyle(Color.hbBrand)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color(hex: "#6C63FF")?.opacity(0.1) ?? .purple.opacity(0.1))
+                        .background(Color.hbBrand.opacity(0.1))
                         .cornerRadius(8)
                 }
                 .padding()
