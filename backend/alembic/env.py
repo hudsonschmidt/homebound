@@ -26,12 +26,20 @@ elif database_url.startswith("postgres://"):
 elif database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
+# CRITICAL: Switch Supabase from Session Mode (port 5432) to Transaction Mode (port 6543)
+# Transaction mode supports many more concurrent connections and is recommended for web apps
+# Session mode has very low connection limits and causes "MaxClientsInSessionMode" errors
+if "supabase.com" in database_url and ":5432" in database_url:
+    print("[Alembic] ⚠️  Supabase Session Mode detected (port 5432) - switching to Transaction Mode (port 6543)")
+    database_url = database_url.replace(":5432", ":6543")
+
 # Add SSL mode for Supabase connection pooler if not already present
 if "supabase.com" in database_url and "sslmode=" not in database_url:
     separator = "&" if "?" in database_url else "?"
     database_url = f"{database_url}{separator}sslmode=require"
 
 print(f"[Alembic] Final URL scheme: {database_url.split('://')[0]}")
+print(f"[Alembic] ✅ Using Supabase Transaction Mode (port 6543) for migrations")
 
 config.set_main_option("sqlalchemy.url", database_url)
 
