@@ -83,8 +83,15 @@ class TimelineEvent(BaseModel):
 @router.post("/", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
 def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_id)):
     """Create a new trip"""
+    # Log incoming request for debugging
+    print(f"[Trips] 📝 Creating trip for user_id={user_id}")
+    print(f"[Trips] Request body: title={body.title}, activity={body.activity}, start={body.start}, eta={body.eta}")
+    print(f"[Trips] Contacts: contact1={body.contact1}, contact2={body.contact2}, contact3={body.contact3}")
+    print(f"[Trips] Location: {body.location_text}, coords=({body.gen_lat}, {body.gen_lon})")
+
     # Validate that at least contact1 is provided (required by database)
     if body.contact1 is None:
+        print(f"[Trips] ❌ No contact1 provided")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one emergency contact (contact1) is required"
@@ -92,6 +99,7 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
 
     with db.engine.begin() as connection:
         # Verify activity exists and get its ID
+        print(f"[Trips] 🔍 Looking up activity: '{body.activity}'")
         activity = connection.execute(
             sqlalchemy.text(
                 """
@@ -104,16 +112,26 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
         ).fetchone()
 
         if not activity:
+            # List available activities for debugging
+            all_activities = connection.execute(
+                sqlalchemy.text("SELECT id, name FROM activities")
+            ).fetchall()
+            print(f"[Trips] ❌ Activity '{body.activity}' not found!")
+            print(f"[Trips] Available activities: {[a.name for a in all_activities]}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Activity not found"
+                detail=f"Activity '{body.activity}' not found. Available: {[a.name for a in all_activities]}"
             )
+
+        print(f"[Trips] ✅ Activity found: id={activity.id}")
 
         activity_id = activity.id
 
         # Verify contacts exist if provided
+        print(f"[Trips] 🔍 Verifying contacts...")
         for contact_id in [body.contact1, body.contact2, body.contact3]:
             if contact_id is not None:
+                print(f"[Trips] Checking contact_id={contact_id}")
                 contact = connection.execute(
                     sqlalchemy.text(
                         """
@@ -126,10 +144,19 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
                 ).fetchone()
 
                 if not contact:
+                    # List user's contacts for debugging
+                    user_contacts = connection.execute(
+                        sqlalchemy.text("SELECT id, name FROM contacts WHERE user_id = :user_id"),
+                        {"user_id": user_id}
+                    ).fetchall()
+                    print(f"[Trips] ❌ Contact {contact_id} not found for user {user_id}!")
+                    print(f"[Trips] User's contacts: {[(c.id, c.name) for c in user_contacts]}")
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Contact {contact_id} not found"
+                        detail=f"Contact {contact_id} not found. Available: {[c.id for c in user_contacts]}"
                     )
+
+                print(f"[Trips] ✅ Contact {contact_id} verified")
 
         # Generate unique tokens for checkin/checkout
         checkin_token = secrets.token_urlsafe(32)
