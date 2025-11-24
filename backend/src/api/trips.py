@@ -6,7 +6,9 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from src import database as db
 from src.api import auth
+from src.api.activities import Activity
 import sqlalchemy
+import json
 
 router = APIRouter(
     prefix="/api/v1/trips",
@@ -52,7 +54,7 @@ class TripResponse(BaseModel):
     id: int
     user_id: int
     title: str
-    activity: str
+    activity: Activity  # Full activity object with safety tips, colors, messages
     start: str
     eta: str
     grace_min: int
@@ -212,57 +214,75 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
         )
         trip_id = result.fetchone()[0]
 
-        # Fetch created trip with activity name
+        # Fetch created trip with full activity data
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT t.id, t.user_id, t.title, a.name as activity, t.start, t.eta, t.grace_min,
+                SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
-                       t.checkin_token, t.checkout_token
+                       t.checkin_token, t.checkout_token,
+                       a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
+                       a.default_grace_minutes, a.colors as activity_colors,
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.id = :trip_id
                 """
             ),
             {"trip_id": trip_id}
-        ).fetchone()
+        ).mappings().fetchone()
+
+        # Construct Activity object from trip data
+        activity = Activity(
+            id=trip["activity_id"],
+            name=trip["activity_name"],
+            icon=trip["activity_icon"],
+            default_grace_minutes=trip["default_grace_minutes"],
+            colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
+            messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
+            safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+            order=trip["activity_order"]
+        )
 
         return TripResponse(
-            id=trip.id,
-            user_id=trip.user_id,
-            title=trip.title,
-            activity=trip.activity,
-            start=to_iso8601(trip.start),
-            eta=to_iso8601(trip.eta),
-            grace_min=trip.grace_min,
-            location_text=trip.location_text,
-            gen_lat=trip.gen_lat,
-            gen_lon=trip.gen_lon,
-            notes=trip.notes,
-            status=trip.status,
-            completed_at=to_iso8601(trip.completed_at),
-            last_checkin=to_iso8601(trip.last_checkin),
-            created_at=to_iso8601(trip.created_at),
-            contact1=trip.contact1,
-            contact2=trip.contact2,
-            contact3=trip.contact3,
-            checkin_token=trip.checkin_token,
-            checkout_token=trip.checkout_token
+            id=trip["id"],
+            user_id=trip["user_id"],
+            title=trip["title"],
+            activity=activity,
+            start=to_iso8601(trip["start"]),
+            eta=to_iso8601(trip["eta"]),
+            grace_min=trip["grace_min"],
+            location_text=trip["location_text"],
+            gen_lat=trip["gen_lat"],
+            gen_lon=trip["gen_lon"],
+            notes=trip["notes"],
+            status=trip["status"],
+            completed_at=to_iso8601(trip["completed_at"]),
+            last_checkin=to_iso8601(trip["last_checkin"]),
+            created_at=to_iso8601(trip["created_at"]),
+            contact1=trip["contact1"],
+            contact2=trip["contact2"],
+            contact3=trip["contact3"],
+            checkin_token=trip["checkin_token"],
+            checkout_token=trip["checkout_token"]
         )
 
 
 @router.get("/", response_model=List[TripResponse])
 def get_trips(user_id: int = Depends(auth.get_current_user_id)):
-    """Get all trips for the current user"""
+    """Get all trips for the current user with full activity data"""
     with db.engine.begin() as connection:
         trips = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT t.id, t.user_id, t.title, a.name as activity, t.start, t.eta, t.grace_min,
+                SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
-                       t.checkin_token, t.checkout_token
+                       t.checkin_token, t.checkout_token,
+                       a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
+                       a.default_grace_minutes, a.colors as activity_colors,
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.user_id = :user_id
@@ -270,46 +290,64 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                 """
             ),
             {"user_id": user_id}
-        ).fetchall()
+        ).mappings().fetchall()
 
-        return [
-            TripResponse(
-                id=t.id,
-                user_id=t.user_id,
-                title=t.title,
-                activity=t.activity,
-                start=to_iso8601(t.start),
-                eta=to_iso8601(t.eta),
-                grace_min=t.grace_min,
-                location_text=t.location_text,
-                gen_lat=t.gen_lat,
-                gen_lon=t.gen_lon,
-                notes=t.notes,
-                status=t.status,
-                completed_at=to_iso8601(t.completed_at),
-                last_checkin=to_iso8601(t.last_checkin),
-                created_at=to_iso8601(t.created_at),
-                contact1=t.contact1,
-                contact2=t.contact2,
-                contact3=t.contact3,
-                checkin_token=t.checkin_token,
-                checkout_token=t.checkout_token
+        result = []
+        for trip in trips:
+            # Construct Activity object for each trip
+            activity = Activity(
+                id=trip["activity_id"],
+                name=trip["activity_name"],
+                icon=trip["activity_icon"],
+                default_grace_minutes=trip["default_grace_minutes"],
+                colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
+                messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
+                safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+                order=trip["activity_order"]
             )
-            for t in trips
-        ]
+
+            result.append(
+                TripResponse(
+                    id=trip["id"],
+                    user_id=trip["user_id"],
+                    title=trip["title"],
+                    activity=activity,
+                    start=to_iso8601(trip["start"]),
+                    eta=to_iso8601(trip["eta"]),
+                    grace_min=trip["grace_min"],
+                    location_text=trip["location_text"],
+                    gen_lat=trip["gen_lat"],
+                    gen_lon=trip["gen_lon"],
+                    notes=trip["notes"],
+                    status=trip["status"],
+                    completed_at=to_iso8601(trip["completed_at"]),
+                    last_checkin=to_iso8601(trip["last_checkin"]),
+                    created_at=to_iso8601(trip["created_at"]),
+                    contact1=trip["contact1"],
+                    contact2=trip["contact2"],
+                    contact3=trip["contact3"],
+                    checkin_token=trip["checkin_token"],
+                    checkout_token=trip["checkout_token"]
+                )
+            )
+
+        return result
 
 
 @router.get("/active", response_model=Optional[TripResponse])
 def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
-    """Get the current active trip"""
+    """Get the current active trip with full activity data including safety tips"""
     with db.engine.begin() as connection:
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT t.id, t.user_id, t.title, a.name as activity, t.start, t.eta, t.grace_min,
+                SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
-                       t.checkin_token, t.checkout_token
+                       t.checkin_token, t.checkout_token,
+                       a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
+                       a.default_grace_minutes, a.colors as activity_colors,
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.user_id = :user_id AND t.status = 'active'
@@ -318,53 +356,68 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
                 """
             ),
             {"user_id": user_id}
-        ).fetchone()
+        ).mappings().fetchone()
 
         if not trip:
             return None
 
+        # Construct Activity object from trip data
+        activity = Activity(
+            id=trip["activity_id"],
+            name=trip["activity_name"],
+            icon=trip["activity_icon"],
+            default_grace_minutes=trip["default_grace_minutes"],
+            colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
+            messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
+            safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+            order=trip["activity_order"]
+        )
+
         return TripResponse(
-            id=trip.id,
-            user_id=trip.user_id,
-            title=trip.title,
-            activity=trip.activity,
-            start=to_iso8601(trip.start),
-            eta=to_iso8601(trip.eta),
-            grace_min=trip.grace_min,
-            location_text=trip.location_text,
-            gen_lat=trip.gen_lat,
-            gen_lon=trip.gen_lon,
-            notes=trip.notes,
-            status=trip.status,
-            completed_at=to_iso8601(trip.completed_at),
-            last_checkin=to_iso8601(trip.last_checkin),
-            created_at=to_iso8601(trip.created_at),
-            contact1=trip.contact1,
-            contact2=trip.contact2,
-            contact3=trip.contact3,
-            checkin_token=trip.checkin_token,
-            checkout_token=trip.checkout_token
+            id=trip["id"],
+            user_id=trip["user_id"],
+            title=trip["title"],
+            activity=activity,
+            start=to_iso8601(trip["start"]),
+            eta=to_iso8601(trip["eta"]),
+            grace_min=trip["grace_min"],
+            location_text=trip["location_text"],
+            gen_lat=trip["gen_lat"],
+            gen_lon=trip["gen_lon"],
+            notes=trip["notes"],
+            status=trip["status"],
+            completed_at=to_iso8601(trip["completed_at"]),
+            last_checkin=to_iso8601(trip["last_checkin"]),
+            created_at=to_iso8601(trip["created_at"]),
+            contact1=trip["contact1"],
+            contact2=trip["contact2"],
+            contact3=trip["contact3"],
+            checkin_token=trip["checkin_token"],
+            checkout_token=trip["checkout_token"]
         )
 
 
 @router.get("/{trip_id}", response_model=TripResponse)
 def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
-    """Get a specific trip"""
+    """Get a specific trip with full activity data"""
     with db.engine.begin() as connection:
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT t.id, t.user_id, t.title, a.name as activity, t.start, t.eta, t.grace_min,
+                SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
-                       t.checkin_token, t.checkout_token
+                       t.checkin_token, t.checkout_token,
+                       a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
+                       a.default_grace_minutes, a.colors as activity_colors,
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.id = :trip_id AND t.user_id = :user_id
                 """
             ),
             {"trip_id": trip_id, "user_id": user_id}
-        ).fetchone()
+        ).mappings().fetchone()
 
         if not trip:
             raise HTTPException(
@@ -372,27 +425,39 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                 detail="Trip not found"
             )
 
+        # Construct Activity object from trip data
+        activity = Activity(
+            id=trip["activity_id"],
+            name=trip["activity_name"],
+            icon=trip["activity_icon"],
+            default_grace_minutes=trip["default_grace_minutes"],
+            colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
+            messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
+            safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+            order=trip["activity_order"]
+        )
+
         return TripResponse(
-            id=trip.id,
-            user_id=trip.user_id,
-            title=trip.title,
-            activity=trip.activity,
-            start=to_iso8601(trip.start),
-            eta=to_iso8601(trip.eta),
-            grace_min=trip.grace_min,
-            location_text=trip.location_text,
-            gen_lat=trip.gen_lat,
-            gen_lon=trip.gen_lon,
-            notes=trip.notes,
-            status=trip.status,
-            completed_at=to_iso8601(trip.completed_at),
-            last_checkin=to_iso8601(trip.last_checkin),
-            created_at=to_iso8601(trip.created_at),
-            contact1=trip.contact1,
-            contact2=trip.contact2,
-            contact3=trip.contact3,
-            checkin_token=trip.checkin_token,
-            checkout_token=trip.checkout_token
+            id=trip["id"],
+            user_id=trip["user_id"],
+            title=trip["title"],
+            activity=activity,
+            start=to_iso8601(trip["start"]),
+            eta=to_iso8601(trip["eta"]),
+            grace_min=trip["grace_min"],
+            location_text=trip["location_text"],
+            gen_lat=trip["gen_lat"],
+            gen_lon=trip["gen_lon"],
+            notes=trip["notes"],
+            status=trip["status"],
+            completed_at=to_iso8601(trip["completed_at"]),
+            last_checkin=to_iso8601(trip["last_checkin"]),
+            created_at=to_iso8601(trip["created_at"]),
+            contact1=trip["contact1"],
+            contact2=trip["contact2"],
+            contact3=trip["contact3"],
+            checkin_token=trip["checkin_token"],
+            checkout_token=trip["checkout_token"]
         )
 
 
