@@ -47,7 +47,14 @@ struct API {
 
     func get<T: Decodable>(_ url: URL, bearer: String?) async throws -> T {
         var req = URLRequest(url: url); req.httpMethod = "GET"
-        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        if let b = bearer {
+            // Use both headers - X-Auth-Token as primary (Cloudflare-safe) and Authorization as fallback
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
+            print("[API] ✅ GET \(url.path) - Added auth headers with token: \(b.prefix(20))...")
+        } else {
+            print("[API] ⚠️ GET \(url.path) - NO bearer token provided!")
+        }
         let (data, resp) = try await URLSession.shared.data(for: req)
         try check(resp: resp, data: data)
         return try decoder.decode(T.self, from: data)
@@ -56,7 +63,14 @@ struct API {
     func post<T: Decodable, B: Encodable>(_ url: URL, body: B, bearer: String?) async throws -> T {
         var req = URLRequest(url: url); req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        if let b = bearer {
+            // Use both headers - X-Auth-Token as primary (Cloudflare-safe) and Authorization as fallback
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
+            print("[API] ✅ POST \(url.path) - Added auth headers with token: \(b.prefix(20))...")
+        } else {
+            print("[API] ⚠️ POST \(url.path) - NO bearer token provided!")
+        }
         req.httpBody = try encoder.encode(body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         try check(resp: resp, data: data)
@@ -71,7 +85,10 @@ struct API {
     func put<T: Decodable, B: Encodable>(_ url: URL, body: B, bearer: String?) async throws -> T {
         var req = URLRequest(url: url); req.httpMethod = "PUT"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        if let b = bearer {
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
+        }
         req.httpBody = try encoder.encode(body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         try check(resp: resp, data: data)
@@ -82,7 +99,10 @@ struct API {
     func patch<T: Decodable, B: Encodable>(_ url: URL, body: B, bearer: String?) async throws -> T {
         var req = URLRequest(url: url); req.httpMethod = "PATCH"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        if let b = bearer {
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
+        }
         req.httpBody = try encoder.encode(body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         try check(resp: resp, data: data)
@@ -92,7 +112,10 @@ struct API {
 
     func delete<T: Decodable>(_ url: URL, bearer: String?) async throws -> T {
         var req = URLRequest(url: url); req.httpMethod = "DELETE"
-        if let b = bearer { req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization") }
+        if let b = bearer {
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
+            req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
+        }
         let (data, resp) = try await URLSession.shared.data(for: req)
         try check(resp: resp, data: data)
         if T.self == Empty.self { return Empty() as! T }

@@ -472,7 +472,7 @@ final class Session: ObservableObject {
 
         do {
             let response: PeekResponse = try await api.get(
-                url("/api/v1/auth/_dev/peek-code?email=\(email)"),
+                url("/api/v1/auth/_dev/peek-code/?email=\(email)"),
                 bearer: nil
             )
             return response.code
@@ -1020,7 +1020,7 @@ final class Session: ObservableObject {
     func loadActivities() async {
         do {
             let response: [Activity] = try await api.get(
-                url("/api/v1/activities"),
+                url("/api/v1/activities/"),
                 bearer: nil  // Activities endpoint doesn't require auth
             )
 

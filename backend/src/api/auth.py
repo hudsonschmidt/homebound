@@ -7,12 +7,17 @@ settings = config.get_settings()
 
 async def get_current_user_id(request: Request) -> int:
     """
-    Extract and validate JWT token from Authorization header.
+    Extract and validate JWT token from Authorization or X-Auth-Token header.
     Returns the user ID from the token's 'sub' claim.
 
     This is used as a dependency in protected routes.
     """
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    # Try X-Auth-Token first (Cloudflare-safe), then fall back to Authorization
+    auth = (request.headers.get("x-auth-token") or
+            request.headers.get("X-Auth-Token") or
+            request.headers.get("authorization") or
+            request.headers.get("Authorization"))
+
     if not auth or not auth.lower().startswith("bearer "):
         print(f"[Auth] ❌ Missing bearer token - headers: {dict(request.headers)}")
         raise HTTPException(
