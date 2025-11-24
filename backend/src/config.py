@@ -2,11 +2,11 @@ from dotenv import load_dotenv, find_dotenv
 import os
 from functools import lru_cache
 
-# Load default first
+# Load .env files for local development
+# IMPORTANT: override=False means environment variables (set in Render) take precedence
+# This ensures production environment variables aren't overridden by local .env files
 load_dotenv(dotenv_path="default.env", override=False)
-
-# Then override with .env if available
-load_dotenv(dotenv_path=find_dotenv(".env"), override=True)
+load_dotenv(dotenv_path=find_dotenv(".env"), override=False)  # Changed to False!
 
 
 class Settings:

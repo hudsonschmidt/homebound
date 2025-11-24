@@ -60,6 +60,10 @@ def create_jwt_pair(user_id: int, email: str) -> tuple[str, str]:
     access = jwt.encode(access_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     refresh = jwt.encode(refresh_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
+    print(f"[Auth] ✅ Created JWT pair for user_id={user_id}, email={email}")
+    print(f"[Auth] Access token expires in {settings.ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
+    print(f"[Auth] Using SECRET_KEY: {settings.SECRET_KEY[:5]}...{settings.SECRET_KEY[-5:]}")
+
     return access, refresh
 
 

@@ -112,9 +112,15 @@ final class Session: ObservableObject {
     @Published var apnsToken: String? = nil
     @Published var accessToken: String? = nil {
         didSet {
-            // Save to keychain when set
+            // Save to both keychain and local storage for redundancy
             if let token = accessToken {
                 keychain.saveAccessToken(token)
+                // Also save to local storage as backup
+                let refreshToken = keychain.getRefreshToken()
+                LocalStorage.shared.saveAuthTokens(access: token, refresh: refreshToken)
+                print("[Session] ✅ Access token saved to keychain and local storage")
+            } else {
+                print("[Session] ⚠️ Access token set to nil")
             }
         }
     }
@@ -165,7 +171,23 @@ final class Session: ObservableObject {
     }
 
     private func loadFromKeychain() {
+        // Try loading from keychain first
         accessToken = keychain.getAccessToken()
+
+        // If keychain fails, try LocalStorage as backup
+        if accessToken == nil {
+            let tokens = LocalStorage.shared.getAuthTokens()
+            if let access = tokens.access {
+                print("[Session] ℹ️ Loaded access token from LocalStorage backup")
+                accessToken = access
+                // Restore to keychain
+                keychain.saveAccessToken(access)
+            }
+            if let refresh = tokens.refresh {
+                keychain.saveRefreshToken(refresh)
+            }
+        }
+
         userName = keychain.getUserName()
         userEmail = keychain.getUserEmail()
         userAge = keychain.getUserAge()
@@ -181,6 +203,9 @@ final class Session: ObservableObject {
         // If we have a token, we're authenticated
         if accessToken != nil {
             isAuthenticated = true
+            print("[Session] ✅ Loaded auth token - user authenticated")
+        } else {
+            print("[Session] ℹ️ No auth token found - user not authenticated")
         }
     }
 
@@ -283,6 +308,9 @@ final class Session: ObservableObject {
             // Store refresh token if present
             if let refresh = resp.refresh {
                 keychain.saveRefreshToken(refresh)
+                // Also save to local storage as backup
+                LocalStorage.shared.saveAuthTokens(access: accessToken, refresh: refresh)
+                print("[Session] ✅ Refresh token saved to keychain and local storage")
             }
 
             // Store user profile data
@@ -329,12 +357,26 @@ final class Session: ObservableObject {
     /// Refresh the access token using the stored refresh token
     @MainActor
     func refreshAccessToken() async -> Bool {
-        guard let refreshToken = keychain.getRefreshToken() else {
+        var refreshToken = keychain.getRefreshToken()
+
+        // If keychain doesn't have it, try LocalStorage backup
+        if refreshToken == nil {
+            let tokens = LocalStorage.shared.getAuthTokens()
+            refreshToken = tokens.refresh
+            if refreshToken != nil {
+                print("[Session] ℹ️ Using refresh token from LocalStorage backup")
+            }
+        }
+
+        guard let refreshToken = refreshToken else {
+            print("[Session] ❌ No refresh token available - user needs to re-authenticate")
             // No refresh token available, user needs to re-authenticate
             isAuthenticated = false
             accessToken = nil
             return false
         }
+
+        print("[Session] ℹ️ Attempting to refresh access token...")
 
         do {
             let resp: RefreshResponse = try await api.post(
@@ -351,6 +393,9 @@ final class Session: ObservableObject {
             // Update refresh token if a new one was provided
             if let newRefresh = resp.refresh {
                 keychain.saveRefreshToken(newRefresh)
+                // Also save to local storage as backup
+                LocalStorage.shared.saveAuthTokens(access: accessToken, refresh: newRefresh)
+                print("[Session] ✅ Token refreshed successfully - saved to keychain and local storage")
             }
 
             // Update user profile data if provided
@@ -375,12 +420,15 @@ final class Session: ObservableObject {
                 }
             }
 
+            print("[Session] ✅ Access token refresh successful")
             return true
         } catch {
+            print("[Session] ❌ Token refresh failed: \(error)")
             // Token refresh failed, user needs to re-authenticate
             isAuthenticated = false
             accessToken = nil
             keychain.clearAll()
+            LocalStorage.shared.clearAuthTokens()
             return false
         }
     }
@@ -389,18 +437,23 @@ final class Session: ObservableObject {
     @MainActor
     private func withAuth<T>(_ operation: @escaping (String) async throws -> T) async throws -> T {
         guard let bearer = accessToken else {
+            print("[Session] ❌ No access token available - unauthorized")
             throw API.APIError.unauthorized
         }
 
         do {
             return try await operation(bearer)
         } catch API.APIError.unauthorized {
+            print("[Session] ⚠️ Got 401 Unauthorized - attempting token refresh...")
+
             // Try to refresh the token
             let refreshed = await refreshAccessToken()
             guard refreshed, let newBearer = accessToken else {
+                print("[Session] ❌ Token refresh failed - user needs to re-authenticate")
                 throw API.APIError.unauthorized
             }
 
+            print("[Session] ✅ Token refreshed - retrying request with new token")
             // Retry the operation with the new token
             return try await operation(newBearer)
         }
@@ -1003,6 +1056,8 @@ final class Session: ObservableObject {
     // MARK: - Sign Out
     @MainActor
     func signOut() {
+        print("[Session] 🔒 Signing out - clearing all data")
+
         // Clear keychain
         keychain.clearAll()
 
@@ -1025,5 +1080,7 @@ final class Session: ObservableObject {
         profileCompleted = false
         activePlan = nil
         activities = []
+
+        print("[Session] ✅ Sign out complete")
     }
 }
