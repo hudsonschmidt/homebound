@@ -26,6 +26,11 @@ elif database_url.startswith("postgres://"):
 elif database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
+# Add SSL mode for Supabase connection pooler if not already present
+if "supabase.com" in database_url and "sslmode=" not in database_url:
+    separator = "&" if "?" in database_url else "?"
+    database_url = f"{database_url}{separator}sslmode=require"
+
 print(f"[Alembic] Final URL scheme: {database_url.split('://')[0]}")
 
 config.set_main_option("sqlalchemy.url", database_url)

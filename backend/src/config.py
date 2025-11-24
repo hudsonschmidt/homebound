@@ -10,8 +10,10 @@ load_dotenv(dotenv_path=find_dotenv(".env"), override=True)
 
 
 class Settings:
-    # Database - Docker PostgreSQL for local dev, Supabase for production
+    # Database - Docker PostgreSQL for local dev, Supabase connection pooler for production
     # Check DATABASE_URL first (Render sets this), then POSTGRES_URI, then default to local Docker
+    # For Supabase: Use session pooler connection string from Supabase dashboard
+    # Example: postgresql+psycopg://postgres.[ref]:[password]@aws-1-us-east-2.pooler.supabase.com:5432/postgres
     POSTGRES_URI: str = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI", "postgresql://myuser:mypassword@localhost:5432/mydatabase")
 
     # JWT settings for authentication

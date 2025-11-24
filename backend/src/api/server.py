@@ -37,7 +37,9 @@ origins = [
     "http://127.0.0.1:8000",
     "capacitor://localhost",
     "ionic://localhost",
-    "https://homebound.onrender.com",
+    "https://api.homeboundapp.com",
+    "https://homeboundapp.com",
+    "https://www.homeboundapp.com",
 ]
 
 app.add_middleware(
