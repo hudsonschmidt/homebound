@@ -99,13 +99,17 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
 
     with db.engine.begin() as connection:
         # Verify activity exists and get its ID
-        print(f"[Trips] 🔍 Looking up activity: '{body.activity}'")
+        # Normalize activity name: convert to lowercase and replace underscores with spaces
+        # This allows "scuba_diving" to match "Scuba Diving"
+        normalized_activity = body.activity.lower().replace('_', ' ')
+        print(f"[Trips] 🔍 Looking up activity: '{body.activity}' (normalized: '{normalized_activity}')")
+
         activity = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id
+                SELECT id, name
                 FROM activities
-                WHERE LOWER(name) = LOWER(:activity)
+                WHERE LOWER(REPLACE(name, ' ', '_')) = LOWER(REPLACE(:activity, ' ', '_'))
                 """
             ),
             {"activity": body.activity}
@@ -123,7 +127,7 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
                 detail=f"Activity '{body.activity}' not found. Available: {[a.name for a in all_activities]}"
             )
 
-        print(f"[Trips] ✅ Activity found: id={activity.id}")
+        print(f"[Trips] ✅ Activity found: id={activity.id}, name='{activity.name}'")
 
         activity_id = activity.id
 
