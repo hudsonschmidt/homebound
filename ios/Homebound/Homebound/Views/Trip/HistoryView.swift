@@ -6,6 +6,12 @@ struct HistoryView: View {
     @State private var allPlans: [Trip] = []
     @State private var isLoading = true
     @State private var searchText = ""
+    @State private var errorMessage: String?
+    @State private var loadTask: Task<Void, Never>?
+
+    // Presentation mode - controls whether this is shown as a tab or modal
+    var showAsTab: Bool = false
+    var showStats: Bool = false
 
     var filteredPlans: [Trip] {
         let filtered = allPlans.filter { plan in
@@ -18,17 +24,15 @@ struct HistoryView: View {
         // Sort by completion time for completed trips, start time for others
         return filtered.sorted { plan1, plan2 in
             let date1: Date
-            if plan1.status == "completed", let completedStr = plan1.completed_at,
-               let completedDate = DateUtils.parseDate(completedStr) {
-                date1 = completedDate
+            if plan1.status == "completed", let completedAt = plan1.completed_at {
+                date1 = completedAt
             } else {
                 date1 = plan1.start_at
             }
 
             let date2: Date
-            if plan2.status == "completed", let completedStr = plan2.completed_at,
-               let completedDate = DateUtils.parseDate(completedStr) {
-                date2 = completedDate
+            if plan2.status == "completed", let completedAt = plan2.completed_at {
+                date2 = completedAt
             } else {
                 date2 = plan2.start_at
             }
@@ -44,47 +48,47 @@ struct HistoryView: View {
                 Color(.systemBackground)
                     .ignoresSafeArea()
 
-                if isLoading {
-                    ProgressView("Loading trips...")
+                if isLoading && allPlans.isEmpty {
+                    ProgressView("Loading history...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if filteredPlans.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 60))
-                            .foregroundStyle(Color.gray.opacity(0.5))
-
-                        Text("No trips found")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-
-                        Text(searchText.isEmpty ? "Start your first adventure!" : "Try a different search")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if filteredPlans.isEmpty && !isLoading {
+                    EmptyHistoryView(hasSearchText: !searchText.isEmpty)
                 } else {
-                    VStack(spacing: 0) {
-                        // Search Bar
-                        HStack {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.secondary)
-                            TextField("Search trips...", text: $searchText)
-                                .textFieldStyle(.plain)
-                            if !searchText.isEmpty {
-                                Button(action: { searchText = "" }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.secondary)
+                    List {
+                        // Stats Section (optional - only shown in tab mode)
+                        if showStats && !allPlans.isEmpty {
+                            Section {
+                                TripStatsView(plans: allPlans)
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+
+                        // Search Bar Section
+                        Section {
+                            HStack {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                TextField("Search trips...", text: $searchText)
+                                    .textFieldStyle(.plain)
+                                if !searchText.isEmpty {
+                                    Button(action: { searchText = "" }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
+                            .padding(12)
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(12)
                         }
-                        .padding(12)
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-                        .padding(.horizontal)
-                        .padding(.vertical)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
 
-                        // Trip List using List for swipe actions
-                        List {
+                        // Trip List
+                        Section {
                             ForEach(filteredPlans) { plan in
                                 TripHistoryCard(plan: plan)
                                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
@@ -101,56 +105,90 @@ struct HistoryView: View {
                                     }
                             }
                         }
-                        .listStyle(.plain)
-                        .scrollContentBackground(.hidden)
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
             }
             .navigationTitle("Trip History")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(showAsTab ? .large : .inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
+                if !showAsTab {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                        .fontWeight(.semibold)
                     }
-                    .fontWeight(.semibold)
                 }
             }
-        }
-        .task {
-            await loadAllPlans()
+            .task {
+                await loadAllPlans()
+            }
+            .refreshable {
+                await loadAllPlans()
+            }
+            .alert("Error", isPresented: .constant(errorMessage != nil)) {
+                Button("OK") { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+            .onDisappear {
+                loadTask?.cancel()
+            }
         }
     }
 
     func loadAllPlans() async {
-        guard let bearer = session.accessToken else { return }
+        // Cancel any existing load task
+        loadTask?.cancel()
 
-        isLoading = true
-        do {
-            // Backend returns all trips ordered by created_at DESC (most recent first)
-            let plans: [Trip] = try await session.api.get(
-                session.url("/api/v1/trips/"),
-                bearer: bearer
-            )
-
-            print("[HistoryView] 📥 Loaded \(plans.count) total trips from backend")
-            plans.forEach { plan in
-                print("[HistoryView] - '\(plan.title)': status=\(plan.status), completed_at=\(plan.completed_at ?? "nil")")
-            }
+        // Create new task
+        loadTask = Task {
+            guard !Task.isCancelled else { return }
+            guard let bearer = session.accessToken else { return }
 
             await MainActor.run {
-                self.allPlans = plans
-                self.isLoading = false
-            }
-        } catch {
-            print("[HistoryView] ❌ Failed to load history: \(error)")
-            if let decodingError = error as? DecodingError {
-                print("[HistoryView] Decoding error details: \(decodingError)")
+                isLoading = true
+                errorMessage = nil
             }
 
-            await MainActor.run {
-                self.isLoading = false
-                session.lastError = "Failed to load history: \(error.localizedDescription)"
+            do {
+                // Backend returns all trips ordered by created_at DESC (most recent first)
+                let plans: [Trip] = try await session.api.get(
+                    session.url("/api/v1/trips/"),
+                    bearer: bearer
+                )
+
+                print("[HistoryView] 📥 Loaded \(plans.count) total trips from backend")
+
+                // Check if task was cancelled before updating UI
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    self.allPlans = plans
+                    self.isLoading = false
+                }
+            } catch {
+                print("[HistoryView] ❌ Failed to load history: \(error)")
+                if let decodingError = error as? DecodingError {
+                    print("[HistoryView] Decoding error details: \(decodingError)")
+                }
+
+                // Only show error if not cancelled
+                if !Task.isCancelled {
+                    let errorText = error.localizedDescription
+                    if !errorText.contains("cancelled") {
+                        await MainActor.run {
+                            self.isLoading = false
+                            errorMessage = "Failed to load history: \(errorText)"
+                        }
+                    } else {
+                        await MainActor.run {
+                            self.isLoading = false
+                        }
+                    }
+                }
             }
         }
     }
@@ -162,10 +200,39 @@ struct HistoryView: View {
                 // Remove the plan from the list
                 self.allPlans.removeAll { $0.id == plan.id }
             }
+        } else {
+            await MainActor.run {
+                errorMessage = "Failed to delete trip"
+            }
         }
     }
 }
 
+// MARK: - Empty History View
+struct EmptyHistoryView: View {
+    let hasSearchText: Bool
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: hasSearchText ? "magnifyingglass" : "clock.badge.xmark")
+                .font(.system(size: 60))
+                .foregroundStyle(Color.gray.opacity(0.5))
+
+            Text(hasSearchText ? "No trips found" : "No Trip History")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text(hasSearchText ? "Try a different search" : "Your completed trips will appear here")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Trip History Card
 struct TripHistoryCard: View {
     let plan: Trip
 
@@ -191,14 +258,22 @@ struct TripHistoryCard: View {
         }
     }
 
+    // Helper to format date and time nicely
+    func formatDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
+            // Header with icon, title, and status
+            HStack(alignment: .top, spacing: 12) {
                 // Activity Icon
                 Circle()
                     .fill(primaryColor.opacity(0.2))
-                    .frame(width: 50, height: 50)
+                    .frame(width: 48, height: 48)
                     .overlay(
                         Text(activityIcon)
                             .font(.title2)
@@ -207,49 +282,12 @@ struct TripHistoryCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(plan.title)
                         .font(.headline)
-                        .lineLimit(1)
+                        .lineLimit(2)
 
-                    HStack(spacing: 4) {
-                        Image(systemName: plan.status == "completed" ? "checkmark.circle" : "calendar")
-                            .font(.caption)
-
-                        // Show completion time for completed trips, otherwise show start time
-                        if plan.status == "completed" {
-                            if let completedAtStr = plan.completed_at, !completedAtStr.isEmpty {
-                                if let completedDate = DateUtils.parseDate(completedAtStr) {
-                                    // Show actual completion time
-                                    Text("Finished:")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text(completedDate, style: .date)
-                                        .font(.caption)
-                                    Text("at")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text(completedDate, style: .time)
-                                        .font(.caption)
-                                } else {
-                                    Text("Parse error")
-                                        .font(.caption2)
-                                        .foregroundStyle(.red)
-                                }
-                            } else {
-                                Text("No completion time")
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                            }
-                        } else {
-                            Text(plan.start_at, style: .date)
-                                .font(.caption)
-
-                            Text("•")
-                                .foregroundStyle(.secondary)
-
-                            Text(DateUtils.formatDuration(from: plan.start_at, to: plan.eta_at) ?? "")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    Text(activityName)
+                        .font(.caption)
+                        .foregroundStyle(primaryColor)
+                        .fontWeight(.medium)
                 }
 
                 Spacer()
@@ -259,40 +297,404 @@ struct TripHistoryCard: View {
                     .font(.caption)
                     .fontWeight(.semibold)
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 5)
                     .background(statusColor.opacity(0.2))
                     .foregroundStyle(statusColor)
-                    .cornerRadius(12)
+                    .cornerRadius(8)
             }
 
-            // Location (if available)
-            if let location = plan.location_text {
-                HStack {
-                    Image(systemName: "location.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(location)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            Divider()
+
+            // Trip Details
+            VStack(alignment: .leading, spacing: 8) {
+                // Start Time
+                InfoRow(
+                    icon: "arrow.right.circle.fill",
+                    iconColor: .green,
+                    label: "Started",
+                    value: formatDateTime(plan.start_at)
+                )
+
+                // Finish Time
+                if plan.status == "completed" {
+                    if let completedAt = plan.completed_at {
+                        InfoRow(
+                            icon: "checkmark.circle.fill",
+                            iconColor: .blue,
+                            label: "Finished",
+                            value: formatDateTime(completedAt)
+                        )
+                    } else {
+                        InfoRow(
+                            icon: "checkmark.circle.fill",
+                            iconColor: .blue,
+                            label: "Finished",
+                            value: "(time unknown)"
+                        )
+                    }
+                } else {
+                    InfoRow(
+                        icon: "clock.fill",
+                        iconColor: .orange,
+                        label: "Expected",
+                        value: formatDateTime(plan.eta_at)
+                    )
                 }
-            }
 
-            // Activity Type
-            HStack {
-                Image(systemName: "figure.walk")
-                    .font(.caption)
-                    .foregroundStyle(primaryColor)
-                Text(activityName)
-                    .font(.caption)
-                    .foregroundStyle(primaryColor)
-                    .fontWeight(.medium)
+                // Duration
+                if plan.status == "completed", let completedAt = plan.completed_at {
+                    // Actual duration for completed trips
+                    if let duration = DateUtils.formatDuration(from: plan.start_at, to: completedAt) {
+                        InfoRow(
+                            icon: "timer",
+                            iconColor: .purple,
+                            label: "Duration",
+                            value: duration
+                        )
+                    }
+                } else if plan.status == "completed" {
+                    // Completed but no completion time - show unknown
+                    InfoRow(
+                        icon: "timer",
+                        iconColor: .purple,
+                        label: "Duration",
+                        value: "(unknown)"
+                    )
+                } else {
+                    // Expected duration for active/planned trips
+                    if let duration = DateUtils.formatDuration(from: plan.start_at, to: plan.eta_at) {
+                        InfoRow(
+                            icon: "timer",
+                            iconColor: .purple,
+                            label: "Duration",
+                            value: duration
+                        )
+                    }
+                }
+
+                // Location (if available)
+                if let location = plan.location_text {
+                    InfoRow(
+                        icon: "location.fill",
+                        iconColor: .red,
+                        label: "Location",
+                        value: location
+                    )
+                }
             }
         }
         .padding(16)
         .background(Color(.secondarySystemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+}
+
+// MARK: - Info Row Helper
+struct InfoRow: View {
+    let icon: String
+    let iconColor: Color
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(iconColor)
+                .frame(width: 16)
+
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+
+            Text(value)
+                .font(.caption)
+                .fontWeight(.medium)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+// MARK: - Trip Stats View
+struct TripStatsView: View {
+    let plans: [Trip]
+    @State private var preferences = StatsPreferences.load()
+    @State private var showingEditStats = false
+    @State private var animatedValues: [StatType: Double] = [:]
+
+    var calculator: TripStatsCalculator {
+        TripStatsCalculator(trips: plans)
+    }
+
+    var favoriteActivity: (icon: String, name: String, count: Int)? {
+        let activityCounts = Dictionary(grouping: plans) { plan in
+            plan.activity.id
+        }
+
+        guard let mostCommon = activityCounts.max(by: { $0.value.count < $1.value.count }) else {
+            return nil
+        }
+
+        let activity = mostCommon.value.first!.activity
+        return (activity.icon, activity.name, mostCommon.value.count)
+    }
+
+    var useScrolling: Bool {
+        preferences.selectedStats.count > 4
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header with Edit button
+            HStack {
+                Text("Your Adventure Stats")
+                    .font(.headline)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.hbBrand, Color.hbTeal],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                Spacer()
+                Button(action: { showingEditStats = true }) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.title3)
+                        .foregroundStyle(Color.hbBrand)
+                }
+            }
+
+            // Stats Grid or Scrolling
+            if useScrolling {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(Array(preferences.selectedStats.enumerated()), id: \.element) { index, statType in
+                            AnimatedStatCard(
+                                statType: statType,
+                                value: calculator.value(for: statType),
+                                badge: calculator.achievementBadge(for: statType),
+                                delay: Double(index) * 0.1
+                            )
+                            .frame(width: 140)
+                        }
+                    }
+                }
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    ForEach(Array(preferences.selectedStats.enumerated()), id: \.element) { index, statType in
+                        AnimatedStatCard(
+                            statType: statType,
+                            value: calculator.value(for: statType),
+                            badge: calculator.achievementBadge(for: statType),
+                            delay: Double(index) * 0.1
+                        )
+                    }
+                }
+            }
+
+            // Favorite Activity (if available)
+            if let favorite = favoriteActivity {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color.hbBrand.opacity(0.2))
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Text(favorite.icon)
+                                .font(.title3)
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Favorite Activity")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(favorite.name)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+
+                    Spacer()
+
+                    Text("\(favorite.count) trips")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color.hbBrand)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.hbBrand.opacity(0.1))
+                        .cornerRadius(8)
+                }
+                .padding()
+                .background(Color(.tertiarySystemBackground))
+                .cornerRadius(12)
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .sheet(isPresented: $showingEditStats) {
+            EditStatsView(preferences: $preferences)
+        }
+    }
+}
+
+// MARK: - Animated Stat Card
+struct AnimatedStatCard: View {
+    let statType: StatType
+    let value: String
+    let badge: String?
+    let delay: Double
+
+    @State private var appeared = false
+    @State private var scale: CGFloat = 0.8
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Icon
+            Image(systemName: statType.icon)
+                .font(.title2)
+                .foregroundStyle(statType.color)
+
+            Text(value)
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundStyle(.primary)
+                .opacity(appeared ? 1 : 0)
+
+            Text(statType.displayName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(
+            LinearGradient(
+                colors: [
+                    statType.color.opacity(0.1),
+                    statType.color.opacity(0.05)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(12)
+        .scaleEffect(scale)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(delay)) {
+                appeared = true
+                scale = 1.0
+            }
+        }
+    }
+}
+
+// MARK: - Edit Stats View
+struct EditStatsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var preferences: StatsPreferences
+    @State private var selectedStats: [StatType]
+
+    init(preferences: Binding<StatsPreferences>) {
+        self._preferences = preferences
+        self._selectedStats = State(initialValue: preferences.wrappedValue.selectedStats)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Select up to 8 stats to display on your Adventure Stats dashboard")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Customize Your Stats")
+                }
+
+                Section {
+                    ForEach(StatType.allCases, id: \.self) { statType in
+                        HStack {
+                            Image(systemName: statType.icon)
+                                .foregroundStyle(statType.color)
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(statType.displayName)
+                                    .font(.subheadline)
+
+                                Text(getStatDescription(statType))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            if selectedStats.contains(statType) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(statType.color)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            toggleStat(statType)
+                        }
+                    }
+                } header: {
+                    Text("Available Stats (\(selectedStats.count)/8)")
+                }
+
+                Section {
+                    Button("Reset to Default") {
+                        selectedStats = StatsPreferences.defaultStats
+                    }
+                    .foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Edit Stats")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        savePreferences()
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(selectedStats.isEmpty)
+                }
+            }
+        }
+    }
+
+    func toggleStat(_ statType: StatType) {
+        if selectedStats.contains(statType) {
+            selectedStats.removeAll { $0 == statType }
+        } else if selectedStats.count < 8 {
+            selectedStats.append(statType)
+        }
+    }
+
+    func savePreferences() {
+        preferences.selectedStats = selectedStats
+        preferences.save()
+    }
+
+    func getStatDescription(_ statType: StatType) -> String {
+        switch statType {
+        case .totalTrips: return "Total number of adventures"
+        case .adventureTime: return "Total time on all trips"
+        case .longestAdventure: return "Your longest single trip"
+        case .activitiesTried: return "Different activity types"
+        case .thisMonth: return "Trips this month"
+        case .uniqueLocations: return "Different places visited"
+        case .mostAdventurousMonth: return "Month with most trips"
+        case .averageTripDuration: return "Average trip length"
+        }
     }
 }
 

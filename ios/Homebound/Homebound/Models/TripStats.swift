@@ -84,15 +84,23 @@ struct StatsPreferences: Codable {
 struct TripStatsCalculator {
     let trips: [Trip]
 
+    // Helper: Filter only completed trips with valid completed_at
+    var completedTrips: [Trip] {
+        trips.filter { trip in
+            trip.status == "completed" && trip.completed_at != nil
+        }
+    }
+
     // MARK: - Individual Stat Calculations
 
     func totalTrips() -> String {
-        return "\(trips.count)"
+        return "\(completedTrips.count)"
     }
 
     func totalAdventureTime() -> String {
-        let totalSeconds = trips.reduce(0.0) { total, trip in
-            total + trip.eta_at.timeIntervalSince(trip.start_at)
+        let totalSeconds = completedTrips.reduce(0.0) { total, trip in
+            guard let completedAt = trip.completed_at else { return total }
+            return total + completedAt.timeIntervalSince(trip.start_at)
         }
         let hours = Int(totalSeconds) / 3600
         let days = hours / 24
@@ -107,17 +115,20 @@ struct TripStatsCalculator {
     }
 
     func longestAdventure() -> String {
-        guard !trips.isEmpty else { return "0h" }
+        guard !completedTrips.isEmpty else { return "0h" }
 
-        let longest = trips.max { trip1, trip2 in
-            let duration1 = trip1.eta_at.timeIntervalSince(trip1.start_at)
-            let duration2 = trip2.eta_at.timeIntervalSince(trip2.start_at)
+        let longest = completedTrips.max { trip1, trip2 in
+            guard let completed1 = trip1.completed_at, let completed2 = trip2.completed_at else {
+                return false
+            }
+            let duration1 = completed1.timeIntervalSince(trip1.start_at)
+            let duration2 = completed2.timeIntervalSince(trip2.start_at)
             return duration1 < duration2
         }
 
-        guard let trip = longest else { return "0h" }
+        guard let trip = longest, let completedAt = trip.completed_at else { return "0h" }
 
-        let duration = trip.eta_at.timeIntervalSince(trip.start_at)
+        let duration = completedAt.timeIntervalSince(trip.start_at)
         let hours = Int(duration) / 3600
         let days = hours / 24
 
@@ -167,13 +178,14 @@ struct TripStatsCalculator {
     }
 
     func averageTripDuration() -> String {
-        guard !trips.isEmpty else { return "0h" }
+        guard !completedTrips.isEmpty else { return "0h" }
 
-        let totalSeconds = trips.reduce(0.0) { total, trip in
-            total + trip.eta_at.timeIntervalSince(trip.start_at)
+        let totalSeconds = completedTrips.reduce(0.0) { total, trip in
+            guard let completedAt = trip.completed_at else { return total }
+            return total + completedAt.timeIntervalSince(trip.start_at)
         }
 
-        let avgSeconds = totalSeconds / Double(trips.count)
+        let avgSeconds = totalSeconds / Double(completedTrips.count)
         let hours = Int(avgSeconds) / 3600
         let minutes = (Int(avgSeconds) % 3600) / 60
 

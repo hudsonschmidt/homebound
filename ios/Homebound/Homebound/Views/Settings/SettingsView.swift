@@ -5,6 +5,7 @@ import PhotosUI
 struct SettingsView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
+    @State private var showingClearCacheAlert = false
 
     var body: some View {
         NavigationStack {
@@ -196,6 +197,24 @@ struct SettingsView: View {
                         }
                     }
                     .foregroundStyle(.primary)
+
+                    Button(action: {
+                        showingClearCacheAlert = true
+                    }) {
+                        Label {
+                            HStack {
+                                Text("Clear Cache")
+                                Spacer()
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "tray.fill")
+                                .foregroundStyle(.purple)
+                        }
+                    }
+                    .foregroundStyle(.primary)
                 }
 
                 // Version info at bottom
@@ -219,6 +238,14 @@ struct SettingsView: View {
                     }
                     .fontWeight(.semibold)
                 }
+            }
+            .alert("Clear Cache", isPresented: $showingClearCacheAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear", role: .destructive) {
+                    LocalStorage.shared.clearAll()
+                }
+            } message: {
+                Text("This will clear all cached trips and activities. Data will be reloaded from the server.")
             }
         }
     }

@@ -306,7 +306,7 @@ final class LocalStorage {
                     trip.grace_minutes,
                     trip.location_text, trip.location_lat, trip.location_lng,
                     trip.notes, trip.status,
-                    trip.completed_at, trip.last_checkin, trip.created_at,
+                    trip.completed_at.map { ISO8601DateFormatter().string(from: $0) }, trip.last_checkin, trip.created_at,
                     trip.contact1, trip.contact2, trip.contact3,
                     trip.checkin_token, trip.checkout_token,
                     ISO8601DateFormatter().string(from: Date())
@@ -386,7 +386,7 @@ final class LocalStorage {
                         trip.grace_minutes,
                         trip.location_text, trip.location_lat, trip.location_lng,
                         trip.notes, trip.status,
-                        trip.completed_at, trip.last_checkin, trip.created_at,
+                        trip.completed_at.map { ISO8601DateFormatter().string(from: $0) }, trip.last_checkin, trip.created_at,
                         trip.contact1, trip.contact2, trip.contact3,
                         trip.checkin_token, trip.checkout_token,
                         ISO8601DateFormatter().string(from: Date())
@@ -452,6 +452,14 @@ final class LocalStorage {
                         return nil
                     }
 
+                    // Parse optional completed_at date
+                    let completedAtDate: Date? = {
+                        if let completedAtStr = row["completed_at"] as? String {
+                            return ISO8601DateFormatter().date(from: completedAtStr)
+                        }
+                        return nil
+                    }()
+
                     let activity = Activity(
                         id: activityId,
                         name: activityName,
@@ -476,7 +484,7 @@ final class LocalStorage {
                         location_lng: row["gen_lon"] as? Double,
                         notes: row["notes"] as? String,
                         status: status,
-                        completed_at: row["completed_at"] as? String,
+                        completed_at: completedAtDate,
                         last_checkin: row["last_checkin"] as? String,
                         created_at: createdAt,
                         contact1: row["contact1"] as? Int,
@@ -547,6 +555,14 @@ final class LocalStorage {
                     return nil
                 }
 
+                // Parse optional completed_at date
+                let completedAtDate: Date? = {
+                    if let completedAtStr = row["completed_at"] as? String {
+                        return ISO8601DateFormatter().date(from: completedAtStr)
+                    }
+                    return nil
+                }()
+
                 let activity = Activity(
                     id: activityId,
                     name: activityName,
@@ -571,7 +587,7 @@ final class LocalStorage {
                     location_lng: row["gen_lon"] as? Double,
                     notes: row["notes"] as? String,
                     status: status,
-                    completed_at: row["completed_at"] as? String,
+                    completed_at: completedAtDate,
                     last_checkin: row["last_checkin"] as? String,
                     created_at: createdAt,
                     contact1: row["contact1"] as? Int,

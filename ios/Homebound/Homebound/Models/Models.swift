@@ -44,7 +44,7 @@ struct Trip: Codable, Identifiable, Equatable {
     var location_lng: Double?  // Maps from backend 'gen_lon'
     var notes: String?
     var status: String
-    var completed_at: String?
+    var completed_at: Date?
     var last_checkin: String?
     var created_at: String
     var contact1: Int?
@@ -87,7 +87,21 @@ struct Trip: Codable, Identifiable, Equatable {
         location_lng = try container.decodeIfPresent(Double.self, forKey: .gen_lon)
         notes = try container.decodeIfPresent(String.self, forKey: .notes)
         status = try container.decode(String.self, forKey: .status)
-        completed_at = try container.decodeIfPresent(String.self, forKey: .completed_at)
+
+        // Parse completed_at date string if present
+        if let completedAtString = try container.decodeIfPresent(String.self, forKey: .completed_at) {
+            print("[Trip Decoder] ✅ completed_at string received: '\(completedAtString)' for trip id=\(id)")
+            completed_at = Self.parseISO8601Date(completedAtString)
+            if let parsedDate = completed_at {
+                print("[Trip Decoder] ✅ completed_at parsed successfully: \(parsedDate)")
+            } else {
+                print("[Trip Decoder] ❌ completed_at parsing FAILED for string: '\(completedAtString)'")
+            }
+        } else {
+            print("[Trip Decoder] ⚠️ completed_at is nil/missing from API for trip id=\(id), status=\(status)")
+            completed_at = nil
+        }
+
         last_checkin = try container.decodeIfPresent(String.self, forKey: .last_checkin)
         created_at = try container.decode(String.self, forKey: .created_at)
         contact1 = try container.decodeIfPresent(Int.self, forKey: .contact1)
@@ -111,7 +125,10 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(location_lng, forKey: .gen_lon)
         try container.encodeIfPresent(notes, forKey: .notes)
         try container.encode(status, forKey: .status)
-        try container.encodeIfPresent(completed_at, forKey: .completed_at)
+        // Encode completed_at as ISO8601 string
+        if let completedAt = completed_at {
+            try container.encode(completedAt.ISO8601Format(), forKey: .completed_at)
+        }
         try container.encodeIfPresent(last_checkin, forKey: .last_checkin)
         try container.encode(created_at, forKey: .created_at)
         try container.encodeIfPresent(contact1, forKey: .contact1)
@@ -161,6 +178,18 @@ struct Trip: Codable, Identifiable, Equatable {
             return date
         }
 
+        // Try with T separator and microseconds (no timezone): "2025-11-24T07:26:43.111442"
+        customFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        if let date = customFormatter.date(from: normalizedString) {
+            return date
+        }
+
+        // Try with T separator and milliseconds (no timezone): "2025-11-24T07:26:43.111"
+        customFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+        if let date = customFormatter.date(from: normalizedString) {
+            return date
+        }
+
         // Last resort: try basic ISO8601 format
         let formatterBasic = ISO8601DateFormatter()
         return formatterBasic.date(from: normalizedString)
@@ -180,7 +209,7 @@ struct Trip: Codable, Identifiable, Equatable {
         location_lng: Double?,
         notes: String?,
         status: String,
-        completed_at: String?,
+        completed_at: Date?,
         last_checkin: String?,
         created_at: String,
         contact1: Int?,

@@ -60,3 +60,7 @@ class Settings:
 @lru_cache()
 def get_settings():
     return Settings()
+
+
+# Create singleton instance for direct imports
+settings = get_settings()
