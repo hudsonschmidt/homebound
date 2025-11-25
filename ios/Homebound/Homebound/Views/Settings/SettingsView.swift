@@ -1,5 +1,195 @@
 import SwiftUI
 import PhotosUI
+import Combine
+
+// MARK: - App Preferences
+enum AppColorScheme: String, CaseIterable {
+    case system = "system"
+    case light = "light"
+    case dark = "dark"
+
+    var displayName: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+enum MapType: String, CaseIterable {
+    case standard = "standard"
+    case satellite = "satellite"
+    case hybrid = "hybrid"
+
+    var displayName: String {
+        switch self {
+        case .standard: return "Standard"
+        case .satellite: return "Satellite"
+        case .hybrid: return "Hybrid"
+        }
+    }
+}
+
+class AppPreferences: ObservableObject {
+    static let shared = AppPreferences()
+
+    // MARK: - Appearance
+    @Published var colorScheme: AppColorScheme {
+        didSet {
+            UserDefaults.standard.set(colorScheme.rawValue, forKey: "colorScheme")
+        }
+    }
+
+    // MARK: - Trips
+    @Published var autoStartTrips: Bool {
+        didSet {
+            UserDefaults.standard.set(autoStartTrips, forKey: "autoStartTrips")
+        }
+    }
+
+    @Published var defaultGraceMinutes: Int {
+        didSet {
+            UserDefaults.standard.set(defaultGraceMinutes, forKey: "defaultGraceMinutes")
+        }
+    }
+
+    @Published var defaultActivityId: Int? {
+        didSet {
+            if let id = defaultActivityId {
+                UserDefaults.standard.set(id, forKey: "defaultActivityId")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "defaultActivityId")
+            }
+        }
+    }
+
+    // MARK: - Home Screen
+    @Published var showUpcomingTrips: Bool {
+        didSet {
+            UserDefaults.standard.set(showUpcomingTrips, forKey: "showUpcomingTrips")
+        }
+    }
+
+    @Published var showStats: Bool {
+        didSet {
+            UserDefaults.standard.set(showStats, forKey: "showStats")
+        }
+    }
+
+    @Published var maxUpcomingTrips: Int {
+        didSet {
+            UserDefaults.standard.set(maxUpcomingTrips, forKey: "maxUpcomingTrips")
+        }
+    }
+
+    // MARK: - Sounds & Haptics
+    @Published var hapticFeedbackEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(hapticFeedbackEnabled, forKey: "hapticFeedbackEnabled")
+        }
+    }
+
+    @Published var checkInSoundEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(checkInSoundEnabled, forKey: "checkInSoundEnabled")
+        }
+    }
+
+    // MARK: - Map
+    @Published var defaultMapType: MapType {
+        didSet {
+            UserDefaults.standard.set(defaultMapType.rawValue, forKey: "defaultMapType")
+        }
+    }
+
+    // MARK: - Units & Formats
+    @Published var useMetricUnits: Bool {
+        didSet {
+            UserDefaults.standard.set(useMetricUnits, forKey: "useMetricUnits")
+        }
+    }
+
+    @Published var use24HourTime: Bool {
+        didSet {
+            UserDefaults.standard.set(use24HourTime, forKey: "use24HourTime")
+        }
+    }
+
+    init() {
+        // Appearance
+        let schemeRaw = UserDefaults.standard.string(forKey: "colorScheme") ?? "system"
+        self.colorScheme = AppColorScheme(rawValue: schemeRaw) ?? .system
+
+        // Trips
+        self.autoStartTrips = UserDefaults.standard.bool(forKey: "autoStartTrips")
+        let savedGrace = UserDefaults.standard.integer(forKey: "defaultGraceMinutes")
+        self.defaultGraceMinutes = savedGrace > 0 ? savedGrace : 30
+        let savedActivityId = UserDefaults.standard.integer(forKey: "defaultActivityId")
+        self.defaultActivityId = savedActivityId > 0 ? savedActivityId : nil
+
+        // Home Screen - defaults to true/shown
+        self.showUpcomingTrips = UserDefaults.standard.object(forKey: "showUpcomingTrips") == nil ? true : UserDefaults.standard.bool(forKey: "showUpcomingTrips")
+        self.showStats = UserDefaults.standard.object(forKey: "showStats") == nil ? true : UserDefaults.standard.bool(forKey: "showStats")
+        let savedMaxTrips = UserDefaults.standard.integer(forKey: "maxUpcomingTrips")
+        self.maxUpcomingTrips = savedMaxTrips > 0 ? savedMaxTrips : 3
+
+        // Sounds & Haptics - defaults to true/enabled
+        self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "hapticFeedbackEnabled")
+        self.checkInSoundEnabled = UserDefaults.standard.object(forKey: "checkInSoundEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "checkInSoundEnabled")
+
+        // Map
+        let mapTypeRaw = UserDefaults.standard.string(forKey: "defaultMapType") ?? "standard"
+        self.defaultMapType = MapType(rawValue: mapTypeRaw) ?? .standard
+
+        // Units & Formats - default to locale-appropriate
+        self.useMetricUnits = UserDefaults.standard.object(forKey: "useMetricUnits") == nil ? Locale.current.measurementSystem == .metric : UserDefaults.standard.bool(forKey: "useMetricUnits")
+        self.use24HourTime = UserDefaults.standard.object(forKey: "use24HourTime") == nil ? false : UserDefaults.standard.bool(forKey: "use24HourTime")
+    }
+
+    // MARK: - Formatting Helpers
+    func formatDistance(_ meters: Double) -> String {
+        if useMetricUnits {
+            if meters >= 1000 {
+                return String(format: "%.1f km", meters / 1000)
+            } else {
+                return String(format: "%.0f m", meters)
+            }
+        } else {
+            let miles = meters / 1609.34
+            if miles >= 0.1 {
+                return String(format: "%.1f mi", miles)
+            } else {
+                let feet = meters * 3.28084
+                return String(format: "%.0f ft", feet)
+            }
+        }
+    }
+
+    func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = use24HourTime ? "HH:mm" : "h:mm a"
+        return formatter.string(from: date)
+    }
+
+    func formatDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        if use24HourTime {
+            formatter.setLocalizedDateFormatFromTemplate("Md HH:mm")
+        }
+        return formatter.string(from: date)
+    }
+}
 
 // MARK: - Main Settings View
 struct SettingsView: View {
@@ -59,6 +249,15 @@ struct SettingsView: View {
 
                 // App Section
                 Section("App") {
+                    NavigationLink(destination: CustomizationView()) {
+                        Label {
+                            Text("Customization")
+                        } icon: {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(.purple)
+                        }
+                    }
+
                     NavigationLink(destination: NotificationSettingsView()) {
                         Label {
                             Text("Notifications")
@@ -614,6 +813,107 @@ struct AccountView: View {
     }
 }
 
+// MARK: - Customization View
+struct CustomizationView: View {
+    @EnvironmentObject var session: Session
+    @EnvironmentObject var preferences: AppPreferences
+
+    let graceOptions = [15, 30, 45, 60, 90]
+
+    var body: some View {
+        List {
+            // MARK: - Appearance
+            Section {
+                Picker("Theme", selection: $preferences.colorScheme) {
+                    ForEach(AppColorScheme.allCases, id: \.self) { scheme in
+                        Text(scheme.displayName).tag(scheme)
+                    }
+                }
+            } header: {
+                Text("Appearance")
+            }
+
+            // MARK: - Trips
+            Section {
+                Toggle(isOn: $preferences.autoStartTrips) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Auto-Start Trips")
+                        Text(preferences.autoStartTrips ? "Starts automatically" : "Manual start")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Picker("Default Grace Period", selection: $preferences.defaultGraceMinutes) {
+                    ForEach(graceOptions, id: \.self) { minutes in
+                        Text("\(minutes) minutes").tag(minutes)
+                    }
+                }
+
+                Picker("Default Activity", selection: $preferences.defaultActivityId) {
+                    Text("None").tag(nil as Int?)
+                    ForEach(session.activities) { activity in
+                        Text("\(activity.icon) \(activity.name)").tag(activity.id as Int?)
+                    }
+                }
+            } header: {
+                Text("Trips")
+            } footer: {
+                Text("These defaults will be used when creating new trips.")
+            }
+
+            // MARK: - Home Screen
+            Section {
+                Toggle("Show Upcoming Trips", isOn: $preferences.showUpcomingTrips)
+
+                if preferences.showUpcomingTrips {
+                    Stepper("Show \(preferences.maxUpcomingTrips) trips", value: $preferences.maxUpcomingTrips, in: 1...5)
+                }
+
+                Toggle("Show Trip Stats", isOn: $preferences.showStats)
+            } header: {
+                Text("Home Screen")
+            }
+
+            // MARK: - Sounds & Haptics
+            Section {
+                Toggle("Haptic Feedback", isOn: $preferences.hapticFeedbackEnabled)
+                Toggle("Check-in Sound", isOn: $preferences.checkInSoundEnabled)
+            } header: {
+                Text("Sounds & Haptics")
+            }
+
+            // MARK: - Map
+            Section {
+                Picker("Default Map Style", selection: $preferences.defaultMapType) {
+                    ForEach(MapType.allCases, id: \.self) { type in
+                        Text(type.displayName).tag(type)
+                    }
+                }
+            } header: {
+                Text("Map")
+            }
+
+            // MARK: - Units & Formats
+            Section {
+                Picker("Distance Units", selection: $preferences.useMetricUnits) {
+                    Text("Miles").tag(false)
+                    Text("Kilometers").tag(true)
+                }
+
+                Picker("Time Format", selection: $preferences.use24HourTime) {
+                    Text("12-hour").tag(false)
+                    Text("24-hour").tag(true)
+                }
+            } header: {
+                Text("Units & Formats")
+            }
+        }
+        .navigationTitle("Customization")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 // MARK: - Placeholder Views
 struct NotificationSettingsView: View {
     var body: some View {
@@ -674,4 +974,5 @@ struct AboutView: View {
 #Preview {
     SettingsView()
         .environmentObject(Session())
+        .environmentObject(AppPreferences.shared)
 }

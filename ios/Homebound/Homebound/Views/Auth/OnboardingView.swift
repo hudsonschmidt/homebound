@@ -9,7 +9,7 @@ struct OnboardingView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @FocusState private var focusedField: Field?
-    @State private var animationAmount = 1.0
+    @State private var appeared = false
 
     enum Field {
         case firstName
@@ -19,58 +19,37 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            // Dynamic gradient background
-            LinearGradient(
-                colors: [
-                    Color.hbBrand,
-                    Color.hbTeal,
-                    Color(hex: "#FF6B6B") ?? .pink
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            .hueRotation(.degrees(animationAmount * 20))
-            .animation(.easeInOut(duration: 3).repeatForever(autoreverses: true), value: animationAmount)
+            // System background
+            Color(.systemBackground)
+                .ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 30) {
                     Spacer(minLength: 60)
 
-                    // Welcome message with glassmorphism
-                    VStack(spacing: 20) {
-                        Image(systemName: "hand.wave.fill")
-                            .font(.system(size: 60))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 10)
-                            .scaleEffect(animationAmount)
-                            .animation(
-                                .spring(response: 0.5, dampingFraction: 0.6)
-                                    .repeatForever(autoreverses: true),
-                                value: animationAmount
-                            )
-
+                    // Welcome message
+                    VStack(spacing: 16) {
                         Text("Welcome to Homebound!")
                             .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .multilineTextAlignment(.center)
 
                         Text("Let's get to know you better")
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 20)
 
-                    // Glass card for form
+                    // Card with glowing background
                     VStack(spacing: 25) {
                         // First name field
                         VStack(alignment: .leading, spacing: 10) {
                             Label("What's your first name?", systemImage: "person.fill")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .foregroundStyle(.secondary)
 
                             TextField("Enter your first name", text: $firstName)
-                                .textFieldStyle(GlassTextFieldStyle())
+                                .textFieldStyle(OnboardingTextFieldStyle())
                                 .focused($focusedField, equals: .firstName)
                                 .submitLabel(.next)
                                 .onSubmit {
@@ -82,10 +61,10 @@ struct OnboardingView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Label("What's your last name?", systemImage: "person.fill")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .foregroundStyle(.secondary)
 
                             TextField("Enter your last name", text: $lastName)
-                                .textFieldStyle(GlassTextFieldStyle())
+                                .textFieldStyle(OnboardingTextFieldStyle())
                                 .focused($focusedField, equals: .lastName)
                                 .submitLabel(.next)
                                 .onSubmit {
@@ -97,10 +76,10 @@ struct OnboardingView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Label("How old are you?", systemImage: "birthday.cake.fill")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .foregroundStyle(.secondary)
 
                             TextField("Enter your age", text: $age)
-                                .textFieldStyle(GlassTextFieldStyle())
+                                .textFieldStyle(OnboardingTextFieldStyle())
                                 .keyboardType(.numberPad)
                                 .focused($focusedField, equals: .age)
                                 .submitLabel(.done)
@@ -113,11 +92,11 @@ struct OnboardingView: View {
                         HStack {
                             Image(systemName: "lock.shield.fill")
                                 .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.secondary)
 
                             Text("Your information is secure and will never be shared")
                                 .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                         }
                         .padding(.top, 10)
@@ -138,57 +117,31 @@ struct OnboardingView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 56)
-                            .background(
-                                LinearGradient(
-                                    colors: isButtonDisabled ?
-                                        [Color.white.opacity(0.2), Color.white.opacity(0.1)] :
-                                        [Color.white.opacity(0.9), Color.white.opacity(0.7)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .foregroundStyle(isButtonDisabled ? .white.opacity(0.5) : Color.hbBrand)
-                            .cornerRadius(28)
-                            .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
+                            .background(isButtonDisabled ? Color.gray : Color.hbBrand)
+                            .foregroundStyle(.white)
+                            .cornerRadius(16)
                         }
                         .disabled(isButtonDisabled || isLoading)
-                        .scaleEffect(isButtonDisabled ? 0.95 : 1.0)
+                        .scaleEffect(isButtonDisabled ? 0.98 : 1.0)
                         .animation(.spring(response: 0.3), value: isButtonDisabled)
                     }
                     .padding(30)
-                    .background(
-                        RoundedRectangle(cornerRadius: 30)
-                            .fill(.ultraThinMaterial)
-                            .background(
-                                RoundedRectangle(cornerRadius: 30)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.2),
-                                                Color.white.opacity(0.05)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 30)
-                                    .stroke(
-                                        LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.5),
-                                                Color.white.opacity(0.1)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1
-                                    )
-                            )
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(32)
+                    // Glowing shadow effect like active trips
+                    .shadow(
+                        color: Color.hbBrand.opacity(0.3),
+                        radius: 20,
+                        y: 10
                     )
-                    .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: 10)
+                    .shadow(
+                        color: Color.hbBrand.opacity(0.2),
+                        radius: 12,
+                        y: 6
+                    )
                     .padding(.horizontal, 24)
+                    .opacity(appeared ? 1.0 : 0.0)
+                    .offset(y: appeared ? 0 : 20)
 
                     Spacer(minLength: 100)
                 }
@@ -196,14 +149,17 @@ struct OnboardingView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .onAppear {
-            animationAmount = 1.1
-
             // Pre-fill name fields from Apple Sign In if available
             if let appleFirst = session.appleFirstName, !appleFirst.isEmpty {
                 firstName = appleFirst
             }
             if let appleLast = session.appleLastName, !appleLast.isEmpty {
                 lastName = appleLast
+            }
+
+            // Animate card appearance
+            withAnimation(.easeOut(duration: 0.5)) {
+                appeared = true
             }
 
             // Auto-focus appropriate field after a brief delay
@@ -272,37 +228,13 @@ struct OnboardingView: View {
     }
 }
 
-// Glass-morphism text field style
-struct GlassTextFieldStyle: TextFieldStyle {
-    @FocusState private var isFocused: Bool
-
+// Clean text field style for onboarding
+struct OnboardingTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.white.opacity(0.1))
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.4),
-                                Color.white.opacity(0.1)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
-            .foregroundStyle(.white)
-            .tint(.white)
+            .background(Color(.tertiarySystemFill))
+            .cornerRadius(12)
             .font(.system(size: 16, weight: .medium))
     }
 }

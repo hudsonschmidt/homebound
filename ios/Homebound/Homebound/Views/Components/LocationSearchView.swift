@@ -13,8 +13,6 @@ struct LocationSearchView: View {
     @StateObject private var locationManager = LocationManager.shared
     @State private var searchText = ""
     @State private var showingNearby = true
-    @State private var nearbyPlaces: [MKMapItem] = []
-    @State private var isLoadingNearby = true
     @State private var isGettingCurrentLocation = false
     @State private var showLocationDeniedAlert = false
 
@@ -104,28 +102,14 @@ struct LocationSearchView: View {
                             .disabled(isGettingCurrentLocation)
                         }
 
-                        // Nearby Places
-                        if isLoadingNearby {
-                            Section("Nearby Places") {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                        .padding()
-                                    Spacer()
-                                }
-                            }
-                        } else if !nearbyPlaces.isEmpty {
-                            Section("Nearby Places") {
-                                ForEach(nearbyPlaces, id: \.self) { place in
-                                    LocationRow(
-                                        mapItem: place,
-                                        onSelect: {
-                                            selectedLocation = place.name ?? "Unknown Location"
-                                            selectedCoordinates = place.location.coordinate
-                                            isPresented = false
-                                        }
-                                    )
-                                }
+                        // Hint to search
+                        Section {
+                            HStack {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                Text("Search for an address above")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     } else {
@@ -187,7 +171,6 @@ struct LocationSearchView: View {
         .task {
             // Start location services when view appears
             locationManager.startUpdatingLocation()
-            await loadNearbyPlaces()
         }
     }
 
@@ -230,7 +213,7 @@ struct LocationSearchView: View {
             if let location = await locationManager.getCurrentLocation() {
                 // Reverse geocode to get actual address using modern MapKit API
                 let request = MKLocalSearch.Request()
-                request.resultTypes = .pointOfInterest
+                request.resultTypes = .address
                 request.region = MKCoordinateRegion(
                     center: location,
                     span: MKCoordinateSpan(latitudeDelta: 0.001, longitudeDelta: 0.001)
@@ -316,166 +299,6 @@ struct LocationSearchView: View {
             }
         }
     }
-
-    private func loadNearbyPlaces() async {
-        guard let location = locationManager.currentLocation else {
-            await MainActor.run {
-                isLoadingNearby = false
-            }
-            return
-        }
-
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = "Points of Interest"
-        request.region = MKCoordinateRegion(
-            center: location,
-            span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
-        )
-
-        let search = MKLocalSearch(request: request)
-
-        do {
-            let response = try await search.start()
-            await MainActor.run {
-                nearbyPlaces = Array(response.mapItems.prefix(10))
-                isLoadingNearby = false
-            }
-        } catch {
-            print("Error loading nearby places: \(error)")
-            await MainActor.run {
-                isLoadingNearby = false
-            }
-        }
-    }
-}
-
-// MARK: - Location Row
-struct LocationRow: View {
-    let mapItem: MKMapItem
-    let onSelect: () -> Void
-    @ObservedObject private var locationManager = LocationManager.shared
-
-    private var categoryIcon: String {
-        guard let category = mapItem.pointOfInterestCategory else {
-            return "mappin.circle.fill"
-        }
-
-        switch category {
-        case .airport: return "airplane"
-        case .amusementPark: return "star.circle.fill"
-        case .aquarium: return "drop.circle.fill"
-        case .atm: return "creditcard.fill"
-        case .bakery: return "birthday.cake.fill"
-        case .bank: return "building.columns.fill"
-        case .beach: return "umbrella.fill"
-        case .brewery: return "mug.fill"
-        case .cafe: return "cup.and.saucer.fill"
-        case .campground: return "tent.fill"
-        case .carRental: return "car.fill"
-        case .evCharger: return "bolt.car.fill"
-        case .fireStation: return "flame.fill"
-        case .fitnessCenter: return "figure.run"
-        case .foodMarket: return "cart.fill"
-        case .gasStation: return "fuelpump.fill"
-        case .hospital: return "cross.fill"
-        case .hotel: return "bed.double.fill"
-        case .laundry: return "washer.fill"
-        case .library: return "books.vertical.fill"
-        case .marina: return "sailboat.fill"
-        case .movieTheater: return "tv.fill"
-        case .museum: return "building.columns.fill"
-        case .nationalPark: return "tree.fill"
-        case .nightlife: return "moon.stars.fill"
-        case .park: return "leaf.fill"
-        case .parking: return "p.square.fill"
-        case .pharmacy: return "pills.fill"
-        case .police: return "shield.fill"
-        case .postOffice: return "envelope.fill"
-        case .publicTransport: return "bus.fill"
-        case .restaurant: return "fork.knife"
-        case .restroom: return "figure.dress.line.vertical.figure"
-        case .school: return "graduationcap.fill"
-        case .stadium: return "sportscourt.fill"
-        case .store: return "bag.fill"
-        case .theater: return "theatermasks.fill"
-        case .university: return "building.2.fill"
-        case .winery: return "wineglass.fill"
-        case .zoo: return "pawprint.fill"
-        default: return "mappin.circle.fill"
-        }
-    }
-
-    private var categoryColor: Color {
-        guard let category = mapItem.pointOfInterestCategory else {
-            return Color.hbBrand
-        }
-
-        switch category {
-        case .restaurant, .cafe, .bakery, .foodMarket:
-            return .orange
-        case .park, .nationalPark, .beach, .campground:
-            return .green
-        case .hotel, .gasStation, .parking:
-            return .blue
-        case .hospital, .pharmacy, .police, .fireStation:
-            return .red
-        case .museum, .theater, .movieTheater:
-            return Color.hbBrand
-        default:
-            return .gray
-        }
-    }
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack {
-                ZStack {
-                    Circle()
-                        .fill(categoryColor.opacity(0.2))
-                        .frame(width: 40, height: 40)
-
-                    Image(systemName: categoryIcon)
-                        .foregroundStyle(categoryColor)
-                        .font(.system(size: 18))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(mapItem.name ?? "Unknown Place")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.primary)
-
-                    if let address = formatAddress(mapItem) {
-                        Text(address)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                if let currentLocation = locationManager.currentLocation {
-                    let distance = mapItem.location.distance(from: CLLocation(latitude: currentLocation.latitude, longitude: currentLocation.longitude))
-                    Text(formatDistance(distance))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func formatAddress(_ mapItem: MKMapItem) -> String? {
-        // For now, just return the subtitle if available
-        // In a real app, we might use reverse geocoding or access the address differently
-        return nil
-    }
-
-    private func formatDistance(_ distance: CLLocationDistance) -> String {
-        let formatter = MKDistanceFormatter()
-        formatter.unitStyle = .abbreviated
-        return formatter.string(fromDistance: distance)
-    }
 }
 
 // MARK: - Search Result Row
@@ -535,7 +358,7 @@ class LocationSearchCompleter: NSObject, ObservableObject {
     override init() {
         super.init()
         searchCompleter.delegate = self
-        searchCompleter.resultTypes = [.address, .pointOfInterest]
+        searchCompleter.resultTypes = .address
     }
 }
 

@@ -36,6 +36,7 @@ struct MainTabView: View {
 // MARK: - New Home View with Big Trip Card
 struct NewHomeView: View {
     @EnvironmentObject var session: Session
+    @EnvironmentObject var preferences: AppPreferences
     @State private var showingCreatePlan = false
     @State private var showingSettings = false
     @State private var greeting = "Good morning"
@@ -107,10 +108,12 @@ struct NewHomeView: View {
                                 .padding(.horizontal)
                         }
 
-                        // Upcoming Trips Section (always visible)
-                        UpcomingTripsSection()
-                            .padding(.horizontal)
-                            .id(refreshID)
+                        // Upcoming Trips Section (respects user preference)
+                        if preferences.showUpcomingTrips {
+                            UpcomingTripsSection()
+                                .padding(.horizontal)
+                                .id(refreshID)
+                        }
                     }
                     .padding(.bottom, 100)
                 }
@@ -123,6 +126,7 @@ struct NewHomeView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
                     .environmentObject(session)
+                    .environmentObject(AppPreferences.shared)
             }
             .task {
                 updateGreeting()
@@ -251,6 +255,7 @@ struct ActivePlanCardCompact: View {
     let plan: Trip
     @Binding var timeline: [TimelineEvent]
     @EnvironmentObject var session: Session
+    @EnvironmentObject var preferences: AppPreferences
     @State private var timeRemaining = ""
     @State private var isOverdue = false
     @State private var isPerformingAction = false
@@ -338,8 +343,10 @@ struct ActivePlanCardCompact: View {
             HStack(spacing: 12) {
                 // Check-in button
                 Button(action: {
-                    let impact = UIImpactFeedbackGenerator(style: .medium)
-                    impact.impactOccurred()
+                    if preferences.hapticFeedbackEnabled {
+                        let impact = UIImpactFeedbackGenerator(style: .medium)
+                        impact.impactOccurred()
+                    }
 
                     if let token = plan.checkin_token {
                         Task {
@@ -347,8 +354,10 @@ struct ActivePlanCardCompact: View {
                             await session.performTokenAction(token, action: "checkin")
 
                             // Success haptic
-                            let success = UINotificationFeedbackGenerator()
-                            success.notificationOccurred(.success)
+                            if preferences.hapticFeedbackEnabled {
+                                let success = UINotificationFeedbackGenerator()
+                                success.notificationOccurred(.success)
+                            }
 
                             isPerformingAction = false
                         }
@@ -368,8 +377,10 @@ struct ActivePlanCardCompact: View {
 
                 // I'm safe button
                 Button(action: {
-                    let impact = UIImpactFeedbackGenerator(style: .medium)
-                    impact.impactOccurred()
+                    if preferences.hapticFeedbackEnabled {
+                        let impact = UIImpactFeedbackGenerator(style: .medium)
+                        impact.impactOccurred()
+                    }
 
                     if let token = plan.checkout_token {
                         Task {
@@ -377,8 +388,10 @@ struct ActivePlanCardCompact: View {
                             await session.performTokenAction(token, action: "checkout")
 
                             // Success haptic with confetti effect
-                            let success = UINotificationFeedbackGenerator()
-                            success.notificationOccurred(.success)
+                            if preferences.hapticFeedbackEnabled {
+                                let success = UINotificationFeedbackGenerator()
+                                success.notificationOccurred(.success)
+                            }
 
                             // Reload active plan to update UI
                             await session.loadActivePlan()
@@ -412,8 +425,10 @@ struct ActivePlanCardCompact: View {
                             HStack(spacing: 8) {
                                 ForEach(extendOptions, id: \.0) { minutes, label in
                                     Button(action: {
-                                        let impact = UIImpactFeedbackGenerator(style: .light)
-                                        impact.impactOccurred()
+                                        if preferences.hapticFeedbackEnabled {
+                                            let impact = UIImpactFeedbackGenerator(style: .light)
+                                            impact.impactOccurred()
+                                        }
 
                                         Task {
                                             isPerformingAction = true
@@ -438,8 +453,10 @@ struct ActivePlanCardCompact: View {
                     .transition(.scale.combined(with: .opacity))
                 } else {
                     Button(action: {
-                        let impact = UIImpactFeedbackGenerator(style: .light)
-                        impact.impactOccurred()
+                        if preferences.hapticFeedbackEnabled {
+                            let impact = UIImpactFeedbackGenerator(style: .light)
+                            impact.impactOccurred()
+                        }
 
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             showingExtendOptions = true
@@ -517,6 +534,7 @@ extension Notification.Name {
 // MARK: - Upcoming Trips Section
 struct UpcomingTripsSection: View {
     @EnvironmentObject var session: Session
+    @EnvironmentObject var preferences: AppPreferences
     @State private var upcomingPlans: [Trip] = []
     @State private var currentTime = Date()
     @State private var startingTripId: Int? = nil
@@ -557,7 +575,10 @@ struct UpcomingTripsSection: View {
         }
         .onReceive(timer) { time in
             currentTime = time
-            // Don't auto-start - let user tap the Start button
+            // Check if auto-start is enabled in preferences
+            if preferences.autoStartTrips {
+                checkForTripsToAutoStart()
+            }
         }
         .task {
             await loadUpcomingPlans()
@@ -581,11 +602,28 @@ struct UpcomingTripsSection: View {
         let allPlans = await session.loadAllTrips()
 
         await MainActor.run {
+            let maxTrips = preferences.maxUpcomingTrips
             upcomingPlans = allPlans
                 .filter { $0.status == "planned" }
                 .sorted { $0.start_at < $1.start_at }
-                .prefix(3) // Show max 3 upcoming trips
+                .prefix(maxTrips)
                 .map { $0 }
+        }
+    }
+
+    func checkForTripsToAutoStart() {
+        // Only auto-start if not already starting something and no failures
+        guard startingTripId == nil else { return }
+
+        for plan in upcomingPlans {
+            // Skip trips that already failed
+            if failedTripIds.contains(plan.id) { continue }
+
+            // Auto-start if the start time has passed
+            if plan.start_at <= currentTime {
+                startTrip(plan.id)
+                break
+            }
         }
     }
 

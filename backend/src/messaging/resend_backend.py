@@ -1,11 +1,8 @@
-from __future__ import annotations
-
-import logging
-from typing import Optional, List, Dict, Any
-
 import resend
-
+import logging
 from ..config import settings
+from __future__ import annotations
+from typing import Optional, List, Dict, Any
 
 log = logging.getLogger(__name__)
 
@@ -93,77 +90,77 @@ async def send_resend_email(
 def create_magic_link_email_html(email: str, code: str) -> str:
     """Create HTML email template for magic link."""
     return f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-        }}
-        .container {{
-            background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 30px;
-        }}
-        .code-box {{
-            background: #f5f5f5;
-            border: 2px solid #007bff;
-            border-radius: 6px;
-            padding: 20px;
-            text-align: center;
-            margin: 30px 0;
-        }}
-        .code {{
-            font-size: 32px;
-            font-weight: bold;
-            letter-spacing: 8px;
-            color: #007bff;
-        }}
-        .footer {{
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            font-size: 14px;
-            color: #666;
-        }}
-        h1 {{
-            color: #333;
-            font-size: 24px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Your Homebound Login Code</h1>
-        <p>Hi there,</p>
-        <p>You requested a login code for Homebound. Use the code below to complete your sign-in:</p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+            }}
+            .container {{
+                background: #fff;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 30px;
+            }}
+            .code-box {{
+                background: #f5f5f5;
+                border: 2px solid #333;
+                border-radius: 6px;
+                padding: 20px;
+                text-align: center;
+                margin: 30px 0;
+            }}
+            .code {{
+                font-size: 32px;
+                font-weight: bold;
+                letter-spacing: 8px;
+                color: #007bff;
+            }}
+            .footer {{
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                font-size: 14px;
+                color: #666;
+            }}
+            h1 {{
+                color: #333;
+                font-size: 24px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Your Homebound Login Code</h1>
+            <p>Hi there!</p>
+            <p>We recently received a request to verify the Homebound account that’s linked to this email address. Use the code below to complete your sign-in:</p>
 
-        <div class="code-box">
-            <div class="code">{code}</div>
+            <div class="code-box">
+                <div class="code">{code}</div>
+            </div>
+
+            <p>This code will expire in <strong>10 minutes</strong>. If you miss it, don't worry! Just request a new one in the app.</p>
+            <p>If you didn't request this code, you can safely ignore this email.</p>
+
+            <div class="footer">
+                <p>Best regards,<br>The Homebound Team</p>
+                <p style="font-size: 12px; color: #999;">
+                    This email was sent to {email}.
+                    If you have any questions, please contact support.
+                </p>
+            </div>
         </div>
-
-        <p>This code will expire in <strong>10 minutes</strong>.</p>
-        <p>If you didn't request this code, you can safely ignore this email.</p>
-
-        <div class="footer">
-            <p>Best regards,<br>The Homebound Team</p>
-            <p style="font-size: 12px; color: #999;">
-                This email was sent to {email}.
-                If you have any questions, please contact support.
-            </p>
-        </div>
-    </div>
-</body>
-</html>
-"""
+    </body>
+    </html>
+    """
 
 
 def create_overdue_notification_email_html(

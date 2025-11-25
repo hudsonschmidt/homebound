@@ -11,6 +11,7 @@ import UserNotifications
 @main
 struct HomeboundApp: App {
     @StateObject private var session = Session()
+    @StateObject private var preferences = AppPreferences.shared
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
@@ -20,15 +21,18 @@ struct HomeboundApp: App {
                     // Not authenticated - show login
                     AuthenticationView()
                         .environmentObject(session)
+                        .environmentObject(preferences)
                 } else if !session.profileCompleted {
                     // Authenticated but profile not complete - show onboarding
                     OnboardingView()
                         .environmentObject(session)
+                        .environmentObject(preferences)
                         .transition(.move(edge: .trailing))
                 } else {
                     // Authenticated with complete profile - show main tab view
                     MainTabView()
                         .environmentObject(session)
+                        .environmentObject(preferences)
                         .task { await requestPush() }
                         .onOpenURL { url in
                             // Handle universal links for check-in/out
@@ -39,6 +43,7 @@ struct HomeboundApp: App {
             }
             .animation(.easeInOut(duration: 0.3), value: session.accessToken)
             .animation(.easeInOut(duration: 0.3), value: session.profileCompleted)
+            .preferredColorScheme(preferences.colorScheme.colorScheme)
         }
     }
 

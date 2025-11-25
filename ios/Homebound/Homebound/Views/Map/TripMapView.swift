@@ -43,6 +43,17 @@ struct TripMapView: View {
         return uniqueActivities.sorted { $0.name < $1.name }
     }
 
+    var mapStyleFromPreferences: MapStyle {
+        switch AppPreferences.shared.defaultMapType {
+        case .standard:
+            return .standard
+        case .satellite:
+            return .imagery
+        case .hybrid:
+            return .hybrid
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -74,6 +85,7 @@ struct TripMapView: View {
                         }
                     }
                 }
+                .mapStyle(mapStyleFromPreferences)
                 .ignoresSafeArea(edges: .top)
 
                 // Filter Controls

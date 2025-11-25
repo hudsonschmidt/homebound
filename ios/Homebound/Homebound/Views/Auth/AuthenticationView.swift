@@ -10,226 +10,239 @@ struct AuthenticationView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var appleSignInCoordinator: AppleSignInCoordinator?
+    @State private var appeared = false
 
     var body: some View {
         ZStack {
-            // Gradient Background
-            LinearGradient(
-                colors: [
-                    Color.hbBrand,
-                    Color.hbTeal
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // System background
+            Color(.systemBackground)
+                .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer()
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 80)
 
-                // Logo and Title
-                VStack(spacing: 24) {
-                    // App Icon/Logo
-                    Image(systemName: "location.north.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(.white)
-                        .shadow(radius: 10)
+                    // Logo and Title
+                    VStack(spacing: 20) {
+                        // App Icon/Logo
+                        ZStack {
+                            Circle()
+                                .fill(Color.hbBrand.opacity(0.1))
+                                .frame(width: 100, height: 100)
 
-                    Text("Homebound")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                .padding(.bottom, 60)
-
-                // Auth Card
-                VStack(spacing: 20) {
-                    if !showingVerification {
-                        // Email Entry
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Create an account")
-                                .font(.title2)
-                                .fontWeight(.bold)
-
-                            Text("Enter your email to sign up")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                            Image(systemName: "location.north.circle.fill")
+                                .font(.system(size: 60))
+                                .foregroundStyle(Color.hbBrand)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.bottom, 20)
 
-                        // Email Field
-                        TextField("email@domain.com", text: $email)
-                            .textFieldStyle(ModernTextFieldStyle())
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-
-                        // Continue Button
-                        Button(action: requestMagicLink) {
-                            HStack {
-                                if isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Text("Continue")
-                                        .fontWeight(.semibold)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(Color.black)
-                            .foregroundStyle(.white)
-                            .cornerRadius(12)
-                        }
-                        .disabled(!isValidEmail || isLoading)
-                        .opacity(!isValidEmail ? 0.6 : 1)
-
-                        // Divider
-                        HStack {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 1)
-                            Text("or")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 1)
-                        }
-                        .padding(.vertical, 8)
-
-                        // Apple Sign In
-                        Button {
-                            print("🍎 Apple Sign In button tapped")
-                            let provider = ASAuthorizationAppleIDProvider()
-                            let request = provider.createRequest()
-                            request.requestedScopes = [.email, .fullName]
-
-                            let controller = ASAuthorizationController(authorizationRequests: [request])
-                            appleSignInCoordinator = AppleSignInCoordinator(session: session) {}
-                            controller.delegate = appleSignInCoordinator
-
-                            print("🍎 Calling performRequests()")
-                            controller.performRequests()
-                        } label: {
-                            HStack {
-                                Image(systemName: "apple.logo")
-                                    .font(.title3)
-                                Text("Continue with Apple")
-                                    .fontWeight(.medium)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(Color.black)
-                            .foregroundStyle(.white)
-                            .cornerRadius(12)
-                        }
-                        .buttonStyle(.plain)
-
-                    } else {
-                        // Verification Code Entry
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Check your email")
-                                .font(.title2)
-                                .fontWeight(.bold)
-
-                            Text("We sent a code to \(email)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.bottom, 20)
-
-                        // Code Field
-                        TextField("000000", text: $code)
-                            .textFieldStyle(ModernTextFieldStyle())
-                            .keyboardType(.numberPad)
-                            .textContentType(.oneTimeCode)
-                            .multilineTextAlignment(.center)
-                            .font(.system(size: 24, weight: .bold, design: .monospaced))
-                            .onChange(of: code) { _, newValue in
-                                // Auto-submit when 6 digits entered
-                                if newValue.count == 6 {
-                                    verifyCode()
-                                }
-                            }
-
-                        // Verify Button
-                        Button(action: verifyCode) {
-                            HStack {
-                                if isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Text("Verify")
-                                        .fontWeight(.semibold)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(Color.black)
-                            .foregroundStyle(.white)
-                            .cornerRadius(12)
-                        }
-                        .disabled(code.count != 6 || isLoading)
-                        .opacity(code.count != 6 ? 0.6 : 1)
-
-                        // Resend Link
-                        Button(action: {
-                            withAnimation {
-                                showingVerification = false
-                                code = ""
-                            }
-                        }) {
-                            Text("Use a different email")
-                                .font(.footnote)
-                                .foregroundStyle(.blue)
-                        }
-                        .padding(.top, 8)
+                        Text("Homebound")
+                            .font(.system(size: 38, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
                     }
+                    .padding(.bottom, 40)
 
-                    // Error Message
-                    if let error = errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                    // Auth Card with glowing effect
+                    VStack(spacing: 20) {
+                        if !showingVerification {
+                            // Email Entry
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Welcome")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+
+                                Text("Sign in or create an account")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.bottom, 16)
+
+                            // Email Field
+                            TextField("email@example.com", text: $email)
+                                .textFieldStyle(AuthTextFieldStyle())
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+
+                            // Continue Button
+                            Button(action: requestMagicLink) {
+                                HStack {
+                                    if isLoading {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Text("Continue with Email")
+                                            .fontWeight(.semibold)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                                .background(isValidEmail ? Color.hbBrand : Color.gray)
+                                .foregroundStyle(.white)
+                                .cornerRadius(14)
+                            }
+                            .disabled(!isValidEmail || isLoading)
+
+                            // Divider
+                            HStack {
+                                Rectangle()
+                                    .fill(Color(.separator))
+                                    .frame(height: 1)
+                                Text("or")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                Rectangle()
+                                    .fill(Color(.separator))
+                                    .frame(height: 1)
+                            }
+                            .padding(.vertical, 8)
+
+                            // Apple Sign In
+                            Button {
+                                let provider = ASAuthorizationAppleIDProvider()
+                                let request = provider.createRequest()
+                                request.requestedScopes = [.email, .fullName]
+
+                                let controller = ASAuthorizationController(authorizationRequests: [request])
+                                appleSignInCoordinator = AppleSignInCoordinator(session: session) {}
+                                controller.delegate = appleSignInCoordinator
+                                controller.performRequests()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "apple.logo")
+                                        .font(.title3)
+                                    Text("Continue with Apple")
+                                        .fontWeight(.medium)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                                .background(Color(.label))
+                                .foregroundStyle(Color(.systemBackground))
+                                .cornerRadius(14)
+                            }
+                            .buttonStyle(.plain)
+
+                        } else {
+                            // Verification Code Entry
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Check your email")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+
+                                Text("We sent a code to \(email)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.bottom, 16)
+
+                            // Code Field
+                            TextField("000000", text: $code)
+                                .textFieldStyle(AuthTextFieldStyle())
+                                .keyboardType(.numberPad)
+                                .textContentType(.oneTimeCode)
+                                .multilineTextAlignment(.center)
+                                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                                .onChange(of: code) { _, newValue in
+                                    // Auto-submit when 6 digits entered
+                                    if newValue.count == 6 {
+                                        verifyCode()
+                                    }
+                                }
+
+                            // Verify Button
+                            Button(action: verifyCode) {
+                                HStack {
+                                    if isLoading {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Text("Verify")
+                                            .fontWeight(.semibold)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                                .background(code.count == 6 ? Color.hbBrand : Color.gray)
+                                .foregroundStyle(.white)
+                                .cornerRadius(14)
+                            }
+                            .disabled(code.count != 6 || isLoading)
+
+                            // Back Button
+                            Button(action: {
+                                withAnimation {
+                                    showingVerification = false
+                                    code = ""
+                                }
+                            }) {
+                                Text("Use a different email")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color.hbBrand)
+                            }
                             .padding(.top, 8)
-                    }
-                }
-                .padding(30)
-                .background(Color(.systemBackground))
-                .cornerRadius(20)
-                .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: 10)
-                .padding(.horizontal, 24)
+                        }
 
-                Spacer()
-                Spacer()
+                        // Error Message
+                        if let error = errorMessage {
+                            HStack {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .foregroundStyle(.red)
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                            .padding(.top, 8)
+                        }
+                    }
+                    .padding(28)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(28)
+                    // Glowing shadow effect
+                    .shadow(
+                        color: Color.hbBrand.opacity(0.25),
+                        radius: 20,
+                        y: 10
+                    )
+                    .shadow(
+                        color: Color.hbBrand.opacity(0.15),
+                        radius: 12,
+                        y: 6
+                    )
+                    .padding(.horizontal, 24)
+                    .opacity(appeared ? 1.0 : 0.0)
+                    .offset(y: appeared ? 0 : 20)
 
-                // Terms and Privacy
-                VStack(spacing: 4) {
-                    HStack(spacing: 4) {
-                        Text("By clicking continue, you agree to our")
+                    Spacer(minLength: 40)
+
+                    // Terms and Privacy
+                    VStack(spacing: 4) {
+                        Text("By continuing, you agree to our")
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Button("Terms of Service") {}
+                                .font(.caption)
+                                .foregroundStyle(Color.hbBrand)
+                            Text("and")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("Privacy Policy") {}
+                                .font(.caption)
+                                .foregroundStyle(Color.hbBrand)
+                        }
                     }
-                    HStack(spacing: 4) {
-                        Button("Terms of Service") {}
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                            .underline()
-                        Text("and")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
-                        Button("Privacy Policy") {}
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                            .underline()
-                    }
+                    .padding(.bottom, 30)
                 }
-                .padding(.bottom, 50)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.5)) {
+                appeared = true
             }
         }
         .onChange(of: session.accessToken) { _, newValue in
@@ -308,15 +321,11 @@ struct AuthenticationView: View {
 }
 
 // MARK: - Custom TextField Style
-struct ModernTextFieldStyle: TextFieldStyle {
+struct AuthTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .padding(16)
-            .background(Color(.systemGray6))
+            .background(Color(.tertiarySystemFill))
             .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color(.systemGray4), lineWidth: 0.5)
-            )
     }
 }

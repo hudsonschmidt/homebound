@@ -55,8 +55,8 @@ struct HistoryView: View {
                     EmptyHistoryView(hasSearchText: !searchText.isEmpty)
                 } else {
                     List {
-                        // Stats Section (optional - only shown in tab mode)
-                        if showStats && !allPlans.isEmpty {
+                        // Stats Section (optional - respects user preference)
+                        if showStats && AppPreferences.shared.showStats && !allPlans.isEmpty {
                             Section {
                                 TripStatsView(plans: allPlans)
                             }

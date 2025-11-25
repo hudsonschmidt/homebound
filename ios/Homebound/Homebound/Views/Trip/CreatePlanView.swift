@@ -18,9 +18,10 @@ struct CreatePlanView: View {
     @State private var startTime = Date()
     @State private var etaTime = Date().addingTimeInterval(7200) // 2 hours from now
     @State private var isManualETA = false
-    @State private var graceMinutes: Double = 30
+    @State private var graceMinutes: Double = Double(AppPreferences.shared.defaultGraceMinutes)
     @State private var showZeroGraceWarning = false
     @State private var notes = ""
+    @State private var hasAppliedDefaults = false
 
     // Contact management
     @State private var contacts: [EmergencyContact] = []
@@ -46,9 +47,12 @@ struct CreatePlanView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background
+                // Background - tap to dismiss keyboard
                 Color(.systemBackground)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
 
                 VStack(spacing: 0) {
                     // Progress Bar
@@ -114,6 +118,8 @@ struct CreatePlanView: View {
 
                         if currentStep < totalSteps {
                             Button(action: {
+                                // Dismiss keyboard before proceeding
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                                 if validateCurrentStep() {
                                     currentStep += 1
                                 }
@@ -137,6 +143,16 @@ struct CreatePlanView: View {
             }
             .navigationTitle("New Adventure")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // Apply default activity from preferences (only once)
+                if !hasAppliedDefaults {
+                    hasAppliedDefaults = true
+                    if let defaultActivityId = AppPreferences.shared.defaultActivityId,
+                       let activity = session.activities.first(where: { $0.id == defaultActivityId }) {
+                        selectedActivity = activity.name.lowercased().replacingOccurrences(of: " ", with: "_")
+                    }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
@@ -372,6 +388,7 @@ struct Step1TripDetails: View {
                         .padding()
                         .background(Color(.secondarySystemFill))
                         .cornerRadius(12)
+                        .submitLabel(.done)
                 }
 
                 // Activity Type Selection
@@ -432,7 +449,11 @@ struct Step1TripDetails: View {
                 Spacer(minLength: 100)
             }
             .padding(.horizontal)
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
         }
+        .scrollDismissesKeyboard(.interactively)
         .sheet(isPresented: $showingLocationSearch) {
             LocationSearchView(
                 selectedLocation: $location,
@@ -1400,7 +1421,11 @@ struct Step3EmergencyContacts: View {
                 Spacer(minLength: 100)
             }
             .padding(.horizontal)
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
         }
+        .scrollDismissesKeyboard(.interactively)
         .task {
             await loadContacts()
         }
@@ -1502,7 +1527,11 @@ struct Step4AdditionalNotes: View {
                 Spacer(minLength: 100)
             }
             .padding(.horizontal)
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 }
 
