@@ -20,117 +20,132 @@ log = logging.getLogger(__name__)
 scheduler: Optional[AsyncIOScheduler] = None
 
 
-async def check_overdue_plans():
-    """Check for overdue plans and send notifications."""
+async def check_overdue_trips():
+    """Check for overdue trips and send notifications."""
     try:
         now = datetime.utcnow()
 
         with db.engine.begin() as conn:
-            # Find active plans that are overdue
-            overdue_plans = conn.execute(
+            # Find active trips that are past their ETA
+            overdue_trips = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title, eta_at, grace_minutes, location_text, status
-                    FROM plans
-                    WHERE status = 'active' AND eta_at < :now
+                    SELECT id, user_id, title, eta, grace_min, location_text, status
+                    FROM trips
+                    WHERE status = 'active' AND eta < :now
                 """),
                 {"now": now}
             ).fetchall()
 
-            for plan in overdue_plans:
-                plan_id = plan.id
+            for trip in overdue_trips:
+                trip_id = trip.id
 
-                # Check if we've already marked this plan as overdue
+                # Check if we've already marked this trip as overdue
                 existing_overdue = conn.execute(
                     sqlalchemy.text("""
                         SELECT id FROM events
-                        WHERE plan_id = :plan_id AND kind = 'overdue'
+                        WHERE trip_id = :trip_id AND what = 'overdue'
                         LIMIT 1
                     """),
-                    {"plan_id": plan_id}
+                    {"trip_id": trip_id}
                 ).fetchone()
 
                 if existing_overdue:
                     # Already marked as overdue, check if grace period expired
-                    # Parse eta_at string to datetime
-                    if isinstance(plan.eta_at, str):
-                        eta_dt = datetime.fromisoformat(plan.eta_at.replace(' ', 'T'))
+                    # Parse eta string to datetime
+                    if isinstance(trip.eta, str):
+                        eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '+00:00'))
                     else:
-                        eta_dt = plan.eta_at
+                        eta_dt = trip.eta
 
-                    grace_expired = eta_dt + timedelta(minutes=plan.grace_minutes)
+                    grace_expired = eta_dt + timedelta(minutes=trip.grace_min)
 
                     if now > grace_expired:
                         # Check if we've already notified
                         existing_notify = conn.execute(
                             sqlalchemy.text("""
                                 SELECT id FROM events
-                                WHERE plan_id = :plan_id AND kind = 'notify'
+                                WHERE trip_id = :trip_id AND what = 'notify'
                                 LIMIT 1
                             """),
-                            {"plan_id": plan_id}
+                            {"trip_id": trip_id}
                         ).fetchone()
 
                         if not existing_notify:
-                            # Get contacts to notify
+                            # Get contacts to notify (via trip's contact1/2/3 foreign keys)
                             contacts = conn.execute(
                                 sqlalchemy.text("""
-                                    SELECT name, phone, email
-                                    FROM contacts
-                                    WHERE plan_id = :plan_id AND notify_on_overdue = 1
+                                    SELECT c.name, c.phone, c.email
+                                    FROM contacts c
+                                    JOIN trips t ON (
+                                        c.id = t.contact1 OR
+                                        c.id = t.contact2 OR
+                                        c.id = t.contact3
+                                    )
+                                    WHERE t.id = :trip_id AND c.email IS NOT NULL
                                 """),
-                                {"plan_id": plan_id}
+                                {"trip_id": trip_id}
                             ).fetchall()
 
+                            # Fetch user name for notification
+                            user = conn.execute(
+                                sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+                                {"user_id": trip.user_id}
+                            ).fetchone()
+                            user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
+                            if not user_name:
+                                user_name = "A Homebound user"
+
                             if contacts:
-                                log.info(f"Sending overdue notifications for plan {plan_id} to {len(contacts)} contacts")
-                                # Send notifications (this is async but we're in sync context)
-                                await send_overdue_notifications(plan, list(contacts))
+                                log.info(f"Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
+                                # Send notifications
+                                await send_overdue_notifications(trip, list(contacts), user_name)
 
                                 # Mark as notified
                                 conn.execute(
                                     sqlalchemy.text("""
-                                        INSERT INTO events (plan_id, kind, meta, at)
-                                        VALUES (:plan_id, 'notify', :meta, :at)
+                                        INSERT INTO events (user_id, trip_id, what, timestamp)
+                                        VALUES (:user_id, :trip_id, 'notify', :timestamp)
                                     """),
                                     {
-                                        "plan_id": plan_id,
-                                        "meta": f"Notified {len(contacts)} contacts",
-                                        "at": datetime.utcnow()
+                                        "user_id": trip.user_id,
+                                        "trip_id": trip_id,
+                                        "timestamp": datetime.utcnow()
                                     }
                                 )
 
-                            # Update plan status
+                            # Update trip status
                             conn.execute(
                                 sqlalchemy.text("""
-                                    UPDATE plans SET status = 'overdue_notified'
-                                    WHERE id = :plan_id
+                                    UPDATE trips SET status = 'overdue_notified'
+                                    WHERE id = :trip_id
                                 """),
-                                {"plan_id": plan_id}
+                                {"trip_id": trip_id}
                             )
                 else:
                     # Mark as overdue
-                    log.info(f"Marking plan {plan_id} as overdue")
+                    log.info(f"Marking trip {trip_id} as overdue")
                     conn.execute(
                         sqlalchemy.text("""
-                            INSERT INTO events (plan_id, kind, at)
-                            VALUES (:plan_id, 'overdue', :at)
+                            INSERT INTO events (user_id, trip_id, what, timestamp)
+                            VALUES (:user_id, :trip_id, 'overdue', :timestamp)
                         """),
                         {
-                            "plan_id": plan_id,
-                            "at": datetime.utcnow()
+                            "user_id": trip.user_id,
+                            "trip_id": trip_id,
+                            "timestamp": datetime.utcnow()
                         }
                     )
 
                     conn.execute(
                         sqlalchemy.text("""
-                            UPDATE plans SET status = 'overdue'
-                            WHERE id = :plan_id
+                            UPDATE trips SET status = 'overdue'
+                            WHERE id = :trip_id
                         """),
-                        {"plan_id": plan_id}
+                        {"trip_id": trip_id}
                     )
 
     except Exception as e:
-        log.error(f"Error checking overdue plans: {e}", exc_info=True)
+        log.error(f"Error checking overdue trips: {e}", exc_info=True)
 
 
 async def clean_expired_tokens():
@@ -164,12 +179,12 @@ def init_scheduler() -> AsyncIOScheduler:
 
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
 
-    # Check for overdue plans every minute
+    # Check for overdue trips every minute
     scheduler.add_job(
-        check_overdue_plans,
+        check_overdue_trips,
         IntervalTrigger(minutes=1),
         id="check_overdue",
-        name="Check for overdue plans",
+        name="Check for overdue trips",
         replace_existing=True,
         max_instances=1,
     )

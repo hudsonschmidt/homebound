@@ -1,9 +1,14 @@
 """Public check-in/check-out endpoints using tokens (no auth required)"""
+import asyncio
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, status
+import logging
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
 from src import database as db
+from src.services.notifications import send_trip_completed_emails
 import sqlalchemy
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/t", tags=["checkin"])
 
@@ -69,17 +74,19 @@ def checkin_with_token(token: str):
 
 
 @router.get("/{token}/checkout", response_model=CheckinResponse)
-def checkout_with_token(token: str):
+def checkout_with_token(token: str, background_tasks: BackgroundTasks):
     """Complete/check out of a trip using a magic token"""
     with db.engine.begin() as connection:
-        # Find trip by checkout_token
+        # Find trip by checkout_token with activity name
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, user_id, title, status
-                FROM trips
-                WHERE checkout_token = :token
-                AND status = 'active'
+                SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
+                       a.name as activity_name
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.checkout_token = :token
+                AND t.status = 'active'
                 """
             ),
             {"token": token}
@@ -115,6 +122,43 @@ def checkout_with_token(token: str):
             ),
             {"user_id": trip.user_id, "trip_id": trip.id, "timestamp": now.isoformat()}
         )
+
+        # Fetch user name for email notification
+        user = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            {"user_id": trip.user_id}
+        ).fetchone()
+        user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
+        if not user_name:
+            user_name = "A Homebound user"
+
+        # Fetch contacts with email for notification
+        contact_ids = [cid for cid in [trip.contact1, trip.contact2, trip.contact3] if cid is not None]
+        contacts_for_email = []
+        if contact_ids:
+            placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
+            params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
+            contacts_result = connection.execute(
+                sqlalchemy.text(f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"),
+                params
+            ).fetchall()
+            contacts_for_email = [dict(c._mapping) for c in contacts_result]
+
+        # Build trip dict for email notification
+        trip_data = {"title": trip.title}
+        activity_name = trip.activity_name
+
+        # Schedule background task to send emails to contacts
+        def send_emails_sync():
+            asyncio.run(send_trip_completed_emails(
+                trip=trip_data,
+                contacts=contacts_for_email,
+                user_name=user_name,
+                activity_name=activity_name
+            ))
+
+        background_tasks.add_task(send_emails_sync)
+        log.info(f"[Checkout] Scheduled completion emails for {len(contacts_for_email)} contacts")
 
         return CheckinResponse(
             ok=True,

@@ -1,6 +1,27 @@
+from contextlib import asynccontextmanager
+import logging
+
 from fastapi import FastAPI
 from src.api import auth_endpoints, trips, activities, contacts, devices, checkin, profile
+from src.services.scheduler import start_scheduler, stop_scheduler
 from starlette.middleware.cors import CORSMiddleware
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle - start and stop background services."""
+    # Startup
+    log.info("Starting background scheduler...")
+    start_scheduler()
+    yield
+    # Shutdown
+    log.info("Stopping background scheduler...")
+    stop_scheduler()
+
 
 description = """
 Homebound is a personal safety application that helps users create travel plans,
@@ -27,6 +48,7 @@ app = FastAPI(
         "email": "support@homeboundapp.com",
     },
     openapi_tags=tags_metadata,
+    lifespan=lifespan,
 )
 
 # Configure CORS for mobile and web

@@ -15,13 +15,11 @@ router = APIRouter(
 
 class ContactCreate(BaseModel):
     name: str
-    phone: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: EmailStr  # Required for email notifications
 
 
 class ContactUpdate(BaseModel):
     name: Optional[str] = None
-    phone: Optional[str] = None
     email: Optional[EmailStr] = None
 
 
@@ -29,8 +27,7 @@ class Contact(BaseModel):
     id: int
     user_id: int
     name: str
-    phone: Optional[str]
-    email: Optional[str]
+    email: str  # Required field
 
 
 @router.get("/", response_model=List[Contact])
@@ -40,7 +37,7 @@ def get_contacts(user_id: int = Depends(auth.get_current_user_id)):
         contacts = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, user_id, name, phone, email
+                SELECT id, user_id, name, email
                 FROM contacts
                 WHERE user_id = :user_id
                 ORDER BY id
@@ -59,7 +56,7 @@ def get_contact(contact_id: int, user_id: int = Depends(auth.get_current_user_id
         contact = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, user_id, name, phone, email
+                SELECT id, user_id, name, email
                 FROM contacts
                 WHERE id = :contact_id AND user_id = :user_id
                 """
@@ -83,15 +80,14 @@ def create_contact(body: ContactCreate, user_id: int = Depends(auth.get_current_
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO contacts (user_id, name, phone, email)
-                VALUES (:user_id, :name, :phone, :email)
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
                 RETURNING id
                 """
             ),
             {
                 "user_id": user_id,
                 "name": body.name,
-                "phone": body.phone,
                 "email": body.email
             }
         )
@@ -101,7 +97,7 @@ def create_contact(body: ContactCreate, user_id: int = Depends(auth.get_current_
         contact = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, user_id, name, phone, email
+                SELECT id, user_id, name, email
                 FROM contacts
                 WHERE id = :contact_id
                 """
@@ -142,10 +138,6 @@ def update_contact(contact_id: int, body: ContactUpdate, user_id: int = Depends(
             updates.append("name = :name")
             params["name"] = body.name
 
-        if body.phone is not None:
-            updates.append("phone = :phone")
-            params["phone"] = body.phone
-
         if body.email is not None:
             updates.append("email = :email")
             params["email"] = body.email
@@ -160,7 +152,7 @@ def update_contact(contact_id: int, body: ContactUpdate, user_id: int = Depends(
         contact = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, user_id, name, phone, email
+                SELECT id, user_id, name, email
                 FROM contacts
                 WHERE id = :contact_id
                 """

@@ -32,11 +32,14 @@ class Settings:
     # Resend email settings
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
     RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "noreply@homeboundapp.com")
+    RESEND_ALERTS_EMAIL: str = os.getenv("RESEND_ALERTS_EMAIL", "alerts@homeboundapp.com")
+    RESEND_HELLO_EMAIL: str = os.getenv("RESEND_HELLO_EMAIL", "hello@homeboundapp.com")
 
     # SMS settings for notifications
     TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
     TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
     TWILIO_FROM_NUMBER: str = os.getenv("TWILIO_FROM_NUMBER", "")
+    TWILIO_MESSAGING_SERVICE_SID: str = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
 
     # Push notification settings
     APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")

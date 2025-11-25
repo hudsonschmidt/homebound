@@ -1,14 +1,19 @@
 """Trip management endpoints"""
+import asyncio
 from datetime import datetime, timezone
 import secrets
 from typing import Optional, List, Union
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from pydantic import BaseModel
 from src import database as db
 from src.api import auth
 from src.api.activities import Activity
+from src.services.notifications import send_trip_created_emails
 import sqlalchemy
 import json
+import logging
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/trips",
@@ -83,17 +88,21 @@ class TimelineEvent(BaseModel):
 
 
 @router.post("/", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
-def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_id)):
+def create_trip(
+    body: TripCreate,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
     """Create a new trip"""
     # Log incoming request for debugging
-    print(f"[Trips] 📝 Creating trip for user_id={user_id}")
-    print(f"[Trips] Request body: title={body.title}, activity={body.activity}, start={body.start}, eta={body.eta}")
-    print(f"[Trips] Contacts: contact1={body.contact1}, contact2={body.contact2}, contact3={body.contact3}")
-    print(f"[Trips] Location: {body.location_text}, coords=({body.gen_lat}, {body.gen_lon})")
+    log.info(f"[Trips] Creating trip for user_id={user_id}")
+    log.info(f"[Trips] Request body: title={body.title}, activity={body.activity}, start={body.start}, eta={body.eta}")
+    log.info(f"[Trips] Contacts: contact1={body.contact1}, contact2={body.contact2}, contact3={body.contact3}")
+    log.info(f"[Trips] Location: {body.location_text}, coords=({body.gen_lat}, {body.gen_lon})")
 
     # Validate that at least contact1 is provided (required by database)
     if body.contact1 is None:
-        print(f"[Trips] ❌ No contact1 provided")
+        log.warning("[Trips] No contact1 provided")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one emergency contact (contact1) is required"
@@ -104,7 +113,7 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
         # Normalize activity name: convert to lowercase and replace underscores with spaces
         # This allows "scuba_diving" to match "Scuba Diving"
         normalized_activity = body.activity.lower().replace('_', ' ')
-        print(f"[Trips] 🔍 Looking up activity: '{body.activity}' (normalized: '{normalized_activity}')")
+        log.info(f"[Trips] Looking up activity: '{body.activity}' (normalized: '{normalized_activity}')")
 
         activity = connection.execute(
             sqlalchemy.text(
@@ -122,22 +131,22 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
             all_activities = connection.execute(
                 sqlalchemy.text("SELECT id, name FROM activities")
             ).fetchall()
-            print(f"[Trips] ❌ Activity '{body.activity}' not found!")
-            print(f"[Trips] Available activities: {[a.name for a in all_activities]}")
+            log.warning(f"[Trips] Activity '{body.activity}' not found!")
+            log.info(f"[Trips] Available activities: {[a.name for a in all_activities]}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Activity '{body.activity}' not found. Available: {[a.name for a in all_activities]}"
             )
 
-        print(f"[Trips] ✅ Activity found: id={activity.id}, name='{activity.name}'")
+        log.info(f"[Trips] Activity found: id={activity.id}, name='{activity.name}'")
 
         activity_id = activity.id
 
         # Verify contacts exist if provided
-        print(f"[Trips] 🔍 Verifying contacts...")
+        log.info("[Trips] Verifying contacts...")
         for contact_id in [body.contact1, body.contact2, body.contact3]:
             if contact_id is not None:
-                print(f"[Trips] Checking contact_id={contact_id}")
+                log.info(f"[Trips] Checking contact_id={contact_id}")
                 contact = connection.execute(
                     sqlalchemy.text(
                         """
@@ -155,14 +164,14 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
                         sqlalchemy.text("SELECT id, name FROM contacts WHERE user_id = :user_id"),
                         {"user_id": user_id}
                     ).fetchall()
-                    print(f"[Trips] ❌ Contact {contact_id} not found for user {user_id}!")
-                    print(f"[Trips] User's contacts: {[(c.id, c.name) for c in user_contacts]}")
+                    log.warning(f"[Trips] Contact {contact_id} not found for user {user_id}!")
+                    log.info(f"[Trips] User's contacts: {[(c.id, c.name) for c in user_contacts]}")
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Contact {contact_id} not found. Available: {[c.id for c in user_contacts]}"
                     )
 
-                print(f"[Trips] ✅ Contact {contact_id} verified")
+                log.info(f"[Trips] Contact {contact_id} verified")
 
         # Generate unique tokens for checkin/checkout
         checkin_token = secrets.token_urlsafe(32)
@@ -234,7 +243,7 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
         ).mappings().fetchone()
 
         # Construct Activity object from trip data
-        activity = Activity(
+        activity_obj = Activity(
             id=trip["activity_id"],
             name=trip["activity_name"],
             icon=trip["activity_icon"],
@@ -245,11 +254,52 @@ def create_trip(body: TripCreate, user_id: int = Depends(auth.get_current_user_i
             order=trip["activity_order"]
         )
 
+        # Fetch user name for email notification
+        user = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+        user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
+        if not user_name:
+            user_name = "A Homebound user"
+
+        # Fetch contacts with email for notification
+        contact_ids = [cid for cid in [body.contact1, body.contact2, body.contact3] if cid is not None]
+        contacts_for_email = []
+        if contact_ids:
+            placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
+            params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
+            contacts_result = connection.execute(
+                sqlalchemy.text(f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"),
+                params
+            ).fetchall()
+            contacts_for_email = [dict(c._mapping) for c in contacts_result]
+
+        # Build trip dict for email notification
+        trip_data = {
+            "title": trip["title"],
+            "start": trip["start"],
+            "eta": trip["eta"],
+            "location_text": trip["location_text"]
+        }
+
+        # Schedule background task to send emails to contacts
+        def send_emails_sync():
+            asyncio.run(send_trip_created_emails(
+                trip=trip_data,
+                contacts=contacts_for_email,
+                user_name=user_name,
+                activity_name=activity_obj.name
+            ))
+
+        background_tasks.add_task(send_emails_sync)
+        log.info(f"[Trips] Scheduled email notifications for {len(contacts_for_email)} contacts")
+
         return TripResponse(
             id=trip["id"],
             user_id=trip["user_id"],
             title=trip["title"],
-            activity=activity,
+            activity=activity_obj,
             start=to_iso8601(trip["start"]),
             eta=to_iso8601(trip["eta"]),
             grace_min=trip["grace_min"],

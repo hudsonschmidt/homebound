@@ -266,3 +266,219 @@ def create_overdue_notification_email_html(
 </body>
 </html>
 """
+
+
+def create_trip_created_email_html(
+    contact_name: str,
+    user_name: str,
+    plan_title: str,
+    activity: str,
+    start_time: str,
+    expected_time: str,
+    location: Optional[str] = None
+) -> str:
+    """Create HTML email template for trip created notifications to contacts."""
+    location_html = ""
+    if location:
+        location_html = f"<p><strong>📍 Location:</strong> {location}</p>"
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+        .container {{
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 30px;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #6C63FF, #4ECDC4);
+            color: white;
+            padding: 20px;
+            margin: -30px -30px 25px -30px;
+            border-radius: 12px 12px 0 0;
+            text-align: center;
+        }}
+        h1 {{
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+        }}
+        .trip-card {{
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }}
+        .trip-card p {{
+            margin: 8px 0;
+        }}
+        .info-box {{
+            background: #e8f4fd;
+            border-left: 4px solid #6C63FF;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏔️ You're an Emergency Contact</h1>
+        </div>
+
+        <p>Hi {contact_name},</p>
+
+        <p><strong>{user_name}</strong> has added you as an emergency contact for an upcoming trip on Homebound.</p>
+
+        <div class="trip-card">
+            <p><strong>🎯 Trip:</strong> {plan_title}</p>
+            <p><strong>🎿 Activity:</strong> {activity}</p>
+            <p><strong>🕐 Starting:</strong> {start_time}</p>
+            <p><strong>⏰ Expected back by:</strong> {expected_time}</p>
+            {location_html}
+        </div>
+
+        <div class="info-box">
+            <p><strong>What does this mean?</strong></p>
+            <p>If {user_name} doesn't check in by their expected return time (plus a grace period), you'll receive an alert email asking you to check on them.</p>
+        </div>
+
+        <p>No action is needed right now. We just wanted you to know they're heading out and trust you to be there if needed.</p>
+
+        <div class="footer">
+            <p>Safe travels! 🌟</p>
+            <p style="font-size: 12px; color: #999;">
+                Sent via Homebound - Personal Safety for Adventurers
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+def create_trip_completed_email_html(
+    contact_name: str,
+    user_name: str,
+    plan_title: str,
+    activity: str,
+) -> str:
+    """Create HTML email template for trip completed notifications to contacts."""
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+        .container {{
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 30px;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            padding: 20px;
+            margin: -30px -30px 25px -30px;
+            border-radius: 12px 12px 0 0;
+            text-align: center;
+        }}
+        h1 {{
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+        }}
+        .success-box {{
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }}
+        .success-box .icon {{
+            font-size: 48px;
+            margin-bottom: 10px;
+        }}
+        .trip-info {{
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>✅ Good News!</h1>
+        </div>
+
+        <p>Hi {contact_name},</p>
+
+        <div class="success-box">
+            <div class="icon">🎉</div>
+            <p><strong>{user_name}</strong> has checked in safely!</p>
+        </div>
+
+        <div class="trip-info">
+            <p><strong>Trip:</strong> {plan_title}</p>
+            <p><strong>Activity:</strong> {activity}</p>
+        </div>
+
+        <p>Their adventure is complete and they've arrived safely. No action needed on your part.</p>
+
+        <p>Thanks for being there as an emergency contact!</p>
+
+        <div class="footer">
+            <p>Until the next adventure! 🌄</p>
+            <p style="font-size: 12px; color: #999;">
+                Sent via Homebound - Personal Safety for Adventurers
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
