@@ -132,7 +132,7 @@ def test_create_trip():
 
     assert isinstance(trip, TripResponse)
     assert trip.title == "Hiking Trip"
-    assert trip.activity == "Hiking"
+    assert trip.activity.name == "Hiking"
     assert trip.grace_min == 30
     assert trip.location_text == "Mountain Trail"
     assert trip.gen_lat == 37.7749
@@ -308,7 +308,7 @@ def test_get_trip():
 
     assert trip.id == created.id
     assert trip.title == "Specific Trip"
-    assert trip.activity == "Camping"
+    assert trip.activity.name == "Camping"
 
     cleanup_test_data(user_id)
 

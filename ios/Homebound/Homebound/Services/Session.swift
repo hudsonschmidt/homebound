@@ -945,6 +945,32 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Start a planned trip (change status from 'planned' to 'active')
+    func startTrip(_ tripId: Int) async -> Bool {
+        do {
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(tripId)/start"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+
+            // Reload active plan to update UI
+            await loadActivePlan()
+
+            await MainActor.run {
+                self.notice = "Trip started!"
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to start trip: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
     func loadTimeline(planId: Int) async -> [TimelineEvent] {
         do {
             let response: TimelineResponse = try await withAuth { bearer in

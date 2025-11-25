@@ -308,6 +308,8 @@ struct CreatePlanView: View {
             await MainActor.run {
                 isCreating = false
                 if createdPlan != nil {
+                    // Notify that a trip was created so UpcomingTripsSection can refresh
+                    NotificationCenter.default.post(name: .tripCreated, object: nil)
                     dismiss()
                 } else {
                     errorMessage = session.lastError.isEmpty ? "Failed to create plan" : session.lastError

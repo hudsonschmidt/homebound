@@ -504,6 +504,49 @@ def complete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)
         return {"ok": True, "message": "Trip completed successfully"}
 
 
+@router.post("/{trip_id}/start")
+def start_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Start a planned trip (change status from 'planned' to 'active')"""
+    with db.engine.begin() as connection:
+        # Verify trip ownership and status
+        trip = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, status, start
+                FROM trips
+                WHERE id = :trip_id AND user_id = :user_id
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if not trip:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trip not found"
+            )
+
+        if trip.status != "planned":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Trip is not in planned status"
+            )
+
+        # Update trip status to active
+        connection.execute(
+            sqlalchemy.text(
+                """
+                UPDATE trips
+                SET status = 'active'
+                WHERE id = :trip_id
+                """
+            ),
+            {"trip_id": trip_id}
+        )
+
+        return {"ok": True, "message": "Trip started successfully"}
+
+
 @router.post("/{trip_id}/extend")
 def extend_trip(trip_id: int, minutes: int, user_id: int = Depends(auth.get_current_user_id)):
     """Extend the ETA of an active trip by the specified number of minutes"""

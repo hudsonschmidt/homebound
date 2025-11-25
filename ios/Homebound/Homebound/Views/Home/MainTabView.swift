@@ -189,10 +189,10 @@ struct BigNewTripCard: View {
                         .font(.title2)
                         .fontWeight(.bold)
 
-                    Text("Let someone know where you're going")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                    // Text("Let someone know where you're going")
+                    //     .font(.subheadline)
+                    //     .foregroundStyle(.secondary)
+                    //     .multilineTextAlignment(.center)
                 }
 
                 // Features list
@@ -509,11 +509,18 @@ struct ActivePlanCardCompact: View {
     }
 }
 
+// MARK: - Notification for trip creation
+extension Notification.Name {
+    static let tripCreated = Notification.Name("tripCreated")
+}
+
 // MARK: - Upcoming Trips Section
 struct UpcomingTripsSection: View {
     @EnvironmentObject var session: Session
     @State private var upcomingPlans: [Trip] = []
     @State private var currentTime = Date()
+    @State private var startingTripId: Int? = nil
+    @State private var failedTripIds: Set<Int> = [] // Track trips that failed to start
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -537,17 +544,32 @@ struct UpcomingTripsSection: View {
                 .cornerRadius(12)
             } else {
                 ForEach(upcomingPlans) { plan in
-                    UpcomingTripCard(plan: plan, currentTime: currentTime)
+                    UpcomingTripCard(
+                        plan: plan,
+                        currentTime: currentTime,
+                        isStarting: startingTripId == plan.id,
+                        onStartTrip: { tripId in
+                            startTrip(tripId)
+                        }
+                    )
                 }
             }
         }
         .onReceive(timer) { time in
             currentTime = time
+            // Don't auto-start - let user tap the Start button
         }
         .task {
             await loadUpcomingPlans()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task {
+                await loadUpcomingPlans()
+                // Reset failed trips on foreground - allow retry
+                failedTripIds.removeAll()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tripCreated)) { _ in
             Task {
                 await loadUpcomingPlans()
             }
@@ -566,22 +588,49 @@ struct UpcomingTripsSection: View {
                 .map { $0 }
         }
     }
+
+    func startTrip(_ tripId: Int) {
+        // Don't retry trips that already failed
+        guard !failedTripIds.contains(tripId) else { return }
+        guard startingTripId == nil else { return }
+
+        startingTripId = tripId
+        Task {
+            let success = await session.startTrip(tripId)
+            await MainActor.run {
+                startingTripId = nil
+                if success {
+                    // Remove from upcoming list and reload
+                    upcomingPlans.removeAll { $0.id == tripId }
+                } else {
+                    // Mark as failed so we don't retry automatically
+                    failedTripIds.insert(tripId)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Upcoming Trip Card
 struct UpcomingTripCard: View {
     let plan: Trip
     let currentTime: Date
+    var isStarting: Bool = false
+    var onStartTrip: ((Int) -> Void)? = nil
 
     var activity: ActivityTypeAdapter {
         ActivityTypeAdapter(activity: plan.activity)
+    }
+
+    var shouldStart: Bool {
+        plan.start_at <= currentTime
     }
 
     var countdown: String {
         let interval = plan.start_at.timeIntervalSince(currentTime)
 
         if interval <= 0 {
-            return "Starting now"
+            return isStarting ? "Starting..." : "Starting now"
         }
 
         return formatCountdown(interval)
@@ -594,8 +643,15 @@ struct UpcomingTripCard: View {
                 .fill(activity.primaryColor.opacity(0.2))
                 .frame(width: 40, height: 40)
                 .overlay(
-                    Text(activity.icon)
-                        .font(.title3)
+                    Group {
+                        if isStarting {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Text(activity.icon)
+                                .font(.title3)
+                        }
+                    }
                 )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -626,19 +682,36 @@ struct UpcomingTripCard: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(countdown)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Color.hbBrand)
+                if shouldStart && !isStarting {
+                    // Show "Start" button when time is up
+                    Button(action: {
+                        onStartTrip?(plan.id)
+                    }) {
+                        Text("Start")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.hbBrand)
+                            .cornerRadius(8)
+                    }
+                } else {
+                    Text(countdown)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(shouldStart ? .green : Color.hbBrand)
 
-                Text("until start")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    Text(shouldStart ? "" : "until start")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding()
-        .background(Color(.tertiarySystemBackground))
+        .background(shouldStart ? Color.green.opacity(0.1) : Color(.tertiarySystemBackground))
         .cornerRadius(12)
+        .animation(.easeInOut(duration: 0.3), value: shouldStart)
     }
 
     private func formatCountdown(_ interval: TimeInterval) -> String {

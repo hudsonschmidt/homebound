@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import pytest
+import asyncio
 from jose import jwt
 from jose.exceptions import JWTError, ExpiredSignatureError
 from src import database as db
@@ -18,6 +19,11 @@ from src.api.auth_endpoints import (
 from fastapi import HTTPException
 
 settings = config.get_settings()
+
+
+def run_async(coro):
+    """Helper to run async functions in sync tests"""
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def test_create_jwt_pair():
@@ -73,7 +79,7 @@ def test_request_magic_link_existing_user():
             )
 
     request = MagicLinkRequest(email="test@homeboundapp.com")
-    result = request_magic_link(request)
+    result = run_async(request_magic_link(request))
 
     assert result["ok"] is True
     assert "message" in result
@@ -115,7 +121,7 @@ def test_request_magic_link_nonexistent_user():
         )
 
     request = MagicLinkRequest(email=test_email)
-    result = request_magic_link(request)
+    result = run_async(request_magic_link(request))
 
     assert result["ok"] is True
     assert "message" in result
@@ -166,7 +172,7 @@ def test_auto_create_account_full_flow():
 
     # Step 1: Request magic link (should auto-create account)
     request = MagicLinkRequest(email=test_email)
-    result = request_magic_link(request)
+    result = run_async(request_magic_link(request))
     assert result["ok"] is True
 
     # Step 2: Get the magic code from database
@@ -241,10 +247,10 @@ def test_auto_create_vs_existing_user_last_login():
         )
 
     # Request magic link for new user (auto-create)
-    request_magic_link(MagicLinkRequest(email=new_email))
+    run_async(request_magic_link(MagicLinkRequest(email=new_email)))
 
     # Request magic link for existing user
-    request_magic_link(MagicLinkRequest(email=existing_email))
+    run_async(request_magic_link(MagicLinkRequest(email=existing_email)))
 
     # Check both users
     with db.engine.begin() as connection:
@@ -284,7 +290,7 @@ def test_auto_create_multiple_requests_same_email():
 
     # Request magic link 3 times
     for _ in range(3):
-        result = request_magic_link(MagicLinkRequest(email=test_email))
+        result = run_async(request_magic_link(MagicLinkRequest(email=test_email)))
         assert result["ok"] is True
 
     # Verify only one user was created
