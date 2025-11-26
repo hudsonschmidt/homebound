@@ -50,23 +50,20 @@ def test_create_and_get_contact():
     # Create a contact
     contact_data = ContactCreate(
         name="John Doe",
-        phone="+1234567890",
-        email="john@example.com"
+        email="test@homeboundapp.com"
     )
 
     contact = create_contact(contact_data, user_id=user_id)
 
     assert isinstance(contact, Contact)
     assert contact.name == "John Doe"
-    assert contact.phone == "+1234567890"
-    assert contact.email == "john@example.com"
+    assert contact.email == "test@homeboundapp.com"
     assert contact.user_id == user_id
 
     # Get the contact
     retrieved = get_contact(contact.id, user_id=user_id)
     assert retrieved.id == contact.id
     assert retrieved.name == contact.name
-    assert retrieved.phone == contact.phone
     assert retrieved.email == contact.email
 
     # Clean up
@@ -114,11 +111,11 @@ def test_get_all_contacts():
 
     # Create multiple contacts
     contact1 = create_contact(
-        ContactCreate(name="Alice Smith", phone="111", email="alice@example.com"),
+        ContactCreate(name="Alice Smith", email="test@homeboundapp.com"),
         user_id=user_id
     )
     contact2 = create_contact(
-        ContactCreate(name="Bob Jones", phone="222", email="bob@example.com"),
+        ContactCreate(name="Bob Jones", email="test@homeboundapp.com"),
         user_id=user_id
     )
 
@@ -176,17 +173,16 @@ def test_update_contact():
 
     # Create a contact
     contact = create_contact(
-        ContactCreate(name="Original Name", phone="111", email="old@example.com"),
+        ContactCreate(name="Original Name", email="test@homeboundapp.com"),
         user_id=user_id
     )
 
     # Update the contact
-    update_data = ContactUpdate(name="New Name", email="new@example.com")
+    update_data = ContactUpdate(name="New Name", email="test@homeboundapp.com")
     updated = update_contact(contact.id, update_data, user_id=user_id)
 
     assert updated.name == "New Name"
-    assert updated.phone == "111"  # Should remain unchanged
-    assert updated.email == "new@example.com"
+    assert updated.email == "test@homeboundapp.com"
 
     # Clean up
     with db.engine.begin() as connection:
@@ -233,7 +229,7 @@ def test_delete_contact():
 
     # Create a contact
     contact = create_contact(
-        ContactCreate(name="To Delete", phone="999", email="delete@example.com"),
+        ContactCreate(name="To Delete", email="test@homeboundapp.com"),
         user_id=user_id
     )
 
@@ -310,7 +306,7 @@ def test_contact_id_is_integer():
 
     # Create contact
     contact = create_contact(
-        ContactCreate(name="Test Contact", phone="111", email="test@example.com"),
+        ContactCreate(name="Test Contact", email="test@homeboundapp.com"),
         user_id=user_id
     )
 
@@ -384,7 +380,7 @@ def test_user_cannot_access_other_users_contacts():
 
     # User 1 creates a contact
     contact1 = create_contact(
-        ContactCreate(name="User1 Contact", phone="111", email="user1@example.com"),
+        ContactCreate(name="User1 Contact", email="test@homeboundapp.com"),
         user_id=user1_id
     )
 

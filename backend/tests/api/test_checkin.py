@@ -8,7 +8,7 @@ from src.api.checkin import (
     checkin_with_token,
     checkout_with_token
 )
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 
 
 def setup_test_trip_with_tokens():
@@ -59,16 +59,15 @@ def setup_test_trip_with_tokens():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO contacts (user_id, name, phone, email)
-                VALUES (:user_id, :name, :phone, :email)
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
                 RETURNING id
                 """
             ),
             {
                 "user_id": user_id,
                 "name": "Emergency Contact",
-                "phone": "+1234567890",
-                "email": "emergency@example.com"
+                "email": "test@homeboundapp.com"
             }
         )
         contact_id = result.fetchone()[0]
@@ -201,7 +200,8 @@ def test_checkout_with_valid_token():
     user_id, trip_id, _, checkout_token = setup_test_trip_with_tokens()
 
     # Check out
-    response = checkout_with_token(checkout_token)
+    background_tasks = BackgroundTasks()
+    response = checkout_with_token(checkout_token, background_tasks)
 
     assert isinstance(response, CheckinResponse)
     assert response.ok is True
@@ -239,8 +239,9 @@ def test_checkout_with_valid_token():
 
 def test_checkout_with_invalid_token():
     """Test checking out with an invalid token"""
+    background_tasks = BackgroundTasks()
     with pytest.raises(HTTPException) as exc_info:
-        checkout_with_token("invalid_checkout_token")
+        checkout_with_token("invalid_checkout_token", background_tasks)
 
     assert exc_info.value.status_code == 404
     assert "invalid" in exc_info.value.detail.lower()
@@ -251,7 +252,8 @@ def test_checkin_after_checkout():
     user_id, _, checkin_token, checkout_token = setup_test_trip_with_tokens()
 
     # Check out first
-    checkout_with_token(checkout_token)
+    background_tasks = BackgroundTasks()
+    checkout_with_token(checkout_token, background_tasks)
 
     # Try to check in after checkout
     with pytest.raises(HTTPException) as exc_info:
@@ -296,11 +298,12 @@ def test_checkout_already_completed_trip():
     user_id, _, _, checkout_token = setup_test_trip_with_tokens()
 
     # First checkout
-    checkout_with_token(checkout_token)
+    background_tasks = BackgroundTasks()
+    checkout_with_token(checkout_token, background_tasks)
 
     # Try to checkout again
     with pytest.raises(HTTPException) as exc_info:
-        checkout_with_token(checkout_token)
+        checkout_with_token(checkout_token, background_tasks)
 
     assert exc_info.value.status_code == 404
 

@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import resend
 import logging
-from ..config import settings
-from __future__ import annotations
 from typing import Optional, List, Dict, Any
+
+from ..config import settings
 
 log = logging.getLogger(__name__)
 

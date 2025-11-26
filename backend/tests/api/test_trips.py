@@ -1,5 +1,6 @@
 """Tests for trips API endpoints"""
 import pytest
+from unittest.mock import MagicMock
 from datetime import datetime, timezone, timedelta
 from src import database as db
 import sqlalchemy
@@ -15,7 +16,7 @@ from src.api.trips import (
     delete_trip,
     get_trip_timeline
 )
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 
 
 def setup_test_user_and_contact():
@@ -66,15 +67,14 @@ def setup_test_user_and_contact():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO contacts (user_id, name, phone, email)
-                VALUES (:user_id, :name, :phone, :email)
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
                 RETURNING id
                 """
             ),
             {
                 "user_id": user_id,
                 "name": "Emergency Contact",
-                "phone": "+1234567890",
                 "email": "emergency@example.com"
             }
         )
@@ -128,7 +128,8 @@ def test_create_trip():
         contact1=contact_id
     )
 
-    trip = create_trip(trip_data, user_id=user_id)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
 
     assert isinstance(trip, TripResponse)
     assert trip.title == "Hiking Trip"
@@ -160,8 +161,9 @@ def test_create_trip_invalid_activity():
         contact1=contact_id
     )
 
+    background_tasks = MagicMock(spec=BackgroundTasks)
     with pytest.raises(HTTPException) as exc_info:
-        create_trip(trip_data, user_id=user_id)
+        create_trip(trip_data, background_tasks, user_id=user_id)
 
     assert exc_info.value.status_code == 404
     assert "activity" in exc_info.value.detail.lower()
@@ -183,8 +185,9 @@ def test_create_trip_invalid_contact():
         contact1=999999  # Non-existent contact
     )
 
+    background_tasks = MagicMock(spec=BackgroundTasks)
     with pytest.raises(HTTPException) as exc_info:
-        create_trip(trip_data, user_id=user_id)
+        create_trip(trip_data, background_tasks, user_id=user_id)
 
     assert exc_info.value.status_code == 404
     assert "contact" in exc_info.value.detail.lower()
@@ -198,6 +201,7 @@ def test_get_trips():
 
     # Create multiple trips
     now = datetime.now(timezone.utc)
+    background_tasks = MagicMock(spec=BackgroundTasks)
 
     create_trip(
         TripCreate(
@@ -211,6 +215,7 @@ def test_get_trips():
             gen_lon=-122.4194,
             contact1=contact_id
         ),
+        background_tasks,
         user_id=user_id
     )
 
@@ -226,6 +231,7 @@ def test_get_trips():
             gen_lon=-122.4300,
             contact1=contact_id
         ),
+        background_tasks,
         user_id=user_id
     )
 
@@ -259,7 +265,8 @@ def test_get_active_trip():
         contact1=contact_id
     )
 
-    create_trip(trip_data, user_id=user_id)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    create_trip(trip_data, background_tasks, user_id=user_id)
 
     # Get active trip
     active = get_active_trip(user_id=user_id)
@@ -288,6 +295,7 @@ def test_get_trip():
 
     # Create trip
     now = datetime.now(timezone.utc)
+    background_tasks = MagicMock(spec=BackgroundTasks)
     created = create_trip(
         TripCreate(
             title="Specific Trip",
@@ -300,6 +308,7 @@ def test_get_trip():
             gen_lon=-122.4194,
             contact1=contact_id
         ),
+        background_tasks,
         user_id=user_id
     )
 
@@ -328,6 +337,7 @@ def test_complete_trip():
 
     # Create trip
     now = datetime.now(timezone.utc)
+    background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
             title="Complete Me",
@@ -340,6 +350,7 @@ def test_complete_trip():
             gen_lon=-122.4194,
             contact1=contact_id
         ),
+        background_tasks,
         user_id=user_id
     )
 
@@ -361,6 +372,7 @@ def test_complete_already_completed_trip():
 
     # Create and complete trip
     now = datetime.now(timezone.utc)
+    background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
             title="Already Complete",
@@ -373,6 +385,7 @@ def test_complete_already_completed_trip():
             gen_lon=-122.4194,
             contact1=contact_id
         ),
+        background_tasks,
         user_id=user_id
     )
 
@@ -394,6 +407,7 @@ def test_delete_trip():
 
     # Create trip
     now = datetime.now(timezone.utc)
+    background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
             title="Delete Me",
@@ -406,6 +420,7 @@ def test_delete_trip():
             gen_lon=-122.4194,
             contact1=contact_id
         ),
+        background_tasks,
         user_id=user_id
     )
 
@@ -436,6 +451,7 @@ def test_get_trip_timeline():
 
     # Create trip
     now = datetime.now(timezone.utc)
+    background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
             title="Timeline Trip",
@@ -448,6 +464,7 @@ def test_get_trip_timeline():
             gen_lon=-122.4194,
             contact1=contact_id
         ),
+        background_tasks,
         user_id=user_id
     )
 

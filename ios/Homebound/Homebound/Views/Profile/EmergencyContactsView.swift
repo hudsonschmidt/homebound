@@ -5,12 +5,12 @@ struct EmergencyContactsView: View {
     @State private var savedContacts: [Contact] = []
     @State private var showingAddContact = false
     @State private var newContactName = ""
-    @State private var newContactPhone = ""
     @State private var newContactEmail = ""
     @State private var isLoading = true
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var hasLoadedInitially = false
+    @State private var contactToEdit: Contact?
 
     var body: some View {
         ZStack {
@@ -42,13 +42,13 @@ struct EmergencyContactsView: View {
                     if !savedContacts.isEmpty {
                         Section("Saved Contacts") {
                             ForEach(savedContacts) { contact in
-                                ContactRow(
-                                    contact: contact,
-                                    onDelete: {
-                                        deleteContact(contact)
+                                ContactRow(contact: contact)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        contactToEdit = contact
                                     }
-                                )
                             }
+                            .onDelete(perform: deleteContacts)
                         }
                         .headerProminence(.increased)
                     }
@@ -71,6 +71,10 @@ struct EmergencyContactsView: View {
                             Text("When creating a trip, you must select between 1-3 emergency contacts who will be notified if you don't check in on time.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+
+                            Text("Swipe left on a contact to delete it, or tap to edit.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 8)
                     }
@@ -90,14 +94,25 @@ struct EmergencyContactsView: View {
         .sheet(isPresented: $showingAddContact) {
             AddEmergencyContactSheet(
                 name: $newContactName,
-                phone: $newContactPhone,
                 email: $newContactEmail,
                 showingSheet: $showingAddContact,
                 onAdd: {
                     Task {
-                        print("DEBUG: onAdd callback triggered")
                         await addContact()
                     }
+                }
+            )
+        }
+        .sheet(item: $contactToEdit) { contact in
+            EditEmergencyContactSheet(
+                contact: contact,
+                onSave: { name, email in
+                    Task {
+                        await updateContact(contact: contact, name: name, email: email)
+                    }
+                },
+                onDismiss: {
+                    contactToEdit = nil
                 }
             )
         }
@@ -109,64 +124,66 @@ struct EmergencyContactsView: View {
     }
 
     private func loadContacts() async {
-        print("DEBUG loadContacts: Starting to load contacts")
         isLoading = true
         let contacts = await session.loadContacts()
-        print("DEBUG loadContacts: Loaded \(contacts.count) contacts from server")
         await MainActor.run {
-            print("DEBUG loadContacts: Updating UI with contacts")
             self.savedContacts = contacts
             self.isLoading = false
-            print("DEBUG loadContacts: UI updated, savedContacts now has \(self.savedContacts.count) items")
         }
     }
 
     private func addContact() async {
-        print("DEBUG: Starting addContact()")
-        print("DEBUG: Contact Name: \(newContactName)")
-        print("DEBUG: Contact Phone: \(newContactPhone)")
-        print("DEBUG: Contact Email: \(newContactEmail)")
-
         let savedContact = await session.addContact(
             name: newContactName,
-            phone: newContactPhone.isEmpty ? nil : newContactPhone,
-            email: newContactEmail.isEmpty ? nil : newContactEmail
+            email: newContactEmail
         )
-        print("DEBUG: addContact returned: \(String(describing: savedContact))")
 
         if let savedContact = savedContact {
-            print("DEBUG: Contact saved successfully, updating UI...")
             await MainActor.run {
-                print("DEBUG: Before append - savedContacts count: \(savedContacts.count)")
-                // Use the contact returned from the server (with server ID)
                 savedContacts.append(savedContact)
-                print("DEBUG: After append - savedContacts count: \(savedContacts.count)")
-                print("DEBUG: Contacts in list: \(savedContacts)")
-
-                // Clear the form
                 newContactName = ""
-                newContactPhone = ""
                 newContactEmail = ""
                 showingAddContact = false
-                print("DEBUG: Contact added successfully and sheet dismissed")
             }
-            // Don't reload contacts here - it causes a race condition where the
-            // server hasn't fully committed the new contact yet
         } else {
             await MainActor.run {
-                print("DEBUG: Save failed. Session error: \(session.lastError)")
                 errorMessage = session.lastError.isEmpty ? "Failed to add contact. Please try again." : session.lastError
                 showError = true
             }
         }
     }
 
-    private func deleteContact(_ contact: Contact) {
-        Task {
-            let success = await session.deleteContact(contact.id)
-            if success {
-                await MainActor.run {
-                    savedContacts.removeAll { $0.id == contact.id }
+    private func updateContact(contact: Contact, name: String, email: String) async {
+        let success = await session.updateContact(contactId: contact.id, name: name, email: email)
+        if success {
+            await MainActor.run {
+                if let index = savedContacts.firstIndex(where: { $0.id == contact.id }) {
+                    savedContacts[index] = Contact(id: contact.id, user_id: contact.user_id, name: name, phone: nil, email: email)
+                }
+                contactToEdit = nil
+            }
+        } else {
+            await MainActor.run {
+                errorMessage = session.lastError.isEmpty ? "Failed to update contact. Please try again." : session.lastError
+                showError = true
+            }
+        }
+    }
+
+    private func deleteContacts(at offsets: IndexSet) {
+        for index in offsets {
+            let contact = savedContacts[index]
+            Task {
+                let success = await session.deleteContact(contact.id)
+                if success {
+                    await MainActor.run {
+                        savedContacts.removeAll { $0.id == contact.id }
+                    }
+                } else {
+                    await MainActor.run {
+                        errorMessage = session.lastError.isEmpty ? "Failed to delete contact." : session.lastError
+                        showError = true
+                    }
                 }
             }
         }
@@ -176,8 +193,6 @@ struct EmergencyContactsView: View {
 // MARK: - Saved Contact Row
 struct ContactRow: View {
     let contact: Contact
-    let onDelete: () -> Void
-    @State private var showDeleteAlert = false
 
     var body: some View {
         HStack {
@@ -202,12 +217,6 @@ struct ContactRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                if let phone = contact.phone, !phone.isEmpty {
-                    Text(phone)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 if let email = contact.email, !email.isEmpty {
                     Text(email)
                         .font(.caption)
@@ -217,30 +226,17 @@ struct ContactRow: View {
 
             Spacer()
 
-            Button(action: {
-                showDeleteAlert = true
-            }) {
-                Image(systemName: "trash")
-                    .font(.callout)
-                    .foregroundStyle(.red)
-            }
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
-        .alert("Delete Contact", isPresented: $showDeleteAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                onDelete()
-            }
-        } message: {
-            Text("Are you sure you want to delete \(contact.name)?")
-        }
     }
 }
 
 // MARK: - Add Contact Sheet
 struct AddEmergencyContactSheet: View {
     @Binding var name: String
-    @Binding var phone: String
     @Binding var email: String
     @Binding var showingSheet: Bool
     let onAdd: () -> Void
@@ -248,7 +244,8 @@ struct AddEmergencyContactSheet: View {
 
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        email.contains("@")
     }
 
     var body: some View {
@@ -259,18 +256,14 @@ struct AddEmergencyContactSheet: View {
                         .textContentType(.name)
                         .autocapitalization(.words)
 
-                    TextField("Phone Number", text: $phone)
-                        .keyboardType(.phonePad)
-                        .textContentType(.telephoneNumber)
-
-                    TextField("Email (Optional)", text: $email)
+                    TextField("Email", text: $email)
                         .keyboardType(.emailAddress)
                         .textContentType(.emailAddress)
                         .autocapitalization(.none)
                 }
 
                 Section {
-                    Text("This contact will be saved to your account for quick selection when creating trips.")
+                    Text("This contact will be saved to your account for quick selection when creating trips. They will receive email notifications about your trips.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -286,15 +279,78 @@ struct AddEmergencyContactSheet: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Add") {
-                        print("DEBUG AddEmergencyContactSheet: Add button tapped")
-                        print("DEBUG AddEmergencyContactSheet: isValid = \(isValid)")
-                        print("DEBUG AddEmergencyContactSheet: Calling onAdd()")
                         onAdd()
-                        // Don't dismiss immediately - let the async function handle it
                     }
                     .fontWeight(.semibold)
                     .disabled(!isValid)
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Edit Contact Sheet
+struct EditEmergencyContactSheet: View {
+    let contact: Contact
+    let onSave: (String, String) -> Void
+    let onDismiss: () -> Void
+
+    @State private var name: String = ""
+    @State private var email: String = ""
+    @Environment(\.dismiss) var dismiss
+
+    var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        email.contains("@")
+    }
+
+    var hasChanges: Bool {
+        name != contact.name || email != (contact.email ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Contact Information") {
+                    TextField("Name", text: $name)
+                        .textContentType(.name)
+                        .autocapitalization(.words)
+
+                    TextField("Email", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .autocapitalization(.none)
+                }
+
+                Section {
+                    Text("Update this contact's information. They will receive email notifications about your trips.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Edit Contact")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        onDismiss()
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        onSave(name, email)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!isValid || !hasChanges)
+                }
+            }
+            .onAppear {
+                name = contact.name
+                email = contact.email ?? ""
             }
         }
     }

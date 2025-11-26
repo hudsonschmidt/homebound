@@ -2,18 +2,17 @@ import Foundation
 import SwiftUI
 
 // MARK: - Contact Model (for user's saved contacts)
-struct Contact: Identifiable, Codable {
+struct Contact: Identifiable, Codable, Hashable {
     let id: Int
     let user_id: Int
     let name: String
-    let phone: String?
+    let phone: String?  // Deprecated - no longer used
     let email: String?
 }
 
 struct ContactCreateRequest: Codable {
     var name: String
-    var phone: String?
-    var email: String?
+    var email: String
 }
 
 struct TripCreateRequest: Codable {

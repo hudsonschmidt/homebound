@@ -27,7 +27,7 @@ struct CreatePlanView: View {
     @State private var contacts: [EmergencyContact] = []
     @State private var showAddContact = false
     @State private var newContactName = ""
-    @State private var newContactPhone = ""
+    @State private var newContactEmail = ""
 
     // UI State
     @State private var isCreating = false
@@ -85,7 +85,7 @@ struct CreatePlanView: View {
                             contacts: $contacts,
                             showAddContact: $showAddContact,
                             newContactName: $newContactName,
-                            newContactPhone: $newContactPhone
+                            newContactEmail: $newContactEmail
                         )
                         .environmentObject(session)
                         .tag(3)
@@ -163,15 +163,15 @@ struct CreatePlanView: View {
             .sheet(isPresented: $showAddContact) {
                 AddContactSheet(
                     name: $newContactName,
-                    phone: $newContactPhone,
+                    email: $newContactEmail,
                     onAdd: {
                         let contact = EmergencyContact(
                             name: newContactName,
-                            phone: newContactPhone
+                            email: newContactEmail
                         )
                         contacts.append(contact)
                         newContactName = ""
-                        newContactPhone = ""
+                        newContactEmail = ""
                         showAddContact = false
                     }
                 )
@@ -276,7 +276,7 @@ struct CreatePlanView: View {
                     contactIds.append(savedId)
                 } else if contactsToSave.contains(where: { $0.id == contact.id }) {
                     // User confirmed to save this new contact
-                    if let savedContact = await session.addContact(name: contact.name, phone: contact.phone, email: nil) {
+                    if let savedContact = await session.addContact(name: contact.name, email: contact.email) {
                         contactIds.append(savedContact.id)
                     } else {
                         await MainActor.run {
@@ -290,7 +290,7 @@ struct CreatePlanView: View {
                     // New contact that user chose not to save - we still need to handle this
                     // For now, we'll create it temporarily to get an ID
                     // TODO: Backend should support ephemeral contacts for trips
-                    if let savedContact = await session.addContact(name: contact.name, phone: contact.phone, email: nil) {
+                    if let savedContact = await session.addContact(name: contact.name, email: contact.email) {
                         contactIds.append(savedContact.id)
                     } else {
                         await MainActor.run {
@@ -1308,7 +1308,7 @@ struct Step3EmergencyContacts: View {
     @Binding var contacts: [EmergencyContact]
     @Binding var showAddContact: Bool
     @Binding var newContactName: String
-    @Binding var newContactPhone: String
+    @Binding var newContactEmail: String
 
     @State private var savedContacts: [Contact] = []
     @State private var isLoadingSaved = false
@@ -1587,7 +1587,7 @@ struct ContactCard: View {
                 Text(contact.name)
                     .font(.subheadline)
                     .fontWeight(.medium)
-                Text(contact.phone)
+                Text(contact.email)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1609,29 +1609,36 @@ struct ContactCard: View {
 struct EmergencyContact: Identifiable {
     let id = UUID()
     let name: String
-    let phone: String
+    let email: String
     let savedContactId: Int?  // If nil, this is a new contact; if set, it's from saved contacts
 
-    init(name: String, phone: String, savedContactId: Int? = nil) {
+    init(name: String, email: String, savedContactId: Int? = nil) {
         self.name = name
-        self.phone = phone
+        self.email = email
         self.savedContactId = savedContactId
     }
 }
 
 struct AddContactSheet: View {
     @Binding var name: String
-    @Binding var phone: String
+    @Binding var email: String
     let onAdd: () -> Void
     @Environment(\.dismiss) var dismiss
+
+    var isValidEmail: Bool {
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        email.contains("@")
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     TextField("Contact Name", text: $name)
-                    TextField("Phone Number", text: $phone)
-                        .keyboardType(.phonePad)
+                    TextField("Email Address", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .autocapitalization(.none)
                 }
             }
             .navigationTitle("Add Contact")
@@ -1647,7 +1654,7 @@ struct AddContactSheet: View {
                         onAdd()
                         dismiss()
                     }
-                    .disabled(name.isEmpty || phone.isEmpty)
+                    .disabled(name.isEmpty || !isValidEmail)
                 }
             }
         }
@@ -1728,17 +1735,17 @@ struct ContactsSelectionSheet: View {
                         let newContacts = savedContacts
                             .filter { tempSelection.contains($0.id) }
                             .compactMap { saved -> EmergencyContact? in
-                                // Only include contacts with a phone number
-                                guard let phone = saved.phone, !phone.isEmpty else {
+                                // Only include contacts with an email
+                                guard let email = saved.email, !email.isEmpty else {
                                     return nil
                                 }
                                 // Don't add duplicates
-                                guard !selectedContacts.contains(where: { $0.phone == phone }) else {
+                                guard !selectedContacts.contains(where: { $0.email == email }) else {
                                     return nil
                                 }
                                 return EmergencyContact(
                                     name: saved.name,
-                                    phone: phone,
+                                    email: email,
                                     savedContactId: saved.id  // Pass the saved contact ID to prevent duplication
                                 )
                             }
@@ -1761,7 +1768,7 @@ struct ContactsSelectionSheet: View {
             // Pre-select contacts that are already selected
             tempSelection = Set(
                 selectedContacts.compactMap { selected in
-                    savedContacts.first(where: { $0.phone == selected.phone })?.id
+                    savedContacts.first(where: { $0.email == selected.email })?.id
                 }
             )
         }
@@ -1796,10 +1803,6 @@ struct ContactSelectionRow: View {
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundStyle(.primary)
-
-                    Text(contact.phone ?? "")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     if let email = contact.email, !email.isEmpty {
                         Text(email)

@@ -205,6 +205,21 @@ def delete_contact(contact_id: int, user_id: int = Depends(auth.get_current_user
                 detail=f"Cannot delete contact. It is currently being used by trip: {trips_using_contact.title}"
             )
 
+        # NULL out contact references in completed trips (they no longer need the reference)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                UPDATE trips
+                SET contact1 = CASE WHEN contact1 = :contact_id THEN NULL ELSE contact1 END,
+                    contact2 = CASE WHEN contact2 = :contact_id THEN NULL ELSE contact2 END,
+                    contact3 = CASE WHEN contact3 = :contact_id THEN NULL ELSE contact3 END
+                WHERE (contact1 = :contact_id OR contact2 = :contact_id OR contact3 = :contact_id)
+                AND status = 'completed'
+                """
+            ),
+            {"contact_id": contact_id}
+        )
+
         # Delete contact
         connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE id = :contact_id"),

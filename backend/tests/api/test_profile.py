@@ -568,19 +568,17 @@ def test_delete_account_with_contacts():
         connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO contacts (user_id, name, phone, email)
+                INSERT INTO contacts (user_id, name, email)
                 VALUES
-                    (:user_id, :name1, :phone1, :email1),
-                    (:user_id, :name2, :phone2, :email2)
+                    (:user_id, :name1, :email1),
+                    (:user_id, :name2, :email2)
                 """
             ),
             {
                 "user_id": user_id,
                 "name1": "Contact One",
-                "phone1": "111-1111",
                 "email1": "one@example.com",
                 "name2": "Contact Two",
-                "phone2": "222-2222",
                 "email2": "two@example.com"
             }
         )
@@ -658,15 +656,14 @@ def test_delete_account_with_trips_and_events():
         contact_result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO contacts (user_id, name, phone, email)
-                VALUES (:user_id, :name, :phone, :email)
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
                 RETURNING id
                 """
             ),
             {
                 "user_id": user_id,
                 "name": "Emergency Contact",
-                "phone": "555-0001",
                 "email": "emergency@example.com"
             }
         )
@@ -952,15 +949,14 @@ def test_delete_account_full_cascade():
         contact_result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO contacts (user_id, name, phone, email)
-                VALUES (:user_id, :name, :phone, :email)
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
                 RETURNING id
                 """
             ),
             {
                 "user_id": user_id,
                 "name": "Emergency Contact",
-                "phone": "555-1234",
                 "email": "emergency@example.com"
             }
         )

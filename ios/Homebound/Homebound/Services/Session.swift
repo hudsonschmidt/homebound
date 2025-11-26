@@ -1130,27 +1130,15 @@ final class Session: ObservableObject {
         }
     }
 
-    func addContact(name: String, phone: String?, email: String?) async -> Contact? {
-        print("DEBUG Session: addContact called")
-        print("DEBUG Session: Contact to add - name: \(name), phone: \(phone ?? "nil"), email: \(email ?? "nil")")
-
+    func addContact(name: String, email: String) async -> Contact? {
         struct AddContactRequest: Encodable {
             let name: String
-            let phone: String?
-            let email: String?
+            let email: String
         }
 
-        let requestBody = AddContactRequest(
-            name: name,
-            phone: phone,
-            email: email
-        )
-
-        print("DEBUG Session: Request body: \(requestBody)")
-        print("DEBUG Session: URL: \(url("/api/v1/contacts/"))")
+        let requestBody = AddContactRequest(name: name, email: email)
 
         do {
-            print("DEBUG Session: Making API call...")
             let response: Contact = try await withAuth { bearer in
                 try await self.api.post(
                     self.url("/api/v1/contacts/"),
@@ -1158,15 +1146,35 @@ final class Session: ObservableObject {
                     bearer: bearer
                 )
             }
-            print("DEBUG Session: API call successful. Response: \(response)")
-            // Return the saved contact from the server (with server-generated ID)
             return response
         } catch {
-            print("DEBUG Session: API call failed - Error: \(error)")
             await MainActor.run {
                 self.lastError = "Failed to add contact: \(error.localizedDescription)"
             }
             return nil
+        }
+    }
+
+    func updateContact(contactId: Int, name: String, email: String) async -> Bool {
+        struct UpdateContactRequest: Encodable {
+            let name: String
+            let email: String
+        }
+
+        do {
+            let _: Contact = try await withAuth { bearer in
+                try await self.api.put(
+                    self.url("/api/v1/contacts/\(contactId)"),
+                    body: UpdateContactRequest(name: name, email: email),
+                    bearer: bearer
+                )
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to update contact: \(error.localizedDescription)"
+            }
+            return false
         }
     }
 

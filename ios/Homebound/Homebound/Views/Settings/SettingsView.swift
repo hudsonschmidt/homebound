@@ -458,17 +458,14 @@ struct AccountView: View {
     @State private var firstName = ""
     @State private var lastName = ""
     @State private var age: Int = 0
-    @State private var phone = ""
 
     @State private var editingFirstName = false
     @State private var editingLastName = false
     @State private var editingAge = false
-    @State private var editingPhone = false
 
     @State private var tempFirstName = ""
     @State private var tempLastName = ""
     @State private var tempAge = ""
-    @State private var tempPhone = ""
 
     @State private var showingImagePicker = false
     @State private var selectedImage: PhotosPickerItem?
@@ -647,38 +644,6 @@ struct AccountView: View {
                             .foregroundStyle(Color.hbBrand)
                     }
                 }
-
-                // Phone
-                HStack {
-                    Text("Phone")
-                        .foregroundStyle(editingPhone ? Color.hbBrand : .primary)
-                    Spacer()
-                    if editingPhone {
-                        TextField("Phone", text: $tempPhone)
-                            .multilineTextAlignment(.trailing)
-                            .textFieldStyle(.plain)
-                            .keyboardType(.phonePad)
-                            .onSubmit {
-                                savePhone()
-                            }
-                    } else {
-                        Text(phone.isEmpty ? "Not set" : phone)
-                            .foregroundStyle(phone.isEmpty ? .secondary : .primary)
-                    }
-
-                    Button(action: {
-                        if editingPhone {
-                            savePhone()
-                        } else {
-                            tempPhone = phone
-                            editingPhone = true
-                        }
-                    }) {
-                        Text(editingPhone ? "Save" : "Edit")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.hbBrand)
-                    }
-                }
             }
 
             // Log Out
@@ -762,7 +727,6 @@ struct AccountView: View {
             lastName = components.count > 1 ? String(components[1]) : ""
         }
         age = session.userAge ?? 0
-        phone = session.userPhone ?? ""
     }
 
     private func saveFirstName() {
@@ -785,12 +749,6 @@ struct AccountView: View {
         editingAge = false
     }
 
-    private func savePhone() {
-        phone = tempPhone
-        updateProfile()
-        editingPhone = false
-    }
-
     private func updateProfile() {
         Task {
             let trimmedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -798,8 +756,7 @@ struct AccountView: View {
             _ = await session.updateProfile(
                 firstName: trimmedFirstName.isEmpty ? nil : trimmedFirstName,
                 lastName: trimmedLastName.isEmpty ? nil : trimmedLastName,
-                age: age > 0 ? age : nil,
-                phone: phone.isEmpty ? nil : phone
+                age: age > 0 ? age : nil
             )
         }
     }

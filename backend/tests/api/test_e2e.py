@@ -1,5 +1,6 @@
 """End-to-end tests for complete user workflows"""
 import pytest
+from unittest.mock import MagicMock
 from src import database as db
 import sqlalchemy
 from src.api.profile import (
@@ -19,7 +20,7 @@ from src.api.trips import (
     TripCreate
 )
 from datetime import datetime, timedelta
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 
 
 def test_e2e_complete_user_journey():
@@ -97,11 +98,11 @@ def test_e2e_complete_user_journey():
 
     # Step 3: Add emergency contacts
     contact1 = create_contact(
-        ContactCreate(name="Emergency One", phone="555-0001", email="em1@example.com"),
+        ContactCreate(name="Emergency One", email="em1@example.com"),
         user_id=user_id
     )
     contact2 = create_contact(
-        ContactCreate(name="Emergency Two", phone="555-0002", email=None),
+        ContactCreate(name="Emergency Two", email="em2@example.com"),
         user_id=user_id
     )
 
@@ -121,7 +122,8 @@ def test_e2e_complete_user_journey():
         notes="End-to-end test trip",
         contact1=contact1.id
     )
-    trip = create_trip(trip_data, user_id=user_id)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
     assert trip.title == "Test Journey Trip"
 
     # Step 5: Verify all data exists before deletion
@@ -324,27 +326,24 @@ def test_e2e_contact_management_workflow():
         )
         user_id = result.fetchone()[0]
 
-    # Step 2: Add contacts with various optional field combinations
+    # Step 2: Add contacts (email is required now)
     contact1 = create_contact(
-        ContactCreate(name="Full Contact", phone="555-1111", email="full@example.com"),
+        ContactCreate(name="Full Contact", email="full@example.com"),
         user_id=user_id
     )
-    assert contact1.phone == "555-1111"
     assert contact1.email == "full@example.com"
 
     contact2 = create_contact(
-        ContactCreate(name="Phone Only", phone="555-2222", email=None),
+        ContactCreate(name="Contact Two", email="two@example.com"),
         user_id=user_id
     )
-    assert contact2.phone == "555-2222"
-    assert contact2.email is None
+    assert contact2.email == "two@example.com"
 
     contact3 = create_contact(
-        ContactCreate(name="Email Only", phone="555-0000", email="emailonly@example.com"),
+        ContactCreate(name="Contact Three", email="three@example.com"),
         user_id=user_id
     )
-    assert contact3.phone == "555-0000"
-    assert contact3.email == "emailonly@example.com"
+    assert contact3.email == "three@example.com"
 
     # Step 3: Verify all contacts are retrieved
     contacts = get_contacts(user_id=user_id)
@@ -354,9 +353,11 @@ def test_e2e_contact_management_workflow():
     for contact in contacts:
         assert isinstance(contact.id, int)
         assert isinstance(contact.user_id, int)
+        assert isinstance(contact.email, str)
 
     # Step 5: Create a trip using these contacts
     now = datetime.utcnow()
+    background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
             title="Contact Test Trip",
@@ -366,6 +367,7 @@ def test_e2e_contact_management_workflow():
             grace_min=30,
             contact1=contact1.id
         ),
+        background_tasks,
         user_id=user_id
     )
     assert trip.id is not None
@@ -442,7 +444,6 @@ def test_e2e_trip_lifecycle():
     contact = create_contact(
         ContactCreate(
             name="Emergency Contact",
-            phone="+1234567890",
             email="emergency@example.com"
         ),
         user_id=user_id
@@ -450,6 +451,7 @@ def test_e2e_trip_lifecycle():
 
     # Step 3: Create trip
     now = datetime.utcnow()
+    background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
             title="Lifecycle Test Trip",
@@ -461,6 +463,7 @@ def test_e2e_trip_lifecycle():
             notes="Testing trip lifecycle",
             contact1=contact.id
         ),
+        background_tasks,
         user_id=user_id
     )
 
@@ -652,9 +655,9 @@ def test_e2e_ios_sync_scenario():
         )
         user_id = result.fetchone()[0]
 
-    # iOS creates contact with optional phone
+    # iOS creates contact (email is required)
     contact = create_contact(
-        ContactCreate(name="Test Contact", phone="555-0000", email="test@example.com"),
+        ContactCreate(name="Test Contact", email="test@example.com"),
         user_id=user_id
     )
 
@@ -662,7 +665,6 @@ def test_e2e_ios_sync_scenario():
     assert isinstance(contact.id, int), "ID must be int for iOS"
     assert isinstance(contact.user_id, int), "user_id must be int for iOS"
     assert contact.name == "Test Contact"
-    assert contact.phone == "555-0000", "phone was set to 555-0000"
     assert contact.email == "test@example.com"
 
     # iOS fetches contact list
@@ -673,11 +675,7 @@ def test_e2e_ios_sync_scenario():
     for c in contacts:
         assert isinstance(c.id, int)
         assert isinstance(c.user_id, int)
-        # Optional fields can be None
-        if c.phone is not None:
-            assert isinstance(c.phone, str)
-        if c.email is not None:
-            assert isinstance(c.email, str)
+        assert isinstance(c.email, str)
 
     # Clean up
     delete_account(user_id=user_id)
@@ -762,15 +760,14 @@ def test_e2e_cascade_delete_order():
         contact_result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO contacts (user_id, name, phone, email)
-                VALUES (:user_id, :name, :phone, :email)
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
                 RETURNING id
                 """
             ),
             {
                 "user_id": user_id,
                 "name": "Emergency",
-                "phone": "555-9999",
                 "email": "emergency@example.com"
             }
         )
