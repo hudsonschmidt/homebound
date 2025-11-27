@@ -32,7 +32,7 @@ def test_e2e_complete_user_journey():
     4. Create a trip
     5. Delete account (should cascade delete everything)
     """
-    test_email = "e2e-full-journey@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     # Clean up before test
     with db.engine.begin() as connection:
@@ -98,11 +98,11 @@ def test_e2e_complete_user_journey():
 
     # Step 3: Add emergency contacts
     contact1 = create_contact(
-        ContactCreate(name="Emergency One", email="em1@example.com"),
+        ContactCreate(name="Emergency One", email="test@homeboundapp.com"),
         user_id=user_id
     )
     contact2 = create_contact(
-        ContactCreate(name="Emergency Two", email="em2@example.com"),
+        ContactCreate(name="Emergency Two", email="test@homeboundapp.com"),
         user_id=user_id
     )
 
@@ -182,7 +182,7 @@ def test_e2e_onboarding_flow():
     3. User completes profile
     4. Profile completed flag is set
     """
-    test_email = "e2e-onboarding@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     # Clean up
     with db.engine.begin() as connection:
@@ -272,7 +272,7 @@ def test_e2e_contact_management_workflow():
     4. Delete a contact
     5. Use contacts in a trip
     """
-    test_email = "e2e-contacts@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     # Clean up
     with db.engine.begin() as connection:
@@ -328,22 +328,22 @@ def test_e2e_contact_management_workflow():
 
     # Step 2: Add contacts (email is required now)
     contact1 = create_contact(
-        ContactCreate(name="Full Contact", email="full@example.com"),
+        ContactCreate(name="Full Contact", email="test@homeboundapp.com"),
         user_id=user_id
     )
-    assert contact1.email == "full@example.com"
+    assert contact1.email == "test@homeboundapp.com"
 
     contact2 = create_contact(
-        ContactCreate(name="Contact Two", email="two@example.com"),
+        ContactCreate(name="Contact Two", email="test@homeboundapp.com"),
         user_id=user_id
     )
-    assert contact2.email == "two@example.com"
+    assert contact2.email == "test@homeboundapp.com"
 
     contact3 = create_contact(
-        ContactCreate(name="Contact Three", email="three@example.com"),
+        ContactCreate(name="Contact Three", email="test@homeboundapp.com"),
         user_id=user_id
     )
-    assert contact3.email == "three@example.com"
+    assert contact3.email == "test@homeboundapp.com"
 
     # Step 3: Verify all contacts are retrieved
     contacts = get_contacts(user_id=user_id)
@@ -385,7 +385,7 @@ def test_e2e_trip_lifecycle():
     4. Check timeline
     5. Delete account (cascade deletes trip and events)
     """
-    test_email = "e2e-trip-lifecycle@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     # Clean up
     with db.engine.begin() as connection:
@@ -444,7 +444,7 @@ def test_e2e_trip_lifecycle():
     contact = create_contact(
         ContactCreate(
             name="Emergency Contact",
-            email="emergency@example.com"
+            email="test@homeboundapp.com"
         ),
         user_id=user_id
     )
@@ -503,7 +503,7 @@ def test_e2e_profile_update_scenarios():
     3. Empty string handling
     4. Age validation
     """
-    test_email = "e2e-profile-scenarios@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     # Clean up
     with db.engine.begin() as connection:
@@ -601,7 +601,7 @@ def test_e2e_ios_sync_scenario():
     3. Retrieve contact list
     4. Verify all contacts have correct types
     """
-    test_email = "e2e-ios-sync@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     # Clean up
     with db.engine.begin() as connection:
@@ -657,7 +657,7 @@ def test_e2e_ios_sync_scenario():
 
     # iOS creates contact (email is required)
     contact = create_contact(
-        ContactCreate(name="Test Contact", email="test@example.com"),
+        ContactCreate(name="Test Contact", email="test@homeboundapp.com"),
         user_id=user_id
     )
 
@@ -665,7 +665,7 @@ def test_e2e_ios_sync_scenario():
     assert isinstance(contact.id, int), "ID must be int for iOS"
     assert isinstance(contact.user_id, int), "user_id must be int for iOS"
     assert contact.name == "Test Contact"
-    assert contact.email == "test@example.com"
+    assert contact.email == "test@homeboundapp.com"
 
     # iOS fetches contact list
     contacts = get_contacts(user_id=user_id)
@@ -686,7 +686,7 @@ def test_e2e_cascade_delete_order():
     Test that cascade delete works in correct order to avoid foreign key violations.
     This test verifies the fix for the bug where deleting a user with related data failed.
     """
-    test_email = "e2e-cascade-order@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     # Clean up
     with db.engine.begin() as connection:

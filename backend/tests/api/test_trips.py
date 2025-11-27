@@ -21,7 +21,7 @@ from fastapi import HTTPException, BackgroundTasks
 
 def setup_test_user_and_contact():
     """Helper function to set up test user and contact"""
-    test_email = "trip-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up - NULL out last_checkin, then delete events, then trips
         connection.execute(
@@ -75,7 +75,7 @@ def setup_test_user_and_contact():
             {
                 "user_id": user_id,
                 "name": "Emergency Contact",
-                "email": "emergency@example.com"
+                "email": "test@homeboundapp.com"
             }
         )
         contact_id = result.fetchone()[0]

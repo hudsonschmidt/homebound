@@ -16,7 +16,7 @@ from fastapi import HTTPException
 
 def test_get_profile():
     """Test retrieving user profile"""
-    test_email = "profile-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
@@ -62,7 +62,7 @@ def test_get_profile():
 
 def test_update_profile():
     """Test updating user profile with PUT endpoint (returns ProfileUpdateResponse)"""
-    test_email = "update-profile@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
@@ -114,7 +114,7 @@ def test_update_profile():
 
 def test_update_profile_partial():
     """Test updating only some profile fields with PUT endpoint"""
-    test_email = "partial-update@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
@@ -159,7 +159,7 @@ def test_update_profile_partial():
 
 def test_delete_account():
     """Test deleting user account"""
-    test_email = "delete-account@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
@@ -205,7 +205,7 @@ def test_get_nonexistent_profile():
 
 def test_patch_profile():
     """Test PATCH endpoint for partial profile updates"""
-    test_email = "patch-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
@@ -253,7 +253,7 @@ def test_patch_profile():
 
 def test_profile_completed_logic():
     """Test profile_completed flag is set correctly"""
-    test_email = "completed-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -305,7 +305,7 @@ def test_profile_completed_logic():
 
 def test_onboarding_flow_simulation():
     """Test the complete onboarding flow as iOS app would use it"""
-    test_email = "onboarding-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -357,7 +357,7 @@ def test_onboarding_flow_simulation():
 
 def test_update_only_first_name():
     """Test updating only first_name leaves last_name intact"""
-    test_email = "firstname-only@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -401,7 +401,7 @@ def test_update_only_first_name():
 
 def test_update_only_last_name():
     """Test updating only last_name leaves first_name intact"""
-    test_email = "lastname-only@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -445,7 +445,7 @@ def test_update_only_last_name():
 
 def test_empty_strings_mark_profile_incomplete():
     """Test that empty strings in first/last name mark profile as incomplete"""
-    test_email = "empty-strings@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -491,7 +491,7 @@ def test_empty_strings_mark_profile_incomplete():
 
 def test_zero_age_marks_profile_incomplete():
     """Test that age=0 marks profile as incomplete"""
-    test_email = "zero-age@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -537,7 +537,7 @@ def test_zero_age_marks_profile_incomplete():
 
 def test_delete_account_with_contacts():
     """Test deleting account with saved contacts (cascade delete)"""
-    test_email = "delete-with-contacts@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -577,9 +577,9 @@ def test_delete_account_with_contacts():
             {
                 "user_id": user_id,
                 "name1": "Contact One",
-                "email1": "one@example.com",
+                "email1": "test@homeboundapp.com",
                 "name2": "Contact Two",
-                "email2": "two@example.com"
+                "email2": "test@homeboundapp.com"
             }
         )
 
@@ -604,7 +604,7 @@ def test_delete_account_with_contacts():
 
 def test_delete_account_with_trips_and_events():
     """Test deleting account with trips and events (cascade delete)"""
-    test_email = "delete-with-trips@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up with cascade deletion order
@@ -664,7 +664,7 @@ def test_delete_account_with_trips_and_events():
             {
                 "user_id": user_id,
                 "name": "Emergency Contact",
-                "email": "emergency@example.com"
+                "email": "test@homeboundapp.com"
             }
         )
         contact_id = contact_result.fetchone()[0]
@@ -741,7 +741,7 @@ def test_delete_account_with_trips_and_events():
 
 def test_delete_account_with_devices():
     """Test deleting account with registered devices (cascade delete)"""
-    test_email = "delete-with-devices@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -811,7 +811,7 @@ def test_delete_account_with_devices():
 
 def test_delete_account_with_login_tokens():
     """Test deleting account with login tokens (cascade delete)"""
-    test_email = "delete-with-tokens@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
@@ -877,7 +877,7 @@ def test_delete_account_with_login_tokens():
 
 def test_delete_account_full_cascade():
     """Test deleting account with ALL related data (comprehensive cascade delete test)"""
-    test_email = "delete-everything@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up with cascade deletion order
@@ -957,7 +957,7 @@ def test_delete_account_full_cascade():
             {
                 "user_id": user_id,
                 "name": "Emergency Contact",
-                "email": "emergency@example.com"
+                "email": "test@homeboundapp.com"
             }
         )
         contact_id = contact_result.fetchone()[0]

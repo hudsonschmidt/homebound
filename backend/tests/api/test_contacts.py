@@ -18,11 +18,27 @@ from fastapi import HTTPException
 def test_create_and_get_contact():
     """Test creating and retrieving a contact"""
     # Create test user first
-    test_email = "contact-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up any existing data
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -80,11 +96,27 @@ def test_create_and_get_contact():
 
 def test_get_all_contacts():
     """Test retrieving all contacts for a user"""
-    test_email = "contacts-list@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -142,11 +174,27 @@ def test_get_all_contacts():
 
 def test_update_contact():
     """Test updating a contact"""
-    test_email = "update-contact@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -198,11 +246,27 @@ def test_update_contact():
 
 def test_delete_contact():
     """Test deleting a contact"""
-    test_email = "delete-contact@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -275,11 +339,27 @@ def test_delete_nonexistent_contact():
 
 def test_contact_id_is_integer():
     """Test that contact ID is returned as integer (not string)"""
-    test_email = "contact-id-type@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -328,14 +408,30 @@ def test_contact_id_is_integer():
 
 def test_user_cannot_access_other_users_contacts():
     """Test that users cannot access contacts belonging to other users"""
-    test_email1 = "user1-contacts@homeboundapp.com"
-    test_email2 = "user2-contacts@homeboundapp.com"
+    test_email1 = "test@homeboundapp.com"
+    test_email2 = "test@homeboundapp.com"
 
     with db.engine.begin() as connection:
         # Clean up
         for email in [test_email1, test_email2]:
             connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
                 sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
                 {"email": email}
             )
             connection.execute(

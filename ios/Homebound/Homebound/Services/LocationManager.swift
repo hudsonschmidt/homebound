@@ -94,6 +94,11 @@ class LocationManager: NSObject, ObservableObject {
         }
     }
 
+    /// Force refresh authorization state - call this before checking authorization
+    func refreshAuthorizationState() {
+        updateAuthorizationState()
+    }
+
     private func updateAuthorizationState() {
         let status = locationManager.authorizationStatus
         authorizationStatus = status

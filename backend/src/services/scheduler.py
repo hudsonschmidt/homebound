@@ -97,7 +97,7 @@ async def check_overdue_trips():
                             # Get contacts to notify (via trip's contact1/2/3 foreign keys)
                             contacts = conn.execute(
                                 sqlalchemy.text("""
-                                    SELECT c.name, c.phone, c.email
+                                    SELECT c.name, c.email
                                     FROM contacts c
                                     JOIN trips t ON (
                                         c.id = t.contact1 OR

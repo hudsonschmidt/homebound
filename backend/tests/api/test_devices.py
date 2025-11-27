@@ -15,11 +15,27 @@ from fastapi import HTTPException
 
 def test_register_device():
     """Test registering a new device"""
-    test_email = "device-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -74,12 +90,32 @@ def test_register_device():
 
 def test_register_device_update_existing():
     """Test that registering the same token updates the existing device"""
-    test_email = "device-update@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE token = :token"),
             {"token": "update_token_456"}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
         )
         connection.execute(
             sqlalchemy.text("DELETE FROM users WHERE email = :email"),
@@ -133,11 +169,27 @@ def test_register_device_update_existing():
 
 def test_get_devices():
     """Test retrieving all devices for a user"""
-    test_email = "devices-list@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -195,11 +247,27 @@ def test_get_devices():
 
 def test_delete_device():
     """Test deleting a device by ID"""
-    test_email = "delete-device@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -248,12 +316,32 @@ def test_delete_device():
 
 def test_delete_device_by_token():
     """Test deleting a device by token"""
-    test_email = "delete-token@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up
         connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE token = :token"),
             {"token": "delete_by_token"}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
         )
         connection.execute(
             sqlalchemy.text("DELETE FROM users WHERE email = :email"),

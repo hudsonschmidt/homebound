@@ -10,7 +10,7 @@ struct LocationSearchView: View {
     @Binding var isPresented: Bool
 
     @StateObject private var searchCompleter = LocationSearchCompleter()
-    @StateObject private var locationManager = LocationManager.shared
+    @ObservedObject private var locationManager = LocationManager.shared
     @State private var searchText = ""
     @State private var showingNearby = true
     @State private var isGettingCurrentLocation = false
@@ -176,14 +176,23 @@ struct LocationSearchView: View {
 
     private func handleCurrentLocationTap() {
         Task {
+            // Force refresh authorization state to ensure we have the latest
+            await MainActor.run {
+                locationManager.refreshAuthorizationState()
+            }
+
             // Check authorization status
             switch locationManager.authorizationStatus {
             case .notDetermined:
                 // Request permission
                 print("[LocationSearch] Requesting location permission...")
                 locationManager.requestPermission()
-                // Wait a moment for permission to be granted
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                // Wait for permission response
+                try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+                // Refresh state after waiting
+                await MainActor.run {
+                    locationManager.refreshAuthorizationState()
+                }
 
             case .denied, .restricted:
                 // Show alert to open settings
@@ -194,15 +203,18 @@ struct LocationSearchView: View {
                 return
 
             case .authorizedWhenInUse, .authorizedAlways:
+                // Already authorized, proceed
+                print("[LocationSearch] Already authorized: \(locationManager.authorizationStatus.rawValue)")
                 break
 
             @unknown default:
                 break
             }
 
-            // Get current location
-            guard locationManager.isAuthorized else {
-                print("[LocationSearch] Not authorized after permission request")
+            // Get current location - check both status and flag for safety
+            let currentStatus = locationManager.authorizationStatus
+            guard currentStatus == .authorizedWhenInUse || currentStatus == .authorizedAlways else {
+                print("[LocationSearch] Not authorized after permission request. Status: \(currentStatus.rawValue)")
                 return
             }
 

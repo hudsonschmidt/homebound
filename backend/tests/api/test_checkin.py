@@ -13,7 +13,7 @@ from fastapi import HTTPException, BackgroundTasks
 
 def setup_test_trip_with_tokens():
     """Helper function to set up test trip with tokens"""
-    test_email = "checkin-test@homeboundapp.com"
+    test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up - NULL out last_checkin, then delete events, then trips
         connection.execute(
@@ -30,6 +30,14 @@ def setup_test_trip_with_tokens():
         )
         connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
             {"email": test_email}
         )
         connection.execute(
@@ -138,6 +146,14 @@ def cleanup_test_data(user_id):
         )
         connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id = :user_id"),
             {"user_id": user_id}
         )
         connection.execute(
