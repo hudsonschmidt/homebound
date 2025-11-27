@@ -846,3 +846,18 @@ def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user
             )
             for e in events
         ]
+
+
+@router.post("/debug/check-overdue")
+async def debug_check_overdue(user_id: int = Depends(auth.get_current_user_id)):
+    """Debug endpoint to manually trigger overdue check.
+
+    This is useful for testing the overdue notification system without waiting
+    for the scheduler to run.
+    """
+    from src.services.scheduler import check_overdue_trips
+
+    log.info(f"[Debug] User {user_id} manually triggered overdue check")
+    await check_overdue_trips()
+
+    return {"ok": True, "message": "Overdue check completed - see server logs for details"}

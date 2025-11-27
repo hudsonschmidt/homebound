@@ -14,7 +14,8 @@ async def send_email(
     subject: str,
     body: str,
     html_body: Optional[str] = None,
-    from_email: Optional[str] = None
+    from_email: Optional[str] = None,
+    high_priority: bool = False
 ):
     """Send email notification.
 
@@ -24,6 +25,7 @@ async def send_email(
         body: Plain text body
         html_body: Optional HTML body
         from_email: Optional from address (defaults to RESEND_FROM_EMAIL)
+        high_priority: If True, mark email as high priority/urgent
     """
     if settings.EMAIL_BACKEND == "resend":
         from ..messaging.resend_backend import send_resend_email
@@ -32,12 +34,14 @@ async def send_email(
             subject=subject,
             text_body=body,
             html_body=html_body,
-            from_email=from_email
+            from_email=from_email,
+            high_priority=high_priority
         )
         if not success:
             log.error(f"Failed to send email to {email}")
     elif settings.EMAIL_BACKEND == "console":
-        log.info(f"[CONSOLE EMAIL] To: {email}\nFrom: {from_email or 'default'}\nSubject: {subject}\n{body}")
+        priority_note = " [HIGH PRIORITY]" if high_priority else ""
+        log.info(f"[CONSOLE EMAIL]{priority_note} To: {email}\nFrom: {from_email or 'default'}\nSubject: {subject}\n{body}")
     else:
         log.warning(f"Unknown email backend: {settings.EMAIL_BACKEND}")
 
@@ -157,7 +161,8 @@ This notification was sent automatically because the person did not check in by 
                 subject,
                 plain_body,
                 html_body,
-                from_email=settings.RESEND_ALERTS_EMAIL  # alerts@
+                from_email=settings.RESEND_ALERTS_EMAIL,  # alerts@
+                high_priority=True  # Mark as urgent
             )
 
             log.info(f"Sent overdue notification to {contact_email} for trip '{trip_title}'")
@@ -698,7 +703,8 @@ Thank you for being there as an emergency contact!
                 subject,
                 plain_body,
                 html_body,
-                from_email=settings.RESEND_ALERTS_EMAIL  # alerts@ since this follows up on an alert
+                from_email=settings.RESEND_ALERTS_EMAIL,  # alerts@ since this follows up on an alert
+                high_priority=True  # Mark as urgent since it follows up on an alert
             )
 
             log.info(f"Sent overdue resolved notification to {contact_email} for trip '{trip_title}'")

@@ -34,6 +34,7 @@ async def send_resend_email(
     text_body: Optional[str] = None,
     from_email: Optional[str] = None,
     reply_to: Optional[str] = None,
+    high_priority: bool = False,
 ) -> bool:
     """
     Send email via Resend.
@@ -45,6 +46,7 @@ async def send_resend_email(
         text_body: Plain text content of email
         from_email: From email address (defaults to RESEND_FROM_EMAIL)
         reply_to: Reply-to email address
+        high_priority: If True, mark email as high priority/urgent
 
     Returns:
         True if sent successfully, False otherwise
@@ -78,6 +80,14 @@ async def send_resend_email(
             params["text"] = text_body
         if reply_to:
             params["reply_to"] = reply_to
+
+        # Add high priority headers for urgent emails
+        if high_priority:
+            params["headers"] = {
+                "X-Priority": "1",
+                "X-MSMail-Priority": "High",
+                "Importance": "high",
+            }
 
         response = resend.Emails.send(params)
 

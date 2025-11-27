@@ -24,6 +24,7 @@ async def check_overdue_trips():
     """Check for overdue trips and send notifications."""
     try:
         now = datetime.utcnow()
+        log.info(f"[Scheduler] Checking for overdue trips at {now}")
 
         with db.engine.begin() as conn:
             # Find active or overdue trips that are past their ETA
@@ -37,8 +38,11 @@ async def check_overdue_trips():
                 {"now": now}
             ).fetchall()
 
+            log.info(f"[Scheduler] Found {len(overdue_trips)} trips past ETA")
+
             for trip in overdue_trips:
                 trip_id = trip.id
+                log.info(f"[Scheduler] Processing trip {trip_id}: status={trip.status}, eta={trip.eta}, grace_min={trip.grace_min}")
 
                 # Check if we've already marked this trip as overdue
                 existing_overdue = conn.execute(
@@ -51,14 +55,17 @@ async def check_overdue_trips():
                 ).fetchone()
 
                 if existing_overdue:
+                    log.info(f"[Scheduler] Trip {trip_id} already has overdue event, checking grace period")
                     # Already marked as overdue, check if grace period expired
-                    # Parse eta string to datetime
+                    # Parse eta string to datetime (make naive for comparison)
                     if isinstance(trip.eta, str):
-                        eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '+00:00'))
+                        eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
                     else:
-                        eta_dt = trip.eta
+                        # Remove timezone info for comparison with naive datetime
+                        eta_dt = trip.eta.replace(tzinfo=None) if trip.eta.tzinfo else trip.eta
 
                     grace_expired = eta_dt + timedelta(minutes=trip.grace_min)
+                    log.info(f"[Scheduler] Trip {trip_id}: eta_dt={eta_dt}, grace_expired={grace_expired}, now={now}, grace_expired_check={now > grace_expired}")
 
                     if now > grace_expired:
                         # Check if we've already notified
@@ -72,6 +79,7 @@ async def check_overdue_trips():
                         ).fetchone()
 
                         if not existing_notify:
+                            log.info(f"[Scheduler] Trip {trip_id}: Grace period expired, no notify event yet - sending notifications")
                             # Get contacts to notify (via trip's contact1/2/3 foreign keys)
                             contacts = conn.execute(
                                 sqlalchemy.text("""
@@ -87,6 +95,8 @@ async def check_overdue_trips():
                                 {"trip_id": trip_id}
                             ).fetchall()
 
+                            log.info(f"[Scheduler] Trip {trip_id}: Found {len(contacts)} contacts with email")
+
                             # Fetch user name for notification
                             user = conn.execute(
                                 sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
@@ -97,10 +107,11 @@ async def check_overdue_trips():
                                 user_name = "A Homebound user"
 
                             if contacts:
-                                log.info(f"Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
+                                log.info(f"[Scheduler] Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
                                 # Send notifications with user's timezone
                                 user_timezone = trip.timezone if hasattr(trip, 'timezone') else None
                                 await send_overdue_notifications(trip, list(contacts), user_name, user_timezone)
+                                log.info(f"[Scheduler] Overdue notifications sent for trip {trip_id}")
 
                                 # Mark as notified
                                 conn.execute(
@@ -114,6 +125,8 @@ async def check_overdue_trips():
                                         "timestamp": datetime.utcnow()
                                     }
                                 )
+                            else:
+                                log.warning(f"[Scheduler] Trip {trip_id}: No contacts with email found, skipping notification")
 
                             # Update trip status
                             conn.execute(
@@ -123,6 +136,11 @@ async def check_overdue_trips():
                                 """),
                                 {"trip_id": trip_id}
                             )
+                            log.info(f"[Scheduler] Trip {trip_id}: Status updated to overdue_notified")
+                        else:
+                            log.info(f"[Scheduler] Trip {trip_id}: Already has notify event, skipping")
+                    else:
+                        log.info(f"[Scheduler] Trip {trip_id}: Grace period not yet expired")
                 else:
                     # Mark as overdue
                     log.info(f"Marking trip {trip_id} as overdue")
