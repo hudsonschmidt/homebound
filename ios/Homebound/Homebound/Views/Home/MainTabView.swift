@@ -269,6 +269,7 @@ struct ActivePlanCardCompact: View {
     @State private var showingExtendOptions = false
     @State private var selectedExtendMinutes = 30
     @State private var appeared = false
+    @State private var pulseAnimation = false
 
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let extendOptions = [
@@ -295,93 +296,262 @@ struct ActivePlanCardCompact: View {
         }
     }
 
-    var body: some View {
-        VStack(spacing: 20) {
-            // Status badge with pulse animation
-            HStack {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 12, height: 12)
-                    .overlay(
-                        Circle()
-                            .stroke(statusColor, lineWidth: 2)
-                            .scaleEffect(timeState != .onTime ? 1.4 : 1.0)
-                            .opacity(timeState != .onTime ? 0.0 : 1.0)
-                            .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false), value: timeState)
-                    )
+    var urgentMessage: String {
+        switch timeState {
+        case .onTime: return ""
+        case .graceWarning: return "You're past your expected return time. Check in or your contacts will be notified!"
+        case .overdue: return "Your emergency contacts have been notified. Please check in immediately!"
+        }
+    }
 
-                Text(statusText)
+    var isUrgent: Bool {
+        timeState != .onTime
+    }
+
+    var urgentIcon: String {
+        timeState == .overdue ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill"
+    }
+
+    var statusBadgeSize: CGFloat {
+        timeState == .onTime ? 12 : 16
+    }
+
+    var statusFont: Font {
+        timeState == .onTime ? .caption : .subheadline
+    }
+
+    var statusForeground: Color {
+        timeState == .onTime ? .white.opacity(0.9) : statusColor
+    }
+
+    var bannerOpacity: Double {
+        pulseAnimation ? 0.9 : 0.7
+    }
+
+    var borderOpacity: Double {
+        pulseAnimation ? 1.0 : 0.5
+    }
+
+    var body: some View {
+        VStack(spacing: isUrgent ? 16 : 20) {
+            // Urgent warning banner for overdue/warning states
+            if isUrgent {
+                urgentBannerView
+            }
+
+            // Status badge with pulse animation
+            statusBadgeView
+
+            // Plan info with activity icon
+            planInfoView
+
+            // Action buttons with haptic feedback
+            actionButtonsView
+
+            // Extend time section
+            extendTimeView
+
+            // Safety Tips Carousel - hide when urgent to focus on action
+            if !isUrgent {
+                SafetyTipsCarousel(safetyTips: plan.activity.safety_tips)
+            }
+        }
+        .padding(24)
+        .glassmorphic(cornerRadius: 32, borderOpacity: 0.0)
+        // Urgent pulsing border for overdue/warning states
+        .overlay(
+            RoundedRectangle(cornerRadius: 32)
+                .stroke(
+                    isUrgent ? statusColor : Color.clear,
+                    lineWidth: isUrgent ? 3 : 0
+                )
+                .opacity(borderOpacity)
+        )
+        // Glow effect - red for overdue, orange for warning, activity color for normal
+        // Pulses when urgent
+        .shadow(
+            color: glowColor.opacity(isUrgent && pulseAnimation ? 0.7 : 0.5),
+            radius: isUrgent ? 25 : 20,
+            y: 10
+        )
+        .shadow(
+            color: glowColor.opacity(isUrgent && pulseAnimation ? 0.9 : 0.7),
+            radius: isUrgent ? 15 : 12,
+            y: 6
+        )
+        .opacity(appeared ? 1.0 : 0.0)
+        .offset(y: appeared ? 0 : 20)
+        .onReceive(timer) { _ in
+            updateTimeRemaining()
+        }
+        .onAppear {
+            updateTimeRemaining()
+            withAnimation(.easeOut(duration: 0.5)) {
+                appeared = true
+            }
+            // Start pulse animation for the dot and glow
+            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                pulseAnimation = true
+            }
+        }
+    }
+
+    var glowColor: Color {
+        switch timeState {
+        case .overdue: return .red
+        case .graceWarning: return .orange
+        case .onTime: return Color(hex: plan.activity.colors.primary) ?? .purple
+        }
+    }
+
+    var urgentBannerView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: urgentIcon)
+                .font(.title2)
+
+            Text(urgentMessage)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .multilineTextAlignment(.leading)
+
+            Spacer()
+        }
+        .foregroundStyle(.white)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(statusColor.opacity(bannerOpacity))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(statusColor, lineWidth: 2)
+                .opacity(borderOpacity)
+        )
+    }
+
+    var statusBadgeView: some View {
+        HStack {
+            Circle()
+                .fill(statusColor)
+                .frame(width: statusBadgeSize, height: statusBadgeSize)
+                .overlay(
+                    Circle()
+                        .stroke(statusColor, lineWidth: 2)
+                        .scaleEffect(pulseAnimation ? 2.0 : 1.0)
+                        .opacity(pulseAnimation ? 0.0 : 1.0)
+                        .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: pulseAnimation)
+                )
+                .scaleEffect(pulseAnimation && isUrgent ? 1.1 : 1.0)
+                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseAnimation)
+
+            Text(statusText)
+                .font(statusFont)
+                .fontWeight(.bold)
+                .foregroundStyle(statusForeground)
+
+            Spacer()
+
+            // Bell indicator for urgent states
+            if isUrgent {
+                Image(systemName: "bell.fill")
                     .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(statusColor)
+            }
+        }
+    }
+
+    var timeLabel: String {
+        switch timeState {
+        case .onTime: return "Expected return in"
+        case .graceWarning: return "Contacts notified in"
+        case .overdue: return "Overdue by"
+        }
+    }
+
+    var timeLabelFont: Font {
+        isUrgent ? .subheadline : .caption
+    }
+
+    var timeLabelWeight: Font.Weight {
+        isUrgent ? .semibold : .regular
+    }
+
+    var timeLabelColor: Color {
+        isUrgent ? statusColor.opacity(0.9) : .white.opacity(0.7)
+    }
+
+    var timeFont: Font {
+        isUrgent ? .largeTitle : .title3
+    }
+
+    var timeColor: Color {
+        switch timeState {
+        case .overdue: return .red
+        case .graceWarning: return .orange
+        case .onTime: return .white
+        }
+    }
+
+    var planInfoView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(plan.activity.icon)
+                    .font(.system(size: 32))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(plan.title)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+
+                    Text(plan.activity.name)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
 
                 Spacer()
             }
 
-            // Plan info with activity icon
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    // Activity icon
-                    Text(plan.activity.icon)
-                        .font(.system(size: 32))
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(plan.title)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.white)
-
-                        Text(plan.activity.name)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-
-                    Spacer()
-                }
-
-                if let location = plan.location_text {
-                    HStack {
-                        Image(systemName: "location.fill")
-                            .font(.caption)
-                        Text(location)
-                            .font(.subheadline)
-                    }
-                    .foregroundStyle(.white.opacity(0.8))
-                }
-
-                // Time remaining
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(timeState == .onTime ? "Expected return in" : (timeState == .graceWarning ? "Contacts notified in" : "Overdue by"))
+            if let location = plan.location_text {
+                HStack {
+                    Image(systemName: "location.fill")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-                    Text(timeRemaining)
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(timeState == .overdue ? Color.red.opacity(0.9) : (timeState == .graceWarning ? Color.orange : .white))
+                    Text(location)
+                        .font(.subheadline)
                 }
+                .foregroundStyle(.white.opacity(0.8))
             }
 
-            // Action buttons with haptic feedback
-            HStack(spacing: 12) {
-                // Check-in button
+            VStack(alignment: .leading, spacing: 4) {
+                Text(timeLabel)
+                    .font(timeLabelFont)
+                    .fontWeight(timeLabelWeight)
+                    .foregroundStyle(timeLabelColor)
+                Text(timeRemaining)
+                    .font(timeFont)
+                    .fontWeight(.bold)
+                    .foregroundStyle(timeColor)
+                    .scaleEffect(timeState == .overdue ? 1.05 : 1.0)
+            }
+        }
+    }
+
+    var actionButtonsView: some View {
+        HStack(spacing: 12) {
+            // Only show Check In button when NOT urgent (on time)
+            if !isUrgent {
                 Button(action: {
                     if preferences.hapticFeedbackEnabled {
-                        let impact = UIImpactFeedbackGenerator(style: .medium)
-                        impact.impactOccurred()
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }
-
                     if let token = plan.checkin_token {
                         Task {
                             isPerformingAction = true
                             await session.performTokenAction(token, action: "checkin")
-
-                            // Success haptic
                             if preferences.hapticFeedbackEnabled {
-                                let success = UINotificationFeedbackGenerator()
-                                success.notificationOccurred(.success)
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
                             }
-
                             isPerformingAction = false
                         }
                     }
@@ -397,127 +567,90 @@ struct ActivePlanCardCompact: View {
                         .shadow(color: Color.green.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(plan.checkin_token == nil || isPerformingAction)
-
-                // I'm safe button
-                Button(action: {
-                    if preferences.hapticFeedbackEnabled {
-                        let impact = UIImpactFeedbackGenerator(style: .medium)
-                        impact.impactOccurred()
-                    }
-
-                    if let token = plan.checkout_token {
-                        Task {
-                            isPerformingAction = true
-                            await session.performTokenAction(token, action: "checkout")
-
-                            // Success haptic with confetti effect
-                            if preferences.hapticFeedbackEnabled {
-                                let success = UINotificationFeedbackGenerator()
-                                success.notificationOccurred(.success)
-                            }
-
-                            // Reload active plan to update UI
-                            await session.loadActivePlan()
-                            isPerformingAction = false
-                        }
-                    }
-                }) {
-                    Label("I'm Safe", systemImage: "house.fill")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.hbAccent)
-                        .cornerRadius(12)
-                        .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
-                }
-                .disabled(plan.checkout_token == nil || isPerformingAction)
             }
-            .disabled(isPerformingAction)
 
-            // Extend time section
-            VStack(spacing: 12) {
-                if showingExtendOptions {
-                    VStack(spacing: 8) {
-                        Text("Extend trip by:")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(extendOptions, id: \.0) { minutes, label in
-                                    Button(action: {
-                                        if preferences.hapticFeedbackEnabled {
-                                            let impact = UIImpactFeedbackGenerator(style: .light)
-                                            impact.impactOccurred()
-                                        }
-
-                                        Task {
-                                            isPerformingAction = true
-                                            _ = await session.extendPlan(minutes: minutes)
-                                            showingExtendOptions = false
-                                            isPerformingAction = false
-                                        }
-                                    }) {
-                                        Text(label)
-                                            .font(.caption)
-                                            .fontWeight(.medium)
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .glassmorphicButton(cornerRadius: 8)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 2)
-                        }
-                    }
-                    .transition(.scale.combined(with: .opacity))
-                } else {
-                    Button(action: {
+            // I'm Safe button - always shown
+            Button(action: {
+                if preferences.hapticFeedbackEnabled {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+                if let token = plan.checkout_token {
+                    Task {
+                        isPerformingAction = true
+                        await session.performTokenAction(token, action: "checkout")
                         if preferences.hapticFeedbackEnabled {
-                            let impact = UIImpactFeedbackGenerator(style: .light)
-                            impact.impactOccurred()
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
                         }
-
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showingExtendOptions = true
-                        }
-                    }) {
-                        Label("Extend Time", systemImage: "clock.arrow.circlepath")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.white.opacity(0.9))
+                        await session.loadActivePlan()
+                        isPerformingAction = false
                     }
                 }
+            }) {
+                Label("I'm Safe", systemImage: "house.fill")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.hbAccent)
+                    .cornerRadius(12)
+                    .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
             }
+            .disabled(plan.checkout_token == nil || isPerformingAction)
+        }
+        .disabled(isPerformingAction)
+    }
 
-            // Safety Tips Carousel
-            SafetyTipsCarousel(safetyTips: plan.activity.safety_tips)
-        }
-        .padding(24)
-        .glassmorphic(cornerRadius: 32, borderOpacity: 0.0)
-        // Prominent glow effect using activity's primary color
-        .shadow(
-            color: Color(hex: plan.activity.colors.primary)?.opacity(0.4) ?? .clear,
-            radius: 20,
-            y: 10
-        )
-        .shadow(
-            color: Color(hex: plan.activity.colors.primary)?.opacity(0.6) ?? .clear,
-            radius: 12,
-            y: 6
-        )
-        .opacity(appeared ? 1.0 : 0.0)
-        .offset(y: appeared ? 0 : 20)
-        .onReceive(timer) { _ in
-            updateTimeRemaining()
-        }
-        .onAppear {
-            updateTimeRemaining()
-            withAnimation(.easeOut(duration: 0.5)) {
-                appeared = true
+    @ViewBuilder
+    var extendTimeView: some View {
+        if showingExtendOptions {
+            VStack(spacing: 8) {
+                Text("Extend trip by:")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(extendOptions, id: \.0) { minutes, label in
+                            Button(action: {
+                                if preferences.hapticFeedbackEnabled {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                }
+                                Task {
+                                    isPerformingAction = true
+                                    _ = await session.extendPlan(minutes: minutes)
+                                    showingExtendOptions = false
+                                    isPerformingAction = false
+                                }
+                            }) {
+                                Text(label)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .glassmorphicButton(cornerRadius: 8)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+            }
+            .transition(.scale.combined(with: .opacity))
+        } else {
+            // Show "Extend Time" text link for all states
+            Button(action: {
+                if preferences.hapticFeedbackEnabled {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showingExtendOptions = true
+                }
+            }) {
+                Label("Extend Time", systemImage: "clock.arrow.circlepath")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.white.opacity(0.9))
             }
         }
     }
@@ -548,11 +681,14 @@ struct ActivePlanCardCompact: View {
     func formatInterval(_ interval: TimeInterval) -> String {
         let hours = Int(interval) / 3600
         let minutes = (Int(interval) % 3600) / 60
+        let seconds = Int(interval) % 60
 
         if hours > 0 {
             return "\(hours)h \(minutes)m"
+        } else if minutes > 0 {
+            return "\(minutes)m \(seconds)s"
         } else {
-            return "\(minutes) minutes"
+            return "\(seconds) seconds"
         }
     }
 }

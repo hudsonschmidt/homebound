@@ -818,3 +818,139 @@ def create_trip_completed_email_html(
 </body>
 </html>
 """
+
+
+def create_overdue_resolved_email_html(
+    contact_name: str,
+    user_name: str,
+    plan_title: str,
+    activity: str,
+) -> str:
+    """Create HTML email template for overdue resolved notifications to contacts.
+
+    This is sent when a user who was overdue has now checked in safely.
+    Uses a celebratory but urgent style to clearly communicate the good news.
+    """
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+        .container {{
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 30px;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #28a745, #17a2b8);
+            color: white;
+            padding: 25px;
+            margin: -30px -30px 25px -30px;
+            border-radius: 12px 12px 0 0;
+            text-align: center;
+        }}
+        h1 {{
+            margin: 0;
+            font-size: 26px;
+            font-weight: 700;
+        }}
+        .all-clear-badge {{
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-top: 10px;
+        }}
+        .success-box {{
+            background: linear-gradient(135deg, #d4edda, #c3e6cb);
+            border: 2px solid #28a745;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            text-align: center;
+        }}
+        .success-box .icon {{
+            font-size: 64px;
+            margin-bottom: 15px;
+        }}
+        .success-box .message {{
+            font-size: 20px;
+            font-weight: 600;
+            color: #155724;
+        }}
+        .context-box {{
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }}
+        .context-box p {{
+            margin: 0;
+            color: #856404;
+        }}
+        .trip-info {{
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 ALL CLEAR!</h1>
+            <div class="all-clear-badge">Crisis Resolved</div>
+        </div>
+
+        <p>Hi {contact_name},</p>
+
+        <div class="success-box">
+            <div class="icon">✅</div>
+            <p class="message">{user_name} is safe!</p>
+        </div>
+
+        <div class="context-box">
+            <p>📋 <strong>Previous Alert Resolved:</strong> We previously notified you that {user_name} was overdue from their trip. They have now confirmed they are safe and sound.</p>
+        </div>
+
+        <div class="trip-info">
+            <p><strong>Trip:</strong> {plan_title}</p>
+            <p><strong>Activity:</strong> {activity}</p>
+            <p><strong>Status:</strong> ✅ Completed safely</p>
+        </div>
+
+        <p><strong>No further action is needed.</strong> Thank you for being ready to help as an emergency contact!</p>
+
+        <div class="footer">
+            <p>Thank you for being there! 💚</p>
+            <p style="font-size: 12px; color: #999;">
+                Sent via Homebound - Personal Safety for Adventurers
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""

@@ -50,7 +50,6 @@ class Settings:
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")
 
     # Notification backend settings
-    SMS_BACKEND: str = os.getenv("SMS_BACKEND", "dummy")  # "twilio" or "dummy"
     EMAIL_BACKEND: str = os.getenv("EMAIL_BACKEND", "console")  # "resend" or "console"
     PUSH_BACKEND: str = os.getenv("PUSH_BACKEND", "dummy")  # "apns" or "dummy"
 

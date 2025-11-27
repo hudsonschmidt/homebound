@@ -588,6 +588,71 @@ Until the next adventure!
             log.info(f"Sent trip completed notification to {contact_email} for trip '{trip_title}'")
 
 
+async def send_overdue_resolved_emails(
+    trip: Any,
+    contacts: List[Any],
+    user_name: str,
+    activity_name: str
+):
+    """Send urgent "all clear" emails when an overdue trip is resolved.
+
+    This is sent from alerts@ because the contacts already received an alert
+    about the user being overdue. This follow-up confirms they are now safe.
+
+    Args:
+        trip: Dictionary or Row object with trip data
+        contacts: List of contact dictionaries or Row objects
+        user_name: Name of the user who is now safe
+        activity_name: Name of the activity (e.g., "Hiking", "Skiing")
+    """
+    from ..messaging.resend_backend import create_overdue_resolved_email_html
+
+    # Handle both dict and Row objects
+    trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+
+    # Send to each contact
+    for contact in contacts:
+        contact_email = contact.get('email') if hasattr(contact, 'get') else contact.email
+        contact_name = contact.get('name') if hasattr(contact, 'get') else contact.name
+
+        if contact_email:
+            subject = f"🎉 ALL CLEAR: {user_name} is safe!"
+
+            # Plain text fallback
+            plain_body = f"""Hi {contact_name},
+
+GREAT NEWS! {user_name} has checked in and is safe!
+
+Trip: {trip_title}
+Activity: {activity_name}
+
+We previously notified you that {user_name} was overdue from their trip.
+They have now confirmed they are safe. No further action is needed.
+
+Thank you for being there as an emergency contact!
+
+- The Homebound Team
+"""
+
+            # HTML body
+            html_body = create_overdue_resolved_email_html(
+                contact_name=contact_name,
+                user_name=user_name,
+                plan_title=trip_title,
+                activity=activity_name
+            )
+
+            await send_email(
+                contact_email,
+                subject,
+                plain_body,
+                html_body,
+                from_email=settings.RESEND_ALERTS_EMAIL  # alerts@ since this follows up on an alert
+            )
+
+            log.info(f"Sent overdue resolved notification to {contact_email} for trip '{trip_title}'")
+
+
 async def send_plan_created_notification(plan: Any):
     """Send push notification when a plan is created (to the user).
 

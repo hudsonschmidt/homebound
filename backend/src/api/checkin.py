@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
 from src import database as db
-from src.services.notifications import send_trip_completed_emails, send_checkin_update_emails
+from src.services.notifications import send_trip_completed_emails, send_checkin_update_emails, send_overdue_resolved_emails
 import sqlalchemy
 
 log = logging.getLogger(__name__)
@@ -117,6 +117,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
     """Complete/check out of a trip using a magic token"""
     with db.engine.begin() as connection:
         # Find trip by checkout_token with activity name
+        # Allow checkout for active, overdue, and overdue_notified trips
         trip = connection.execute(
             sqlalchemy.text(
                 """
@@ -125,7 +126,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkout_token = :token
-                AND t.status = 'active'
+                AND t.status IN ('active', 'overdue', 'overdue_notified')
                 """
             ),
             {"token": token}
@@ -136,6 +137,9 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Invalid or expired check-out link"
             )
+
+        # Check if trip was overdue (contacts were already notified)
+        was_overdue = trip.status in ('overdue', 'overdue_notified')
 
         # Mark trip as completed
         now = datetime.now(timezone.utc)
@@ -188,16 +192,28 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
         activity_name = trip.activity_name
 
         # Schedule background task to send emails to contacts
+        # If trip was overdue, send "all clear" email from alerts@ instead of normal completion
         def send_emails_sync():
-            asyncio.run(send_trip_completed_emails(
-                trip=trip_data,
-                contacts=contacts_for_email,
-                user_name=user_name,
-                activity_name=activity_name
-            ))
+            if was_overdue:
+                # Send urgent "all clear" email since contacts were already alerted
+                asyncio.run(send_overdue_resolved_emails(
+                    trip=trip_data,
+                    contacts=contacts_for_email,
+                    user_name=user_name,
+                    activity_name=activity_name
+                ))
+            else:
+                # Normal completion email
+                asyncio.run(send_trip_completed_emails(
+                    trip=trip_data,
+                    contacts=contacts_for_email,
+                    user_name=user_name,
+                    activity_name=activity_name
+                ))
 
         background_tasks.add_task(send_emails_sync)
-        log.info(f"[Checkout] Scheduled completion emails for {len(contacts_for_email)} contacts")
+        email_type = "overdue resolved" if was_overdue else "completion"
+        log.info(f"[Checkout] Scheduled {email_type} emails for {len(contacts_for_email)} contacts")
 
         return CheckinResponse(
             ok=True,
