@@ -250,6 +250,13 @@ struct FeatureRow: View {
     }
 }
 
+// MARK: - Trip Time State
+enum TripTimeState {
+    case onTime          // Before ETA - countdown to expected return
+    case graceWarning    // After ETA but before grace period ends - warning state
+    case overdue         // After grace period ends - contacts notified
+}
+
 // MARK: - Active Plan Card Compact
 struct ActivePlanCardCompact: View {
     let plan: Trip
@@ -257,7 +264,7 @@ struct ActivePlanCardCompact: View {
     @EnvironmentObject var session: Session
     @EnvironmentObject var preferences: AppPreferences
     @State private var timeRemaining = ""
-    @State private var isOverdue = false
+    @State private var timeState: TripTimeState = .onTime
     @State private var isPerformingAction = false
     @State private var showingExtendOptions = false
     @State private var selectedExtendMinutes = 30
@@ -272,22 +279,38 @@ struct ActivePlanCardCompact: View {
         (180, "3 hrs")
     ]
 
+    var statusColor: Color {
+        switch timeState {
+        case .onTime: return .green
+        case .graceWarning: return .orange
+        case .overdue: return .red
+        }
+    }
+
+    var statusText: String {
+        switch timeState {
+        case .onTime: return "ACTIVE TRIP"
+        case .graceWarning: return "CHECK IN NOW"
+        case .overdue: return "OVERDUE"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             // Status badge with pulse animation
             HStack {
                 Circle()
-                    .fill(isOverdue ? Color.red : Color.green)
+                    .fill(statusColor)
                     .frame(width: 12, height: 12)
                     .overlay(
                         Circle()
-                            .stroke(isOverdue ? Color.red : Color.green, lineWidth: 2)
-                            .scaleEffect(isOverdue ? 1.4 : 1.0)
-                            .opacity(isOverdue ? 0.0 : 1.0)
-                            .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false), value: isOverdue)
+                            .stroke(statusColor, lineWidth: 2)
+                            .scaleEffect(timeState != .onTime ? 1.4 : 1.0)
+                            .opacity(timeState != .onTime ? 0.0 : 1.0)
+                            .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false), value: timeState)
                     )
 
-                Text(isOverdue ? "OVERDUE" : "ACTIVE TRIP")
+                Text(statusText)
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundStyle(.white.opacity(0.9))
@@ -329,13 +352,13 @@ struct ActivePlanCardCompact: View {
 
                 // Time remaining
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Expected return")
+                    Text(timeState == .onTime ? "Expected return in" : (timeState == .graceWarning ? "Contacts notified in" : "Overdue by"))
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
                     Text(timeRemaining)
                         .font(.title3)
                         .fontWeight(.semibold)
-                        .foregroundStyle(isOverdue ? Color.red.opacity(0.9) : .white)
+                        .foregroundStyle(timeState == .overdue ? Color.red.opacity(0.9) : (timeState == .graceWarning ? Color.orange : .white))
                 }
             }
 
@@ -501,14 +524,22 @@ struct ActivePlanCardCompact: View {
 
     func updateTimeRemaining() {
         let now = Date()
-        let eta = plan.eta_at.addingTimeInterval(Double(plan.grace_minutes) * 60)
+        let eta = plan.eta_at  // Expected return time
+        let graceEnd = plan.eta_at.addingTimeInterval(Double(plan.grace_minutes) * 60)  // When contacts are notified
 
-        if now > eta {
-            isOverdue = true
-            let interval = now.timeIntervalSince(eta)
-            timeRemaining = formatInterval(interval) + " overdue"
+        if now > graceEnd {
+            // After grace period - fully overdue, contacts have been notified
+            timeState = .overdue
+            let interval = now.timeIntervalSince(graceEnd)
+            timeRemaining = formatInterval(interval)
+        } else if now > eta {
+            // Past ETA but within grace period - warning state
+            timeState = .graceWarning
+            let interval = graceEnd.timeIntervalSince(now)
+            timeRemaining = formatInterval(interval)
         } else {
-            isOverdue = false
+            // Before ETA - normal countdown to expected return
+            timeState = .onTime
             let interval = eta.timeIntervalSince(now)
             timeRemaining = formatInterval(interval)
         }

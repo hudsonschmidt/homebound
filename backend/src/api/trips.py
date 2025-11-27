@@ -666,8 +666,25 @@ def extend_trip(
 
         now = datetime.now(timezone.utc)
 
+        # Log checkin event first (extending is also a check-in) and get the event ID
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO events (user_id, trip_id, what, timestamp)
+                VALUES (:user_id, :trip_id, 'checkin', :timestamp)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "trip_id": trip_id,
+                "timestamp": now.isoformat()
+            }
+        )
+        checkin_event_id = result.fetchone()[0]
+
         # Update trip ETA and reset status to active (user is checking in)
-        # Also update last_checkin timestamp
+        # last_checkin stores the event ID, not a timestamp
         connection.execute(
             sqlalchemy.text(
                 """
@@ -679,22 +696,7 @@ def extend_trip(
             {
                 "trip_id": trip_id,
                 "new_eta": new_eta.isoformat(),
-                "last_checkin": now.isoformat()
-            }
-        )
-
-        # Log checkin event (extending is also a check-in)
-        connection.execute(
-            sqlalchemy.text(
-                """
-                INSERT INTO events (user_id, trip_id, what, timestamp)
-                VALUES (:user_id, :trip_id, 'checkin', :timestamp)
-                """
-            ),
-            {
-                "user_id": user_id,
-                "trip_id": trip_id,
-                "timestamp": now.isoformat()
+                "last_checkin": checkin_event_id
             }
         )
 
@@ -781,7 +783,13 @@ def delete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                 detail="Trip not found"
             )
 
-        # Delete trip (events will cascade)
+        # Delete events first (foreign key constraint)
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE trip_id = :trip_id"),
+            {"trip_id": trip_id}
+        )
+
+        # Now delete the trip
         connection.execute(
             sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
             {"trip_id": trip_id}
