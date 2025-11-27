@@ -187,15 +187,25 @@ def create_trip(
 
         # Resolve "Current Location" to a proper place name via reverse geocoding
         location_text = body.location_text
-        if location_text and location_text.lower() == "current location":
-            if body.gen_lat is not None and body.gen_lon is not None:
-                log.info(f"[Trips] Reverse geocoding 'Current Location' at ({body.gen_lat}, {body.gen_lon})")
+        log.info(f"[Trips] Location check: text='{location_text}', lat={body.gen_lat}, lon={body.gen_lon}")
+        if location_text and location_text.lower().strip() == "current location":
+            log.info(f"[Trips] Detected 'Current Location', checking coordinates...")
+            # Check for valid coordinates (not None and not 0,0)
+            has_valid_coords = (
+                body.gen_lat is not None and
+                body.gen_lon is not None and
+                (body.gen_lat != 0.0 or body.gen_lon != 0.0)
+            )
+            if has_valid_coords:
+                log.info(f"[Trips] Reverse geocoding at ({body.gen_lat}, {body.gen_lon})")
                 geocoded = reverse_geocode_sync(body.gen_lat, body.gen_lon)
                 if geocoded:
                     location_text = geocoded
                     log.info(f"[Trips] Geocoded to: {location_text}")
                 else:
                     log.warning("[Trips] Geocoding failed, keeping 'Current Location'")
+            else:
+                log.warning(f"[Trips] No valid coordinates for 'Current Location': lat={body.gen_lat}, lon={body.gen_lon}")
 
         # Insert trip
         result = connection.execute(

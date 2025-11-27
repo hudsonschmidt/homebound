@@ -38,7 +38,7 @@ async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
                 headers={
                     "User-Agent": "Homebound-App/1.0 (safety app for outdoor activities)"
                 },
-                timeout=5.0
+                timeout=10.0
             )
 
             if response.status_code != 200:
@@ -137,7 +137,7 @@ def reverse_geocode_sync(lat: float, lon: float) -> Optional[str]:
                 headers={
                     "User-Agent": "Homebound-App/1.0 (safety app for outdoor activities)"
                 },
-                timeout=5.0
+                timeout=10.0
             )
 
             if response.status_code != 200:

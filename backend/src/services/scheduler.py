@@ -216,7 +216,7 @@ def init_scheduler() -> AsyncIOScheduler:
     # Check for overdue trips every minute
     scheduler.add_job(
         check_overdue_trips,
-        IntervalTrigger(minutes=1),
+        IntervalTrigger(minutes=0.2),
         id="check_overdue",
         name="Check for overdue trips",
         replace_existing=True,
