@@ -27,6 +27,20 @@ async def check_overdue_trips():
         log.info(f"[Scheduler] Checking for overdue trips at {now}")
 
         with db.engine.begin() as conn:
+            # First, activate any planned trips whose start time has passed
+            activated = conn.execute(
+                sqlalchemy.text("""
+                    UPDATE trips
+                    SET status = 'active'
+                    WHERE status = 'planned' AND start < :now
+                    RETURNING id
+                """),
+                {"now": now}
+            ).fetchall()
+
+            if activated:
+                log.info(f"[Scheduler] Activated {len(activated)} planned trips: {[t.id for t in activated]}")
+
             # Find active or overdue trips that are past their ETA
             # Include 'overdue' status so we can check if grace period expired and send notifications
             overdue_trips = conn.execute(

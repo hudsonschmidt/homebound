@@ -1,12 +1,38 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import List, Optional, Any
 
 from ..config import get_settings
 
 settings = get_settings()
 log = logging.getLogger(__name__)
+
+
+def should_display_location(location_text: Optional[str]) -> bool:
+    """Check if location should be displayed in emails.
+
+    Returns False for:
+    - None or empty string
+    - "Current Location"
+    - Coordinate strings (e.g., "37.7749°N, 122.4194°W")
+    """
+    if not location_text:
+        return False
+
+    location_text = location_text.strip()
+
+    # Skip "Current Location"
+    if location_text.lower() == "current location":
+        return False
+
+    # Skip coordinate patterns (e.g., "37.7749°N, 122.4194°W" or "37.7749, -122.4194")
+    coord_pattern = r'^-?\d+\.?\d*°?[NSEW]?,?\s*-?\d+\.?\d*°?[NSEW]?$'
+    if re.match(coord_pattern, location_text, re.IGNORECASE):
+        return False
+
+    return True
 
 
 async def send_email(
@@ -136,7 +162,7 @@ You're receiving this message because you were listed as an emergency contact fo
 Trip: {trip_title}
 Expected by: {eta_formatted}
 """
-            if trip_location_text:
+            if should_display_location(trip_location_text):
                 plain_body += f"Last known location: {trip_location_text}\n"
 
             plain_body += """
@@ -148,12 +174,13 @@ Action Needed:
 This notification was sent automatically because the person did not check in by their expected time plus the grace period they set.
 """
 
-            # HTML body
+            # HTML body - only pass location if it should be displayed
+            display_location = trip_location_text if should_display_location(trip_location_text) else None
             html_body = create_overdue_notification_email_html(
                 contact_name=contact_name,
                 plan_title=trip_title,
                 expected_time=eta_formatted,
-                location=trip_location_text
+                location=display_location
             )
 
             await send_email(
@@ -248,7 +275,7 @@ Activity: {activity_name}
 Starting: {start_formatted}
 Expected back by: {eta_formatted}
 """
-            if trip_location_text:
+            if should_display_location(trip_location_text):
                 plain_body += f"Location: {trip_location_text}\n"
 
             plain_body += f"""
@@ -261,7 +288,8 @@ Safe travels!
 - The Homebound Team
 """
 
-            # HTML body
+            # HTML body - only pass location if it should be displayed
+            display_location = trip_location_text if should_display_location(trip_location_text) else None
             html_body = create_trip_created_email_html(
                 contact_name=contact_name,
                 user_name=user_name,
@@ -269,7 +297,7 @@ Safe travels!
                 activity=activity_name,
                 start_time=start_formatted,
                 expected_time=eta_formatted,
-                location=trip_location_text
+                location=display_location
             )
 
             await send_email(
@@ -345,7 +373,7 @@ Trip: {trip_title}
 Activity: {activity_name}
 Expected back by: {eta_formatted}
 """
-            if trip_location_text:
+            if should_display_location(trip_location_text):
                 plain_body += f"Location: {trip_location_text}\n"
 
             plain_body += f"""
@@ -358,14 +386,15 @@ Stay safe out there!
 - The Homebound Team
 """
 
-            # HTML body
+            # HTML body - only pass location if it should be displayed
+            display_location = trip_location_text if should_display_location(trip_location_text) else None
             html_body = create_trip_starting_now_email_html(
                 contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name,
                 expected_time=eta_formatted,
-                location=trip_location_text
+                location=display_location
             )
 
             await send_email(
