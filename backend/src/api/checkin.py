@@ -22,12 +22,12 @@ class CheckinResponse(BaseModel):
 def checkin_with_token(token: str, background_tasks: BackgroundTasks):
     """Check in to a trip using a magic token"""
     with db.engine.begin() as connection:
-        # Find trip by checkin_token with activity name and timezone
+        # Find trip by checkin_token with activity name, timezone, and location
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       t.timezone, a.name as activity_name
+                       t.timezone, t.location_text, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkin_token = :token
@@ -91,7 +91,7 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
             contacts_for_email = [dict(c._mapping) for c in contacts_result]
 
         # Build trip dict for email notification
-        trip_data = {"title": trip.title}
+        trip_data = {"title": trip.title, "location_text": trip.location_text}
         activity_name = trip.activity_name
         user_timezone = trip.timezone
 

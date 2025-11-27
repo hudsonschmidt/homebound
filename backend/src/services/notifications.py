@@ -265,7 +265,7 @@ async def send_trip_created_emails(
         if contact_email:
             subject = f"{user_name} added you as an emergency contact"
 
-            # Plain text fallback
+            # Plain text fallback - always show location for hello emails
             plain_body = f"""Hi {contact_name},
 
 {user_name} has added you as an emergency contact for an upcoming trip on Homebound.
@@ -274,11 +274,8 @@ Trip: {trip_title}
 Activity: {activity_name}
 Starting: {start_formatted}
 Expected back by: {eta_formatted}
-"""
-            if should_display_location(trip_location_text):
-                plain_body += f"Location: {trip_location_text}\n"
+Location: {trip_location_text or 'Not specified'}
 
-            plain_body += f"""
 What does this mean?
 If {user_name} doesn't check in by their expected return time (plus a grace period), you'll receive an alert email asking you to check on them.
 
@@ -288,8 +285,7 @@ Safe travels!
 - The Homebound Team
 """
 
-            # HTML body - only pass location if it should be displayed
-            display_location = trip_location_text if should_display_location(trip_location_text) else None
+            # HTML body - always show location for hello emails
             html_body = create_trip_created_email_html(
                 contact_name=contact_name,
                 user_name=user_name,
@@ -297,7 +293,7 @@ Safe travels!
                 activity=activity_name,
                 start_time=start_formatted,
                 expected_time=eta_formatted,
-                location=display_location
+                location=trip_location_text or "Not specified"
             )
 
             await send_email(
@@ -364,7 +360,7 @@ async def send_trip_starting_now_emails(
         if contact_email:
             subject = f"🚀 {user_name} just started a trip"
 
-            # Plain text fallback
+            # Plain text fallback - always show location for hello emails
             plain_body = f"""Hi {contact_name},
 
 {user_name} has just started a trip and added you as an emergency contact.
@@ -372,11 +368,8 @@ async def send_trip_starting_now_emails(
 Trip: {trip_title}
 Activity: {activity_name}
 Expected back by: {eta_formatted}
-"""
-            if should_display_location(trip_location_text):
-                plain_body += f"Location: {trip_location_text}\n"
+Location: {trip_location_text or 'Not specified'}
 
-            plain_body += f"""
 What does this mean?
 If {user_name} doesn't check in by their expected return time (plus a grace period), you'll receive an urgent alert email asking you to check on them.
 
@@ -386,15 +379,14 @@ Stay safe out there!
 - The Homebound Team
 """
 
-            # HTML body - only pass location if it should be displayed
-            display_location = trip_location_text if should_display_location(trip_location_text) else None
+            # HTML body - always show location for hello emails
             html_body = create_trip_starting_now_email_html(
                 contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name,
                 expected_time=eta_formatted,
-                location=display_location
+                location=trip_location_text or "Not specified"
             )
 
             await send_email(
@@ -430,6 +422,7 @@ async def send_checkin_update_emails(
 
     # Handle both dict and Row objects
     trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+    trip_location_text = trip.get('location_text') if hasattr(trip, 'get') else getattr(trip, 'location_text', None)
 
     # Get current time in user's timezone
     now = datetime.utcnow()
@@ -460,19 +453,25 @@ async def send_checkin_update_emails(
 Trip: {trip_title}
 Activity: {activity_name}
 Check-in time: {checkin_time}
+"""
+            if should_display_location(trip_location_text):
+                plain_body += f"Location: {trip_location_text}\n"
 
+            plain_body += """
 This is just an update to let you know they're doing well. Their trip is still active.
 
 - The Homebound Team
 """
 
-            # HTML body
+            # HTML body - only pass location if it should be displayed
+            display_location = trip_location_text if should_display_location(trip_location_text) else None
             html_body = create_checkin_update_email_html(
                 contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name,
-                checkin_time=checkin_time
+                checkin_time=checkin_time,
+                location=display_location
             )
 
             await send_email(

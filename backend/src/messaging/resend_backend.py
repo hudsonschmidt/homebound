@@ -519,9 +519,14 @@ def create_checkin_update_email_html(
     user_name: str,
     plan_title: str,
     activity: str,
-    checkin_time: str
+    checkin_time: str,
+    location: Optional[str] = None
 ) -> str:
     """Create HTML email template for check-in update notifications."""
+    location_html = ""
+    if location:
+        location_html = f"<p><strong>📍 Location:</strong> {location}</p>"
+
     return f"""
 <!DOCTYPE html>
 <html>
@@ -602,6 +607,7 @@ def create_checkin_update_email_html(
         <div class="trip-info">
             <p><strong>Trip:</strong> {plan_title}</p>
             <p><strong>Activity:</strong> {activity}</p>
+            {location_html}
         </div>
 
         <p>This is just an update to let you know they're doing well. Their trip is still active.</p>

@@ -9,6 +9,7 @@ from src import database as db
 from src.api import auth
 from src.api.activities import Activity
 from src.services.notifications import send_trip_created_emails, send_trip_starting_now_emails, send_trip_extended_emails
+from src.services.geocoding import reverse_geocode_sync
 import sqlalchemy
 import json
 import logging
@@ -184,6 +185,18 @@ def create_trip(
         start_time = body.start if body.start.tzinfo else body.start.replace(tzinfo=timezone.utc)
         initial_status = 'planned' if start_time > current_time else 'active'
 
+        # Resolve "Current Location" to a proper place name via reverse geocoding
+        location_text = body.location_text
+        if location_text and location_text.lower() == "current location":
+            if body.gen_lat is not None and body.gen_lon is not None:
+                log.info(f"[Trips] Reverse geocoding 'Current Location' at ({body.gen_lat}, {body.gen_lon})")
+                geocoded = reverse_geocode_sync(body.gen_lat, body.gen_lon)
+                if geocoded:
+                    location_text = geocoded
+                    log.info(f"[Trips] Geocoded to: {location_text}")
+                else:
+                    log.warning("[Trips] Geocoding failed, keeping 'Current Location'")
+
         # Insert trip
         result = connection.execute(
             sqlalchemy.text(
@@ -209,7 +222,7 @@ def create_trip(
                 "start": body.start.isoformat(),
                 "eta": body.eta.isoformat(),
                 "grace_min": body.grace_min,
-                "location_text": body.location_text or "Unknown Location",  # Default if not provided
+                "location_text": location_text or "Unknown Location",  # Default if not provided
                 "gen_lat": body.gen_lat if body.gen_lat is not None else 0.0,  # Default to 0.0
                 "gen_lon": body.gen_lon if body.gen_lon is not None else 0.0,  # Default to 0.0
                 "notes": body.notes,
