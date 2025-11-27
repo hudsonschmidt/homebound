@@ -156,7 +156,8 @@ async def send_trip_created_emails(
     trip: Any,
     contacts: List[Any],
     user_name: str,
-    activity_name: str
+    activity_name: str,
+    user_timezone: Optional[str] = None
 ):
     """Send notification emails to contacts when they're added to a trip.
 
@@ -165,8 +166,10 @@ async def send_trip_created_emails(
         contacts: List of contact dictionaries or Row objects
         user_name: Name of the user creating the trip
         activity_name: Name of the activity (e.g., "Hiking", "Skiing")
+        user_timezone: User's timezone (e.g., "America/New_York")
     """
     from datetime import datetime
+    import pytz
     from ..messaging.resend_backend import create_trip_created_email_html
 
     # Handle both dict and Row objects
@@ -175,18 +178,37 @@ async def send_trip_created_emails(
     trip_eta = trip.get('eta') if hasattr(trip, 'get') else trip.eta
     trip_location_text = trip.get('location_text') if hasattr(trip, 'get') else trip.location_text
 
-    # Format times
+    # Parse datetimes
     if isinstance(trip_start, str):
-        start_dt = datetime.fromisoformat(trip_start.replace(' ', 'T'))
+        start_dt = datetime.fromisoformat(trip_start.replace(' ', 'T').replace('Z', '+00:00'))
     else:
         start_dt = trip_start
-    start_formatted = start_dt.strftime('%B %d, %Y at %I:%M %p')
 
     if isinstance(trip_eta, str):
-        eta_dt = datetime.fromisoformat(trip_eta.replace(' ', 'T'))
+        eta_dt = datetime.fromisoformat(trip_eta.replace(' ', 'T').replace('Z', '+00:00'))
     else:
         eta_dt = trip_eta
-    eta_formatted = eta_dt.strftime('%B %d, %Y at %I:%M %p')
+
+    # Convert to user's timezone if provided
+    timezone_display = ""
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            # Make datetimes timezone-aware if they aren't
+            if start_dt.tzinfo is None:
+                start_dt = pytz.utc.localize(start_dt)
+            if eta_dt.tzinfo is None:
+                eta_dt = pytz.utc.localize(eta_dt)
+            # Convert to user's timezone
+            start_dt = start_dt.astimezone(tz)
+            eta_dt = eta_dt.astimezone(tz)
+            # Get timezone abbreviation (e.g., "PST", "EST")
+            timezone_display = f" {start_dt.strftime('%Z')}"
+        except Exception as e:
+            log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
+
+    start_formatted = start_dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display
+    eta_formatted = eta_dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display
 
     # Send to each contact
     for contact in contacts:
@@ -241,6 +263,269 @@ Safe travels!
             log.info(f"Sent trip created notification to {contact_email} for trip '{trip_title}'")
 
 
+async def send_trip_starting_now_emails(
+    trip: Any,
+    contacts: List[Any],
+    user_name: str,
+    activity_name: str,
+    user_timezone: Optional[str] = None
+):
+    """Send notification emails to contacts when a trip starts immediately.
+
+    Args:
+        trip: Dictionary or Row object with trip data
+        contacts: List of contact dictionaries or Row objects
+        user_name: Name of the user creating the trip
+        activity_name: Name of the activity (e.g., "Hiking", "Skiing")
+        user_timezone: User's timezone (e.g., "America/New_York")
+    """
+    from datetime import datetime
+    import pytz
+    from ..messaging.resend_backend import create_trip_starting_now_email_html
+
+    # Handle both dict and Row objects
+    trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+    trip_eta = trip.get('eta') if hasattr(trip, 'get') else trip.eta
+    trip_location_text = trip.get('location_text') if hasattr(trip, 'get') else trip.location_text
+
+    # Parse eta datetime
+    if isinstance(trip_eta, str):
+        eta_dt = datetime.fromisoformat(trip_eta.replace(' ', 'T').replace('Z', '+00:00'))
+    else:
+        eta_dt = trip_eta
+
+    # Convert to user's timezone if provided
+    timezone_display = ""
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            if eta_dt.tzinfo is None:
+                eta_dt = pytz.utc.localize(eta_dt)
+            eta_dt = eta_dt.astimezone(tz)
+            timezone_display = f" {eta_dt.strftime('%Z')}"
+        except Exception as e:
+            log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
+
+    eta_formatted = eta_dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display
+
+    # Send to each contact
+    for contact in contacts:
+        contact_email = contact.get('email') if hasattr(contact, 'get') else contact.email
+        contact_name = contact.get('name') if hasattr(contact, 'get') else contact.name
+
+        if contact_email:
+            subject = f"🚀 {user_name} just started a trip"
+
+            # Plain text fallback
+            plain_body = f"""Hi {contact_name},
+
+{user_name} has just started a trip and added you as an emergency contact.
+
+Trip: {trip_title}
+Activity: {activity_name}
+Expected back by: {eta_formatted}
+"""
+            if trip_location_text:
+                plain_body += f"Location: {trip_location_text}\n"
+
+            plain_body += f"""
+What does this mean?
+If {user_name} doesn't check in by their expected return time (plus a grace period), you'll receive an urgent alert email asking you to check on them.
+
+No action is needed right now. We just wanted you to know they're currently out and trust you to be there if needed.
+
+Stay safe out there!
+- The Homebound Team
+"""
+
+            # HTML body
+            html_body = create_trip_starting_now_email_html(
+                contact_name=contact_name,
+                user_name=user_name,
+                plan_title=trip_title,
+                activity=activity_name,
+                expected_time=eta_formatted,
+                location=trip_location_text
+            )
+
+            await send_email(
+                contact_email,
+                subject,
+                plain_body,
+                html_body,
+                from_email=settings.RESEND_HELLO_EMAIL  # hello@
+            )
+
+            log.info(f"Sent trip starting now notification to {contact_email} for trip '{trip_title}'")
+
+
+async def send_checkin_update_emails(
+    trip: Any,
+    contacts: List[Any],
+    user_name: str,
+    activity_name: str,
+    user_timezone: Optional[str] = None
+):
+    """Send check-in update emails to contacts when user checks in.
+
+    Args:
+        trip: Dictionary or Row object with trip data
+        contacts: List of contact dictionaries or Row objects
+        user_name: Name of the user who checked in
+        activity_name: Name of the activity (e.g., "Hiking", "Skiing")
+        user_timezone: User's timezone (e.g., "America/New_York")
+    """
+    from datetime import datetime
+    import pytz
+    from ..messaging.resend_backend import create_checkin_update_email_html
+
+    # Handle both dict and Row objects
+    trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+
+    # Get current time in user's timezone
+    now = datetime.utcnow()
+    timezone_display = ""
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            now = pytz.utc.localize(now).astimezone(tz)
+            timezone_display = f" {now.strftime('%Z')}"
+        except Exception as e:
+            log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
+
+    checkin_time = now.strftime('%B %d, %Y at %I:%M %p') + timezone_display
+
+    # Send to each contact
+    for contact in contacts:
+        contact_email = contact.get('email') if hasattr(contact, 'get') else contact.email
+        contact_name = contact.get('name') if hasattr(contact, 'get') else contact.name
+
+        if contact_email:
+            subject = f"📍 {user_name} checked in"
+
+            # Plain text fallback
+            plain_body = f"""Hi {contact_name},
+
+{user_name} just checked in!
+
+Trip: {trip_title}
+Activity: {activity_name}
+Check-in time: {checkin_time}
+
+This is just an update to let you know they're doing well. Their trip is still active.
+
+- The Homebound Team
+"""
+
+            # HTML body
+            html_body = create_checkin_update_email_html(
+                contact_name=contact_name,
+                user_name=user_name,
+                plan_title=trip_title,
+                activity=activity_name,
+                checkin_time=checkin_time
+            )
+
+            await send_email(
+                contact_email,
+                subject,
+                plain_body,
+                html_body,
+                from_email=settings.RESEND_UPDATE_EMAIL  # update@
+            )
+
+            log.info(f"Sent checkin update to {contact_email} for trip '{trip_title}'")
+
+
+async def send_trip_extended_emails(
+    trip: Any,
+    contacts: List[Any],
+    user_name: str,
+    activity_name: str,
+    extended_by_minutes: int,
+    user_timezone: Optional[str] = None
+):
+    """Send notification emails to contacts when user extends their trip.
+
+    Args:
+        trip: Dictionary or Row object with trip data
+        contacts: List of contact dictionaries or Row objects
+        user_name: Name of the user who extended the trip
+        activity_name: Name of the activity (e.g., "Hiking", "Skiing")
+        extended_by_minutes: How many minutes the trip was extended by
+        user_timezone: User's timezone (e.g., "America/New_York")
+    """
+    from datetime import datetime
+    import pytz
+    from ..messaging.resend_backend import create_trip_extended_email_html
+
+    # Handle both dict and Row objects
+    trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+    trip_eta = trip.get('eta') if hasattr(trip, 'get') else trip.eta
+
+    # Parse eta datetime
+    if isinstance(trip_eta, str):
+        eta_dt = datetime.fromisoformat(trip_eta.replace(' ', 'T').replace('Z', '+00:00'))
+    else:
+        eta_dt = trip_eta
+
+    # Convert to user's timezone if provided
+    timezone_display = ""
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            if eta_dt.tzinfo is None:
+                eta_dt = pytz.utc.localize(eta_dt)
+            eta_dt = eta_dt.astimezone(tz)
+            timezone_display = f" {eta_dt.strftime('%Z')}"
+        except Exception as e:
+            log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
+
+    new_eta_formatted = eta_dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display
+
+    # Send to each contact
+    for contact in contacts:
+        contact_email = contact.get('email') if hasattr(contact, 'get') else contact.email
+        contact_name = contact.get('name') if hasattr(contact, 'get') else contact.name
+
+        if contact_email:
+            subject = f"⏱️ {user_name} extended their trip"
+
+            # Plain text fallback
+            plain_body = f"""Hi {contact_name},
+
+{user_name} extended their trip by {extended_by_minutes} minutes.
+
+Trip: {trip_title}
+Activity: {activity_name}
+New expected return: {new_eta_formatted}
+
+This means they checked in and need a bit more time. The trip is still active and they're doing well.
+
+- The Homebound Team
+"""
+
+            # HTML body
+            html_body = create_trip_extended_email_html(
+                contact_name=contact_name,
+                user_name=user_name,
+                plan_title=trip_title,
+                activity=activity_name,
+                extended_by=extended_by_minutes,
+                new_eta=new_eta_formatted
+            )
+
+            await send_email(
+                contact_email,
+                subject,
+                plain_body,
+                html_body,
+                from_email=settings.RESEND_UPDATE_EMAIL  # update@
+            )
+
+            log.info(f"Sent trip extended notification to {contact_email} for trip '{trip_title}'")
+
+
 async def send_trip_completed_emails(
     trip: Any,
     contacts: List[Any],
@@ -266,7 +551,7 @@ async def send_trip_completed_emails(
         contact_name = contact.get('name') if hasattr(contact, 'get') else contact.name
 
         if contact_email:
-            subject = f"Good news! {user_name} is safe"
+            subject = f"✅ Good news! {user_name} is safe"
 
             # Plain text fallback
             plain_body = f"""Hi {contact_name},
@@ -297,7 +582,7 @@ Until the next adventure!
                 subject,
                 plain_body,
                 html_body,
-                from_email=settings.RESEND_HELLO_EMAIL  # hello@
+                from_email=settings.RESEND_UPDATE_EMAIL  # update@ for completion
             )
 
             log.info(f"Sent trip completed notification to {contact_email} for trip '{trip_title}'")

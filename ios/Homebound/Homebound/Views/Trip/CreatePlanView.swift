@@ -184,6 +184,8 @@ struct CreatePlanView: View {
             .alert("Zero Grace Period Warning", isPresented: $showZeroGraceWarning) {
                 Button("I Understand", role: .destructive) {
                     showZeroGraceWarning = false
+                    // Advance to next step after user confirms
+                    currentStep += 1
                 }
                 Button("Set to 15 minutes", role: .cancel) {
                     graceMinutes = 15
@@ -224,7 +226,9 @@ struct CreatePlanView: View {
             return !planTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                    !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case 2:
-            return etaTime > startTime
+            // Return time must be after start time AND in the future
+            let now = Date()
+            return etaTime > startTime && etaTime > now
         case 3:
             return !contacts.isEmpty
         case 4:
@@ -304,6 +308,9 @@ struct CreatePlanView: View {
             }
 
             // Step 2: Create plan with contact IDs
+            // Get user's timezone identifier (e.g., "America/New_York")
+            let userTimezone = TimeZone.current.identifier
+
             let plan = TripCreateRequest(
                 title: planTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 activity: selectedActivity,
@@ -316,7 +323,8 @@ struct CreatePlanView: View {
                 notes: notes.isEmpty ? nil : notes,
                 contact1: contactIds.count > 0 ? contactIds[0] : nil,
                 contact2: contactIds.count > 1 ? contactIds[1] : nil,
-                contact3: contactIds.count > 2 ? contactIds[2] : nil
+                contact3: contactIds.count > 2 ? contactIds[2] : nil,
+                timezone: userTimezone
             )
 
             let createdPlan = await session.createPlan(plan)
@@ -512,6 +520,12 @@ struct Step2TimeSettings: View {
         let today = calendar.startOfDay(for: Date())
         let selectedDay = calendar.startOfDay(for: selectedStartDate)
         return today == selectedDay
+    }
+
+    var isReturnTimeValid: Bool {
+        // Return time must be after start time AND in the future
+        let now = Date()
+        return etaTime > startTime && etaTime > now
     }
 
     var body: some View {
@@ -755,9 +769,20 @@ struct Step2TimeSettings: View {
 
                         // Return Time
                         VStack(alignment: .leading, spacing: 12) {
-                            Label("Return Time", systemImage: "airplane.arrival")
-                                .font(.headline)
-                                .foregroundStyle(Color.orange)
+                            HStack {
+                                Label("Return Time", systemImage: "airplane.arrival")
+                                    .font(.headline)
+                                    .foregroundStyle(isReturnTimeValid ? Color.orange : Color.red)
+
+                                Spacer()
+
+                                if !isReturnTimeValid {
+                                    Text("Must be in future")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .fontWeight(.medium)
+                                }
+                            }
 
                             HStack(spacing: 4) {
                                 // Hour Picker (12-hour format)
@@ -799,12 +824,26 @@ struct Step2TimeSettings: View {
                             }
                             .padding(.horizontal)
 
-                            Text("\(selectedEndDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(returnHour):\(String(format: "%02d", returnMinute)) \(returnAMPM == 0 ? "AM" : "PM")")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            if isReturnTimeValid {
+                                Text("\(selectedEndDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(returnHour):\(String(format: "%02d", returnMinute)) \(returnAMPM == 0 ? "AM" : "PM")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.red)
+                                    Text("Return time must be in the future")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                            }
                         }
                         .padding()
-                        .background(Color(.secondarySystemFill))
+                        .background(isReturnTimeValid ? Color(.secondarySystemFill) : Color.red.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isReturnTimeValid ? Color.clear : Color.red.opacity(0.5), lineWidth: 1)
+                        )
                         .cornerRadius(12)
 
                         // Grace Period
@@ -1790,7 +1829,7 @@ struct ContactSelectionRow: View {
             HStack {
                 // Contact Icon
                 Circle()
-                    .fill(Color.hbAccent)
+                    .fill(isSelected ? Color.hbBrand : Color.hbAccent)
                     .frame(width: 40, height: 40)
                     .overlay(
                         Text(contact.name.prefix(1).uppercased())
@@ -1818,7 +1857,13 @@ struct ContactSelectionRow: View {
                     .foregroundStyle(isSelected ? (Color.hbBrand) : Color(.tertiaryLabel))
                     .opacity(canSelect ? 1.0 : 0.5)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.hbBrand.opacity(0.1) : Color(.secondarySystemFill))
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!canSelect && !isSelected)

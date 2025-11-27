@@ -14,9 +14,24 @@
 		F82135962EAB01E300237850 /* Homebound.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Homebound.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F8D6FEE72ED8AE1C00B62467 /* Exceptions for "Homebound" folder in "Homebound" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Config/Base.xcconfig,
+				Config/Prod.xcconfig,
+				Config/Staging.xcconfig,
+			);
+			target = F82135952EAB01E300237850 /* Homebound */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F82135982EAB01E300237850 /* Homebound */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F8D6FEE72ED8AE1C00B62467 /* Exceptions for "Homebound" folder in "Homebound" target */,
+			);
 			path = Homebound;
 			sourceTree = "<group>";
 		};
@@ -92,7 +107,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2600;
-				LastUpgradeCheck = 2600;
+				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					F82135952EAB01E300237850 = {
 						CreatedOnToolsVersion = 26.0.1;
@@ -201,6 +216,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -258,6 +274,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};

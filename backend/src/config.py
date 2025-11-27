@@ -34,6 +34,7 @@ class Settings:
     RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "noreply@homeboundapp.com")
     RESEND_ALERTS_EMAIL: str = os.getenv("RESEND_ALERTS_EMAIL", "alerts@homeboundapp.com")
     RESEND_HELLO_EMAIL: str = os.getenv("RESEND_HELLO_EMAIL", "hello@homeboundapp.com")
+    RESEND_UPDATE_EMAIL: str = os.getenv("RESEND_UPDATE_EMAIL", "update@homeboundapp.com")
 
     # SMS settings for notifications
     TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")

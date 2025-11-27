@@ -151,7 +151,8 @@ def test_checkin_with_valid_token():
     user_id, trip_id, checkin_token, _ = setup_test_trip_with_tokens()
 
     # Check in
-    response = checkin_with_token(checkin_token)
+    background_tasks = BackgroundTasks()
+    response = checkin_with_token(checkin_token, background_tasks)
 
     assert isinstance(response, CheckinResponse)
     assert response.ok is True
@@ -188,8 +189,9 @@ def test_checkin_with_valid_token():
 
 def test_checkin_with_invalid_token():
     """Test checking in with an invalid token"""
+    background_tasks = BackgroundTasks()
     with pytest.raises(HTTPException) as exc_info:
-        checkin_with_token("invalid_token_12345")
+        checkin_with_token("invalid_token_12345", background_tasks)
 
     assert exc_info.value.status_code == 404
     assert "invalid" in exc_info.value.detail.lower()
@@ -257,7 +259,7 @@ def test_checkin_after_checkout():
 
     # Try to check in after checkout
     with pytest.raises(HTTPException) as exc_info:
-        checkin_with_token(checkin_token)
+        checkin_with_token(checkin_token, background_tasks)
 
     assert exc_info.value.status_code == 404
 
@@ -268,12 +270,14 @@ def test_multiple_checkins():
     """Test multiple check-ins on the same trip"""
     user_id, trip_id, checkin_token, _ = setup_test_trip_with_tokens()
 
+    background_tasks = BackgroundTasks()
+
     # First check-in
-    response1 = checkin_with_token(checkin_token)
+    response1 = checkin_with_token(checkin_token, background_tasks)
     assert response1.ok is True
 
     # Second check-in
-    response2 = checkin_with_token(checkin_token)
+    response2 = checkin_with_token(checkin_token, background_tasks)
     assert response2.ok is True
 
     # Verify multiple events were created

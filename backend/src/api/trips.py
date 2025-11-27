@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from src import database as db
 from src.api import auth
 from src.api.activities import Activity
-from src.services.notifications import send_trip_created_emails
+from src.services.notifications import send_trip_created_emails, send_trip_starting_now_emails, send_trip_extended_emails
 import sqlalchemy
 import json
 import logging
@@ -53,6 +53,7 @@ class TripCreate(BaseModel):
     contact1: Optional[int] = None  # Contact ID reference
     contact2: Optional[int] = None
     contact3: Optional[int] = None
+    timezone: Optional[str] = None  # User's timezone (e.g., "America/New_York")
 
 
 class TripResponse(BaseModel):
@@ -283,17 +284,35 @@ def create_trip(
             "location_text": trip["location_text"]
         }
 
+        # Capture timezone and status for closure
+        user_timezone = body.timezone
+        is_starting_now = initial_status == 'active'
+
         # Schedule background task to send emails to contacts
+        # Use different email templates based on whether trip is starting now or upcoming
         def send_emails_sync():
-            asyncio.run(send_trip_created_emails(
-                trip=trip_data,
-                contacts=contacts_for_email,
-                user_name=user_name,
-                activity_name=activity_obj.name
-            ))
+            if is_starting_now:
+                # Trip is starting immediately - send "starting now" email
+                asyncio.run(send_trip_starting_now_emails(
+                    trip=trip_data,
+                    contacts=contacts_for_email,
+                    user_name=user_name,
+                    activity_name=activity_obj.name,
+                    user_timezone=user_timezone
+                ))
+            else:
+                # Trip is scheduled for later - send "upcoming trip" email
+                asyncio.run(send_trip_created_emails(
+                    trip=trip_data,
+                    contacts=contacts_for_email,
+                    user_name=user_name,
+                    activity_name=activity_obj.name,
+                    user_timezone=user_timezone
+                ))
 
         background_tasks.add_task(send_emails_sync)
-        log.info(f"[Trips] Scheduled email notifications for {len(contacts_for_email)} contacts")
+        email_type = "starting now" if is_starting_now else "upcoming trip"
+        log.info(f"[Trips] Scheduled {email_type} email notifications for {len(contacts_for_email)} contacts")
 
         return TripResponse(
             id=trip["id"],
@@ -386,7 +405,10 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
 
 @router.get("/active", response_model=Optional[TripResponse])
 def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
-    """Get the current active trip with full activity data including safety tips"""
+    """Get the current active trip with full activity data including safety tips.
+
+    Returns trips that are active, overdue, or overdue_notified - all require user action.
+    """
     with db.engine.begin() as connection:
         trip = connection.execute(
             sqlalchemy.text(
@@ -400,7 +422,7 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
-                WHERE t.user_id = :user_id AND t.status = 'active'
+                WHERE t.user_id = :user_id AND t.status IN ('active', 'overdue', 'overdue_notified')
                 ORDER BY t.created_at DESC
                 LIMIT 1
                 """
@@ -533,10 +555,11 @@ def complete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)
                 detail="Trip not found"
             )
 
-        if trip.status != "active":
+        # Allow completing active, overdue, or overdue_notified trips
+        if trip.status not in ("active", "overdue", "overdue_notified"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Trip is not active"
+                detail="Trip is not active or overdue"
             )
 
         # Update trip status
@@ -598,16 +621,26 @@ def start_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
 
 
 @router.post("/{trip_id}/extend")
-def extend_trip(trip_id: int, minutes: int, user_id: int = Depends(auth.get_current_user_id)):
-    """Extend the ETA of an active trip by the specified number of minutes"""
+def extend_trip(
+    trip_id: int,
+    minutes: int,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Extend the ETA of an active or overdue trip by the specified number of minutes.
+
+    This also acts as a check-in, confirming the user is okay and resetting overdue status.
+    """
     with db.engine.begin() as connection:
-        # Verify trip ownership and status
+        # Verify trip ownership and status - also fetch title and activity for emails
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, status, eta
-                FROM trips
-                WHERE id = :trip_id AND user_id = :user_id
+                SELECT t.id, t.status, t.eta, t.title, t.contact1, t.contact2, t.contact3,
+                       a.name as activity_name
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.id = :trip_id AND t.user_id = :user_id
                 """
             ),
             {"trip_id": trip_id, "user_id": user_id}
@@ -619,31 +652,53 @@ def extend_trip(trip_id: int, minutes: int, user_id: int = Depends(auth.get_curr
                 detail="Trip not found"
             )
 
-        if trip.status != "active":
+        # Allow extending active, overdue, or overdue_notified trips
+        if trip.status not in ("active", "overdue", "overdue_notified"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Can only extend active trips"
+                detail="Can only extend active or overdue trips"
             )
 
         # Parse current ETA and add minutes
         from datetime import timedelta
-        # trip.eta is already a datetime object from the database
         current_eta = trip.eta if isinstance(trip.eta, datetime) else datetime.fromisoformat(trip.eta)
         new_eta = current_eta + timedelta(minutes=minutes)
 
-        # Update trip ETA
+        now = datetime.now(timezone.utc)
+
+        # Update trip ETA and reset status to active (user is checking in)
+        # Also update last_checkin timestamp
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
-                SET eta = :new_eta
+                SET eta = :new_eta, status = 'active', last_checkin = :last_checkin
                 WHERE id = :trip_id
                 """
             ),
-            {"trip_id": trip_id, "new_eta": new_eta.isoformat()}
+            {
+                "trip_id": trip_id,
+                "new_eta": new_eta.isoformat(),
+                "last_checkin": now.isoformat()
+            }
         )
 
-        # Log timeline event
+        # Log checkin event (extending is also a check-in)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO events (user_id, trip_id, what, timestamp)
+                VALUES (:user_id, :trip_id, 'checkin', :timestamp)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "trip_id": trip_id,
+                "timestamp": now.isoformat()
+            }
+        )
+
+        # Log extend event
         connection.execute(
             sqlalchemy.text(
                 """
@@ -654,10 +709,52 @@ def extend_trip(trip_id: int, minutes: int, user_id: int = Depends(auth.get_curr
             {
                 "user_id": user_id,
                 "trip_id": trip_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": now.isoformat(),
                 "extended_by": minutes
             }
         )
+
+        # Fetch user name for email notification
+        user = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+        user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
+        if not user_name:
+            user_name = "A Homebound user"
+
+        # Fetch contacts with email for notification
+        contact_ids = [cid for cid in [trip.contact1, trip.contact2, trip.contact3] if cid is not None]
+        contacts_for_email = []
+        if contact_ids:
+            placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
+            params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
+            contacts_result = connection.execute(
+                sqlalchemy.text(f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"),
+                params
+            ).fetchall()
+            contacts_for_email = [dict(c._mapping) for c in contacts_result]
+
+        # Build trip dict for email notification (with new ETA)
+        trip_data = {
+            "title": trip.title,
+            "eta": new_eta.isoformat()
+        }
+        activity_name = trip.activity_name
+        extended_by = minutes
+
+        # Schedule background task to send extended trip emails to contacts
+        def send_emails_sync():
+            asyncio.run(send_trip_extended_emails(
+                trip=trip_data,
+                contacts=contacts_for_email,
+                user_name=user_name,
+                activity_name=activity_name,
+                extended_by_minutes=extended_by
+            ))
+
+        background_tasks.add_task(send_emails_sync)
+        log.info(f"[Trips] Scheduled trip extended email notifications for {len(contacts_for_email)} contacts")
 
         return {"ok": True, "message": f"Trip extended by {minutes} minutes", "new_eta": new_eta.isoformat()}
 

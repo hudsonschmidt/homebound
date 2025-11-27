@@ -28,6 +28,7 @@ struct TripCreateRequest: Codable {
     var contact1: Int?
     var contact2: Int?
     var contact3: Int?
+    var timezone: String?  // User's timezone (e.g., "America/New_York")
 }
 
 struct Trip: Codable, Identifiable, Equatable {

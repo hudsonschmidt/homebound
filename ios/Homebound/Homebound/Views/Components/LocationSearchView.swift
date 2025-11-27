@@ -242,17 +242,22 @@ struct LocationSearchView: View {
 
                         let address = addressComponents.joined(separator: ", ")
 
+                        // Create a fallback using coordinates if address is empty
+                        let locationDescription = address.isEmpty
+                            ? formatCoordinates(location)
+                            : address
+
                         await MainActor.run {
-                            selectedLocation = address.isEmpty ? "Current Location" : address
+                            selectedLocation = locationDescription
                             selectedCoordinates = location
                             isGettingCurrentLocation = false
                             isPresented = false
-                            print("[LocationSearch] ✅ Current location: \(address)")
+                            print("[LocationSearch] ✅ Current location: \(locationDescription)")
                         }
                     } else {
-                        // Fallback if no items found
+                        // Fallback if no items found - use coordinates
                         await MainActor.run {
-                            selectedLocation = "Current Location"
+                            selectedLocation = formatCoordinates(location)
                             selectedCoordinates = location
                             isGettingCurrentLocation = false
                             isPresented = false
@@ -260,9 +265,9 @@ struct LocationSearchView: View {
                     }
                 } catch {
                     print("[LocationSearch] Reverse geocoding failed: \(error)")
-                    // Fallback to "Current Location" if geocoding fails
+                    // Fallback to coordinates if geocoding fails
                     await MainActor.run {
-                        selectedLocation = "Current Location"
+                        selectedLocation = formatCoordinates(location)
                         selectedCoordinates = location
                         isGettingCurrentLocation = false
                         isPresented = false
@@ -275,6 +280,15 @@ struct LocationSearchView: View {
                 }
             }
         }
+    }
+
+    /// Format coordinates as a human-readable string for fallback when geocoding fails
+    private func formatCoordinates(_ coordinate: CLLocationCoordinate2D) -> String {
+        let latDirection = coordinate.latitude >= 0 ? "N" : "S"
+        let lonDirection = coordinate.longitude >= 0 ? "E" : "W"
+        let lat = abs(coordinate.latitude)
+        let lon = abs(coordinate.longitude)
+        return String(format: "%.4f°%@, %.4f°%@", lat, latDirection, lon, lonDirection)
     }
 
     private func selectSearchResult(_ result: MKLocalSearchCompletion) async {
