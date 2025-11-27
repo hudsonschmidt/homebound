@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import resend
 import logging
 from pathlib import Path
@@ -15,6 +16,54 @@ def load_template(name: str) -> str:
     """Load HTML template from emails directory."""
     template_path = TEMPLATES_DIR / f"{name}.html"
     return template_path.read_text()
+
+
+def html_to_text(html: str) -> str:
+    """Convert HTML to plain text for email fallback.
+
+    Handles common email HTML patterns:
+    - Removes style/script tags and content
+    - Converts <br> and block elements to newlines
+    - Converts <li> to bullet points
+    - Strips remaining HTML tags
+    - Cleans up whitespace
+    """
+    text = html
+
+    # Remove style and script blocks entirely
+    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Convert <br> to newlines
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+
+    # Convert block elements to newlines
+    text = re.sub(r'</p>', '\n\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</div>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</h[1-6]>', '\n\n', text, flags=re.IGNORECASE)
+
+    # Convert list items to bullet points
+    text = re.sub(r'<li[^>]*>', '• ', text, flags=re.IGNORECASE)
+    text = re.sub(r'</li>', '\n', text, flags=re.IGNORECASE)
+
+    # Remove all remaining HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # Decode common HTML entities
+    text = text.replace('&nbsp;', ' ')
+    text = text.replace('&amp;', '&')
+    text = text.replace('&lt;', '<')
+    text = text.replace('&gt;', '>')
+    text = text.replace('&quot;', '"')
+    text = text.replace('&#39;', "'")
+
+    # Clean up whitespace
+    text = re.sub(r'[ \t]+', ' ', text)  # Multiple spaces/tabs to single space
+    text = re.sub(r'\n[ \t]+', '\n', text)  # Remove leading whitespace on lines
+    text = re.sub(r'[ \t]+\n', '\n', text)  # Remove trailing whitespace on lines
+    text = re.sub(r'\n{3,}', '\n\n', text)  # Max 2 consecutive newlines
+
+    return text.strip()
 
 
 def render_template(name: str, **kwargs) -> str:

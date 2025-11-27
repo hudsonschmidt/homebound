@@ -2,7 +2,8 @@
 import asyncio
 from datetime import datetime, timezone
 import logging
-from fastapi import APIRouter, HTTPException, status, BackgroundTasks
+from typing import Optional
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Query
 from pydantic import BaseModel
 from src import database as db
 from src.services.notifications import send_trip_completed_emails, send_checkin_update_emails, send_overdue_resolved_emails
@@ -19,8 +20,13 @@ class CheckinResponse(BaseModel):
 
 
 @router.get("/{token}/checkin", response_model=CheckinResponse)
-def checkin_with_token(token: str, background_tasks: BackgroundTasks):
-    """Check in to a trip using a magic token"""
+def checkin_with_token(
+    token: str,
+    background_tasks: BackgroundTasks,
+    lat: Optional[float] = Query(None, description="Latitude of check-in location"),
+    lon: Optional[float] = Query(None, description="Longitude of check-in location")
+):
+    """Check in to a trip using a magic token. Optionally include lat/lon coordinates."""
     with db.engine.begin() as connection:
         # Find trip by checkin_token with activity name, timezone, location, and ETA
         trip = connection.execute(
@@ -95,8 +101,13 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
         activity_name = trip.activity_name
         user_timezone = trip.timezone
 
+        # Format coordinates if provided
+        coordinates_str = None
+        if lat is not None and lon is not None:
+            coordinates_str = f"{lat:.6f}, {lon:.6f}"
+            log.info(f"[Checkin] Received coordinates: {coordinates_str}")
+
         # Schedule background task to send checkin update emails to contacts
-        # Note: coordinates would need to come from the client; for token-based check-in we don't have them
         def send_emails_sync():
             asyncio.run(send_checkin_update_emails(
                 trip=trip_data,
@@ -104,7 +115,7 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
                 user_name=user_name,
                 activity_name=activity_name,
                 user_timezone=user_timezone,
-                coordinates=None  # Token-based check-in doesn't include coordinates
+                coordinates=coordinates_str
             ))
 
         background_tasks.add_task(send_emails_sync)

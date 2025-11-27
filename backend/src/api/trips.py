@@ -215,12 +215,12 @@ def create_trip(
                     user_id, title, activity, start, eta, grace_min,
                     location_text, gen_lat, gen_lon, notes, status,
                     contact1, contact2, contact3, created_at,
-                    checkin_token, checkout_token
+                    checkin_token, checkout_token, timezone
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
                     :location_text, :gen_lat, :gen_lon, :notes, :status,
                     :contact1, :contact2, :contact3, :created_at,
-                    :checkin_token, :checkout_token
+                    :checkin_token, :checkout_token, :timezone
                 )
                 RETURNING id
                 """
@@ -242,7 +242,8 @@ def create_trip(
                 "contact3": body.contact3,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "checkin_token": checkin_token,
-                "checkout_token": checkout_token
+                "checkout_token": checkout_token,
+                "timezone": body.timezone
             }
         )
         trip_id = result.fetchone()[0]
