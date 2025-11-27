@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 30px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+        }
+        .update-box {
+            background: #e8f8f5;
+            border: 1px solid #bee5eb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .update-box .icon {
+            font-size: 36px;
+            margin-bottom: 10px;
+        }
+        .trip-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .trip-card p {
+            margin: 8px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Homebound!</h1>
+
+        <p>Hi there!</p>
+
+        <div class="update-box">
+            <div class="icon">🎉</div>
+            <p><strong>{user_name}</strong> has finished their trip safely!</p>
+        </div>
+
+        <div class="trip-card">
+            <p><strong>Trip:</strong> {plan_title}</p>
+            <p><strong>Activity:</strong> {activity}</p>
+            <p><strong>Location:</strong> {location_html}</p>
+        </div>
+
+        <p>Their adventure is complete and they've finished safely.</p>
+
+        <p>Thank you for being there for them as an emergency contact!</p>
+
+        <div class="footer">
+            <p>Until the next adventure!</p>
+            <p style="font-size: 12px; color: #999;">
+                <p>Best regards,<br>The Homebound Team</p>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

@@ -45,8 +45,10 @@ async def check_overdue_trips():
             # Include 'overdue' status so we can check if grace period expired and send notifications
             overdue_trips = conn.execute(
                 sqlalchemy.text("""
-                    SELECT t.id, t.user_id, t.title, t.eta, t.grace_min, t.location_text, t.status, t.timezone
+                    SELECT t.id, t.user_id, t.title, t.eta, t.grace_min, t.location_text, t.status, t.timezone,
+                           t.start, t.notes, a.name as activity_name
                     FROM trips t
+                    JOIN activities a ON t.activity = a.id
                     WHERE t.status IN ('active', 'overdue') AND t.eta < :now
                 """),
                 {"now": now}

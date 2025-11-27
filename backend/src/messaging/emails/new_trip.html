@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 30px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+        }
+        .trip-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .trip-card p {
+            margin: 8px 0;
+        }
+        .info-box {
+            background: #e8f4fd;
+            border-left: 4px solid #6C63FF;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>You've been added as an Emergency Contact</h1>
+
+        <p>Hi there!</p>
+
+        <p><strong>{user_name}</strong> has added you as an emergency contact for an upcoming trip on Homebound.</p>
+
+        <div class="trip-card">
+            <p><strong>Trip:</strong> {plan_title}</p>
+            <p><strong>Activity:</strong> {activity}</p>
+            <p><strong>Starting:</strong> {start_time}</p>
+            <p><strong>Expected back by:</strong> {expected_time}</p>
+            <p><strong>Location:</strong> {location_html}</p>
+        </div>
+
+        <div class="info-box">
+            <p><strong>What does this mean?</strong></p>
+            <p>If {user_name} doesn't check in by their expected return time (plus a grace period), you'll receive an alert email asking you to 
+                check on them. If they have checked in during their trip, you will also see their last know coordinates.</p>
+        </div>
+
+        <p>No action is needed right now. We just wanted to let you know they have a trip coming up. You will recieve another email when their trip begins.</p>
+
+        <div class="footer">
+            <p style="font-size: 12px; color: #999;">
+                <p>Best regards,<br>The Homebound Team</p>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

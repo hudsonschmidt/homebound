@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: #fff;
+            border: 3px solid #dc3545;
+            border-radius: 8px;
+            padding: 30px;
+        }
+        .header {
+            background: #dc3545;
+            color: white;
+            padding: 15px;
+            margin: -30px -30px 20px -30px;
+            border-radius: 5px 5px 0 0;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .trip-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .trip-card p {
+            margin: 8px 0;
+        }
+        .action-needed {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Check-in Overdue</h1>
+        </div>
+
+        <p>Hello,</p>
+
+        <p>You're receiving this message because you were listed as an emergency contact for <strong>{user_name}</strong>, whose Homebound safety plan is now overdue.
+            Here are the details of their trip:
+        </p>
+
+        <div class="trip-card">
+            <p><strong>Trip:</strong> {plan_title}</p>
+            <p><strong>Activity:</strong> {activity}</p>
+            <p><strong>Starting:</strong> {start_time}</p>
+            <p><strong>Expected back by:</strong> {expected_time}</p>
+            <p><strong>Location:</strong> {location_html}</p>
+            <p><strong>Notes:</strong> {notes}</p>
+        </div>
+
+        <div class="action-needed">
+            <p><strong>Action Needed:</strong></p>
+            <ul>
+                <li>Try to contact the person directly</li>
+                <li>If unable to reach them, consider check their planned location</li>
+                <li>If you have concerns about their safety, contact local authorities</li>
+            </ul>
+        </div>
+
+        <p>This notification was sent automatically because the person did not check in by their expected time plus the grace period they set.</p>
+
+        <div class="footer">
+            <p>This is an automated message from Homebound.</p>
+        </div>
+    </div>
+</body>
+</html>

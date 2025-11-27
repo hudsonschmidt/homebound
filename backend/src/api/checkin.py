@@ -22,12 +22,12 @@ class CheckinResponse(BaseModel):
 def checkin_with_token(token: str, background_tasks: BackgroundTasks):
     """Check in to a trip using a magic token"""
     with db.engine.begin() as connection:
-        # Find trip by checkin_token with activity name, timezone, and location
+        # Find trip by checkin_token with activity name, timezone, location, and ETA
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       t.timezone, t.location_text, a.name as activity_name
+                       t.timezone, t.location_text, t.eta, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkin_token = :token
@@ -91,18 +91,20 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
             contacts_for_email = [dict(c._mapping) for c in contacts_result]
 
         # Build trip dict for email notification
-        trip_data = {"title": trip.title, "location_text": trip.location_text}
+        trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
         activity_name = trip.activity_name
         user_timezone = trip.timezone
 
         # Schedule background task to send checkin update emails to contacts
+        # Note: coordinates would need to come from the client; for token-based check-in we don't have them
         def send_emails_sync():
             asyncio.run(send_checkin_update_emails(
                 trip=trip_data,
                 contacts=contacts_for_email,
                 user_name=user_name,
                 activity_name=activity_name,
-                user_timezone=user_timezone
+                user_timezone=user_timezone,
+                coordinates=None  # Token-based check-in doesn't include coordinates
             ))
 
         background_tasks.add_task(send_emails_sync)
@@ -118,13 +120,13 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
 def checkout_with_token(token: str, background_tasks: BackgroundTasks):
     """Complete/check out of a trip using a magic token"""
     with db.engine.begin() as connection:
-        # Find trip by checkout_token with activity name and timezone
+        # Find trip by checkout_token with activity name, timezone, and location
         # Allow checkout for active, overdue, and overdue_notified trips
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       t.timezone, a.name as activity_name
+                       t.timezone, t.location_text, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkout_token = :token
@@ -190,7 +192,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             contacts_for_email = [dict(c._mapping) for c in contacts_result]
 
         # Build trip dict for email notification
-        trip_data = {"title": trip.title}
+        trip_data = {"title": trip.title, "location_text": trip.location_text}
         activity_name = trip.activity_name
         user_timezone = trip.timezone
 

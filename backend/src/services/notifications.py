@@ -176,11 +176,36 @@ This notification was sent automatically because the person did not check in by 
 
             # HTML body - only pass location if it should be displayed
             display_location = trip_location_text if should_display_location(trip_location_text) else None
+            # Get activity and start_time from trip (will be passed by scheduler.py)
+            trip_activity = trip.get('activity_name') if hasattr(trip, 'get') else getattr(trip, 'activity_name', 'Unknown')
+            trip_start = trip.get('start') if hasattr(trip, 'get') else getattr(trip, 'start', None)
+            trip_notes = trip.get('notes') if hasattr(trip, 'get') else getattr(trip, 'notes', None)
+
+            # Format start time
+            start_formatted = "Not specified"
+            if trip_start:
+                if isinstance(trip_start, str):
+                    from datetime import datetime
+                    start_dt = datetime.fromisoformat(trip_start.replace(' ', 'T').replace('Z', '+00:00'))
+                else:
+                    start_dt = trip_start
+                if user_timezone:
+                    try:
+                        if start_dt.tzinfo is None:
+                            start_dt = pytz.utc.localize(start_dt)
+                        start_dt = start_dt.astimezone(pytz.timezone(user_timezone))
+                    except Exception:
+                        pass
+                start_formatted = start_dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display
+
             html_body = create_overdue_notification_email_html(
-                contact_name=contact_name,
+                user_name=user_name,
                 plan_title=trip_title,
+                activity=trip_activity,
+                start_time=start_formatted,
                 expected_time=eta_formatted,
-                location=display_location
+                location=display_location,
+                notes=trip_notes
             )
 
             await send_email(
@@ -287,7 +312,6 @@ Safe travels!
 
             # HTML body - always show location for hello emails
             html_body = create_trip_created_email_html(
-                contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name,
@@ -381,7 +405,6 @@ Stay safe out there!
 
             # HTML body - always show location for hello emails
             html_body = create_trip_starting_now_email_html(
-                contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name,
@@ -405,7 +428,8 @@ async def send_checkin_update_emails(
     contacts: List[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: Optional[str] = None
+    user_timezone: Optional[str] = None,
+    coordinates: Optional[str] = None
 ):
     """Send check-in update emails to contacts when user checks in.
 
@@ -415,6 +439,7 @@ async def send_checkin_update_emails(
         user_name: Name of the user who checked in
         activity_name: Name of the activity (e.g., "Hiking", "Skiing")
         user_timezone: User's timezone (e.g., "America/New_York")
+        coordinates: Lat/lon coordinates of the check-in location
     """
     from datetime import datetime
     import pytz
@@ -423,6 +448,7 @@ async def send_checkin_update_emails(
     # Handle both dict and Row objects
     trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
     trip_location_text = trip.get('location_text') if hasattr(trip, 'get') else getattr(trip, 'location_text', None)
+    trip_eta = trip.get('eta') if hasattr(trip, 'get') else getattr(trip, 'eta', None)
 
     # Get current time in user's timezone
     now = datetime.utcnow()
@@ -436,6 +462,23 @@ async def send_checkin_update_emails(
             log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
 
     checkin_time = now.strftime('%B %d, %Y at %I:%M %p') + timezone_display
+
+    # Format expected time (ETA)
+    expected_time = "Not specified"
+    if trip_eta:
+        if isinstance(trip_eta, str):
+            eta_dt = datetime.fromisoformat(trip_eta.replace(' ', 'T').replace('Z', '+00:00'))
+        else:
+            eta_dt = trip_eta
+        if user_timezone:
+            try:
+                tz = pytz.timezone(user_timezone)
+                if eta_dt.tzinfo is None:
+                    eta_dt = pytz.utc.localize(eta_dt)
+                eta_dt = eta_dt.astimezone(tz)
+            except Exception:
+                pass
+        expected_time = eta_dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display
 
     # Send to each contact
     for contact in contacts:
@@ -453,7 +496,10 @@ async def send_checkin_update_emails(
 Trip: {trip_title}
 Activity: {activity_name}
 Check-in time: {checkin_time}
+Expected back by: {expected_time}
 """
+            if coordinates:
+                plain_body += f"Coordinates: {coordinates}\n"
             if should_display_location(trip_location_text):
                 plain_body += f"Location: {trip_location_text}\n"
 
@@ -466,11 +512,12 @@ This is just an update to let you know they're doing well. Their trip is still a
             # HTML body - only pass location if it should be displayed
             display_location = trip_location_text if should_display_location(trip_location_text) else None
             html_body = create_checkin_update_email_html(
-                contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name,
                 checkin_time=checkin_time,
+                expected_time=expected_time,
+                coordinates=coordinates,
                 location=display_location
             )
 
@@ -510,6 +557,7 @@ async def send_trip_extended_emails(
     # Handle both dict and Row objects
     trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
     trip_eta = trip.get('eta') if hasattr(trip, 'get') else trip.eta
+    trip_location_text = trip.get('location_text') if hasattr(trip, 'get') else getattr(trip, 'location_text', None)
 
     # Parse eta datetime
     if isinstance(trip_eta, str):
@@ -554,13 +602,14 @@ This means they checked in and need a bit more time. The trip is still active an
 """
 
             # HTML body
+            display_location = trip_location_text if should_display_location(trip_location_text) else None
             html_body = create_trip_extended_email_html(
-                contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name,
                 extended_by=extended_by_minutes,
-                new_eta=new_eta_formatted
+                new_eta=new_eta_formatted,
+                location=display_location
             )
 
             await send_email(
@@ -596,6 +645,7 @@ async def send_trip_completed_emails(
 
     # Handle both dict and Row objects
     trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+    trip_location_text = trip.get('location_text') if hasattr(trip, 'get') else getattr(trip, 'location_text', None)
 
     # Get current time in user's timezone for completion timestamp
     now = datetime.utcnow()
@@ -636,11 +686,12 @@ Until the next adventure!
 """
 
             # HTML body
+            display_location = trip_location_text if should_display_location(trip_location_text) else None
             html_body = create_trip_completed_email_html(
-                contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
-                activity=activity_name
+                activity=activity_name,
+                location=display_location
             )
 
             await send_email(
@@ -720,7 +771,6 @@ Thank you for being there as an emergency contact!
 
             # HTML body
             html_body = create_overdue_resolved_email_html(
-                contact_name=contact_name,
                 user_name=user_name,
                 plan_title=trip_title,
                 activity=activity_name
