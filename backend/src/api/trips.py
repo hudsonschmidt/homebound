@@ -632,12 +632,12 @@ def extend_trip(
     This also acts as a check-in, confirming the user is okay and resetting overdue status.
     """
     with db.engine.begin() as connection:
-        # Verify trip ownership and status - also fetch title and activity for emails
+        # Verify trip ownership and status - also fetch title, activity, and timezone for emails
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.status, t.eta, t.title, t.contact1, t.contact2, t.contact3,
-                       a.name as activity_name
+                       t.timezone, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.id = :trip_id AND t.user_id = :user_id
@@ -744,6 +744,7 @@ def extend_trip(
         }
         activity_name = trip.activity_name
         extended_by = minutes
+        user_timezone = trip.timezone
 
         # Schedule background task to send extended trip emails to contacts
         def send_emails_sync():
@@ -752,7 +753,8 @@ def extend_trip(
                 contacts=contacts_for_email,
                 user_name=user_name,
                 activity_name=activity_name,
-                extended_by_minutes=extended_by
+                extended_by_minutes=extended_by,
+                user_timezone=user_timezone
             ))
 
         background_tasks.add_task(send_emails_sync)

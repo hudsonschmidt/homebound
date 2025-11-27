@@ -864,7 +864,7 @@ struct Step2TimeSettings: View {
                                 }
 
                                 // Slider from 0 to 120 minutes
-                                Slider(value: $graceMinutes, in: 0...120, step: 5)
+                                Slider(value: $graceMinutes, in: 0...120, step: 1)
                                     .tint(graceMinutes == 0 ? .red : .orange)
 
                                 // Quick select buttons

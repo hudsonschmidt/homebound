@@ -22,12 +22,12 @@ class CheckinResponse(BaseModel):
 def checkin_with_token(token: str, background_tasks: BackgroundTasks):
     """Check in to a trip using a magic token"""
     with db.engine.begin() as connection:
-        # Find trip by checkin_token with activity name
+        # Find trip by checkin_token with activity name and timezone
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       a.name as activity_name
+                       t.timezone, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkin_token = :token
@@ -93,6 +93,7 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
         # Build trip dict for email notification
         trip_data = {"title": trip.title}
         activity_name = trip.activity_name
+        user_timezone = trip.timezone
 
         # Schedule background task to send checkin update emails to contacts
         def send_emails_sync():
@@ -100,7 +101,8 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
                 trip=trip_data,
                 contacts=contacts_for_email,
                 user_name=user_name,
-                activity_name=activity_name
+                activity_name=activity_name,
+                user_timezone=user_timezone
             ))
 
         background_tasks.add_task(send_emails_sync)
@@ -116,13 +118,13 @@ def checkin_with_token(token: str, background_tasks: BackgroundTasks):
 def checkout_with_token(token: str, background_tasks: BackgroundTasks):
     """Complete/check out of a trip using a magic token"""
     with db.engine.begin() as connection:
-        # Find trip by checkout_token with activity name
+        # Find trip by checkout_token with activity name and timezone
         # Allow checkout for active, overdue, and overdue_notified trips
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       a.name as activity_name
+                       t.timezone, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkout_token = :token
@@ -190,6 +192,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
         # Build trip dict for email notification
         trip_data = {"title": trip.title}
         activity_name = trip.activity_name
+        user_timezone = trip.timezone
 
         # Schedule background task to send emails to contacts
         # If trip was overdue, send "all clear" email from alerts@ instead of normal completion
@@ -200,7 +203,8 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                     trip=trip_data,
                     contacts=contacts_for_email,
                     user_name=user_name,
-                    activity_name=activity_name
+                    activity_name=activity_name,
+                    user_timezone=user_timezone
                 ))
             else:
                 # Normal completion email
@@ -208,7 +212,8 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                     trip=trip_data,
                     contacts=contacts_for_email,
                     user_name=user_name,
-                    activity_name=activity_name
+                    activity_name=activity_name,
+                    user_timezone=user_timezone
                 ))
 
         background_tasks.add_task(send_emails_sync)

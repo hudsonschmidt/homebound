@@ -75,15 +75,17 @@ If you didn't request this code, please ignore this email.
     )
 
 
-async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: str = "Someone"):
+async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: str = "Someone", user_timezone: Optional[str] = None):
     """Send overdue notifications to contacts via email and push.
 
     Args:
         trip: Dictionary or Row object with trip data
         contacts: List of contact dictionaries or Row objects
         user_name: Name of the user who is overdue
+        user_timezone: User's timezone (e.g., "America/New_York")
     """
     from datetime import datetime
+    import pytz
     from ..messaging.resend_backend import create_overdue_notification_email_html
 
     # Handle both dict and Row objects
@@ -92,12 +94,25 @@ async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: 
     trip_location_text = trip.get('location_text') if hasattr(trip, 'get') else trip.location_text
     trip_user_id = trip.get('user_id') if hasattr(trip, 'get') else trip.user_id
 
-    # Format eta if it's a string
+    # Parse eta datetime
     if isinstance(trip_eta, str):
-        eta_dt = datetime.fromisoformat(trip_eta.replace(' ', 'T'))
-        eta_formatted = eta_dt.strftime('%B %d, %Y at %I:%M %p')
+        eta_dt = datetime.fromisoformat(trip_eta.replace(' ', 'T').replace('Z', '+00:00'))
     else:
-        eta_formatted = trip_eta.strftime('%B %d, %Y at %I:%M %p')
+        eta_dt = trip_eta
+
+    # Convert to user's timezone if provided
+    timezone_display = ""
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            if eta_dt.tzinfo is None:
+                eta_dt = pytz.utc.localize(eta_dt)
+            eta_dt = eta_dt.astimezone(tz)
+            timezone_display = f" {eta_dt.strftime('%Z')}"
+        except Exception as e:
+            log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
+
+    eta_formatted = eta_dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display
 
     # Send Email notifications to all contacts
     for contact in contacts:
@@ -530,7 +545,8 @@ async def send_trip_completed_emails(
     trip: Any,
     contacts: List[Any],
     user_name: str,
-    activity_name: str
+    activity_name: str,
+    user_timezone: Optional[str] = None
 ):
     """Send notification emails to contacts when a trip is completed safely.
 
@@ -539,11 +555,27 @@ async def send_trip_completed_emails(
         contacts: List of contact dictionaries or Row objects
         user_name: Name of the user who completed the trip
         activity_name: Name of the activity (e.g., "Hiking", "Skiing")
+        user_timezone: User's timezone (e.g., "America/New_York")
     """
+    from datetime import datetime
+    import pytz
     from ..messaging.resend_backend import create_trip_completed_email_html
 
     # Handle both dict and Row objects
     trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+
+    # Get current time in user's timezone for completion timestamp
+    now = datetime.utcnow()
+    timezone_display = ""
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            now = pytz.utc.localize(now).astimezone(tz)
+            timezone_display = f" {now.strftime('%Z')}"
+        except Exception as e:
+            log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
+
+    completed_time = now.strftime('%B %d, %Y at %I:%M %p') + timezone_display
 
     # Send to each contact
     for contact in contacts:
@@ -560,6 +592,7 @@ Good news! {user_name} has checked in safely.
 
 Trip: {trip_title}
 Activity: {activity_name}
+Completed: {completed_time}
 
 Their adventure is complete and they've arrived safely. No action needed on your part.
 
@@ -592,7 +625,8 @@ async def send_overdue_resolved_emails(
     trip: Any,
     contacts: List[Any],
     user_name: str,
-    activity_name: str
+    activity_name: str,
+    user_timezone: Optional[str] = None
 ):
     """Send urgent "all clear" emails when an overdue trip is resolved.
 
@@ -604,11 +638,27 @@ async def send_overdue_resolved_emails(
         contacts: List of contact dictionaries or Row objects
         user_name: Name of the user who is now safe
         activity_name: Name of the activity (e.g., "Hiking", "Skiing")
+        user_timezone: User's timezone (e.g., "America/New_York")
     """
+    from datetime import datetime
+    import pytz
     from ..messaging.resend_backend import create_overdue_resolved_email_html
 
     # Handle both dict and Row objects
     trip_title = trip.get('title') if hasattr(trip, 'get') else trip.title
+
+    # Get current time in user's timezone for resolution timestamp
+    now = datetime.utcnow()
+    timezone_display = ""
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            now = pytz.utc.localize(now).astimezone(tz)
+            timezone_display = f" {now.strftime('%Z')}"
+        except Exception as e:
+            log.warning(f"Failed to convert to timezone {user_timezone}: {e}")
+
+    resolved_time = now.strftime('%B %d, %Y at %I:%M %p') + timezone_display
 
     # Send to each contact
     for contact in contacts:
@@ -625,6 +675,7 @@ GREAT NEWS! {user_name} has checked in and is safe!
 
 Trip: {trip_title}
 Activity: {activity_name}
+Confirmed safe at: {resolved_time}
 
 We previously notified you that {user_name} was overdue from their trip.
 They have now confirmed they are safe. No further action is needed.

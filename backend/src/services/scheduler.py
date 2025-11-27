@@ -26,12 +26,13 @@ async def check_overdue_trips():
         now = datetime.utcnow()
 
         with db.engine.begin() as conn:
-            # Find active trips that are past their ETA
+            # Find active or overdue trips that are past their ETA
+            # Include 'overdue' status so we can check if grace period expired and send notifications
             overdue_trips = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title, eta, grace_min, location_text, status
-                    FROM trips
-                    WHERE status = 'active' AND eta < :now
+                    SELECT t.id, t.user_id, t.title, t.eta, t.grace_min, t.location_text, t.status, t.timezone
+                    FROM trips t
+                    WHERE t.status IN ('active', 'overdue') AND t.eta < :now
                 """),
                 {"now": now}
             ).fetchall()
@@ -97,8 +98,9 @@ async def check_overdue_trips():
 
                             if contacts:
                                 log.info(f"Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
-                                # Send notifications
-                                await send_overdue_notifications(trip, list(contacts), user_name)
+                                # Send notifications with user's timezone
+                                user_timezone = trip.timezone if hasattr(trip, 'timezone') else None
+                                await send_overdue_notifications(trip, list(contacts), user_name, user_timezone)
 
                                 # Mark as notified
                                 conn.execute(
