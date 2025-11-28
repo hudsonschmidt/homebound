@@ -1,13 +1,18 @@
 """Public check-in/check-out endpoints using tokens (no auth required)"""
 import asyncio
-from datetime import datetime, timezone
 import logging
-from typing import Optional
-from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Query
-from pydantic import BaseModel
-from src import database as db
-from src.services.notifications import send_trip_completed_emails, send_checkin_update_emails, send_overdue_resolved_emails
+from datetime import UTC, datetime
+
 import sqlalchemy
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from pydantic import BaseModel
+
+from src import database as db
+from src.services.notifications import (
+    send_checkin_update_emails,
+    send_overdue_resolved_emails,
+    send_trip_completed_emails,
+)
 
 log = logging.getLogger(__name__)
 
@@ -23,8 +28,8 @@ class CheckinResponse(BaseModel):
 def checkin_with_token(
     token: str,
     background_tasks: BackgroundTasks,
-    lat: Optional[float] = Query(None, description="Latitude of check-in location"),
-    lon: Optional[float] = Query(None, description="Longitude of check-in location")
+    lat: float | None = Query(None, description="Latitude of check-in location"),
+    lon: float | None = Query(None, description="Longitude of check-in location")
 ):
     """Check in to a trip using a magic token. Optionally include lat/lon coordinates."""
     with db.engine.begin() as connection:
@@ -50,7 +55,7 @@ def checkin_with_token(
             )
 
         # Log the check-in event
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = connection.execute(
             sqlalchemy.text(
                 """
@@ -85,13 +90,15 @@ def checkin_with_token(
             user_name = "A Homebound user"
 
         # Fetch contacts with email for notification
-        contact_ids = [cid for cid in [trip.contact1, trip.contact2, trip.contact3] if cid is not None]
+        all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+        contact_ids = [cid for cid in all_contact_ids if cid is not None]
         contacts_for_email = []
         if contact_ids:
             placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
             params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
+            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
             contacts_result = connection.execute(
-                sqlalchemy.text(f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"),
+                sqlalchemy.text(query),
                 params
             ).fetchall()
             contacts_for_email = [dict(c._mapping) for c in contacts_result]
@@ -119,7 +126,8 @@ def checkin_with_token(
             ))
 
         background_tasks.add_task(send_emails_sync)
-        log.info(f"[Checkin] Scheduled checkin update emails for {len(contacts_for_email)} contacts")
+        num_contacts = len(contacts_for_email)
+        log.info(f"[Checkin] Scheduled checkin update emails for {num_contacts} contacts")
 
         return CheckinResponse(
             ok=True,
@@ -157,7 +165,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
         was_overdue = trip.status in ('overdue', 'overdue_notified')
 
         # Mark trip as completed
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         connection.execute(
             sqlalchemy.text(
                 """
@@ -191,13 +199,15 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             user_name = "A Homebound user"
 
         # Fetch contacts with email for notification
-        contact_ids = [cid for cid in [trip.contact1, trip.contact2, trip.contact3] if cid is not None]
+        all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+        contact_ids = [cid for cid in all_contact_ids if cid is not None]
         contacts_for_email = []
         if contact_ids:
             placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
             params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
+            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
             contacts_result = connection.execute(
-                sqlalchemy.text(f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"),
+                sqlalchemy.text(query),
                 params
             ).fetchall()
             contacts_for_email = [dict(c._mapping) for c in contacts_result]
@@ -208,7 +218,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
         user_timezone = trip.timezone
 
         # Schedule background task to send emails to contacts
-        # If trip was overdue, send "all clear" email from alerts@ instead of normal completion
+        # If trip was overdue, send "all clear" email from alerts@
         def send_emails_sync():
             if was_overdue:
                 # Send urgent "all clear" email since contacts were already alerted

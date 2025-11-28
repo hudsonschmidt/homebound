@@ -1,7 +1,8 @@
-from logging.config import fileConfig
 import os
+from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
+
 from alembic import context
 
 # Alembic Config object
@@ -12,7 +13,12 @@ config = context.config
 database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI", "postgresql://myuser:mypassword@localhost:5432/mydatabase")
 
 # Debug: Print original URL (remove credentials for security)
-url_for_display = database_url.split('@')[0].split('://')[0] + '://***@' + database_url.split('@')[1] if '@' in database_url else database_url
+if '@' in database_url:
+    scheme = database_url.split('@')[0].split('://')[0]
+    host = database_url.split('@')[1]
+    url_for_display = f"{scheme}://***@{host}"
+else:
+    url_for_display = database_url
 print(f"[Alembic] Original DATABASE_URL scheme: {url_for_display.split('://')[0]}")
 
 # Force psycopg2 (synchronous) driver for Alembic migrations
@@ -30,7 +36,8 @@ elif database_url.startswith("postgresql://"):
 # Transaction mode supports many more concurrent connections and is recommended for web apps
 # Session mode has very low connection limits and causes "MaxClientsInSessionMode" errors
 if "supabase.com" in database_url and ":5432" in database_url:
-    print("[Alembic] ⚠️  Supabase Session Mode detected (port 5432) - switching to Transaction Mode (port 6543)")
+    print("[Alembic] ⚠️  Supabase Session Mode detected (port 5432)")
+    print("[Alembic] Switching to Transaction Mode (port 6543)")
     database_url = database_url.replace(":5432", ":6543")
 
 # Add SSL mode for Supabase connection pooler if not already present
@@ -39,7 +46,7 @@ if "supabase.com" in database_url and "sslmode=" not in database_url:
     database_url = f"{database_url}{separator}sslmode=require"
 
 print(f"[Alembic] Final URL scheme: {database_url.split('://')[0]}")
-print(f"[Alembic] ✅ Using Supabase Transaction Mode (port 6543) for migrations")
+print("[Alembic] ✅ Using Supabase Transaction Mode (port 6543) for migrations")
 
 config.set_main_option("sqlalchemy.url", database_url)
 

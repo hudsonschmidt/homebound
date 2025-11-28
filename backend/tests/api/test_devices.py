@@ -1,16 +1,17 @@
 """Tests for devices API endpoints"""
 import pytest
-from src import database as db
 import sqlalchemy
+from fastapi import HTTPException
+
+from src import database as db
 from src.api.devices import (
     DeviceRegister,
     DeviceResponse,
-    register_device,
-    get_devices,
     delete_device,
-    delete_device_by_token
+    delete_device_by_token,
+    get_devices,
+    register_device,
 )
-from fastapi import HTTPException
 
 
 def test_register_device():

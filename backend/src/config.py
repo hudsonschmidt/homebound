@@ -1,6 +1,7 @@
-from dotenv import load_dotenv, find_dotenv
 import os
 from functools import lru_cache
+
+from dotenv import find_dotenv, load_dotenv
 
 # Load .env files for local development
 # IMPORTANT: override=False means environment variables (set in Render) take precedence
@@ -51,7 +52,7 @@ class Settings:
             return self.APNS_PRIVATE_KEY
         # Fall back to file path (local development)
         if self.APNS_AUTH_KEY_PATH and os.path.exists(self.APNS_AUTH_KEY_PATH):
-            with open(self.APNS_AUTH_KEY_PATH, 'r') as f:
+            with open(self.APNS_AUTH_KEY_PATH) as f:
                 return f.read()
         return ""
 
@@ -67,7 +68,7 @@ class Settings:
     PUSH_BACKEND: str = os.getenv("PUSH_BACKEND", "dummy")  # "apns" or "dummy"
 
 
-@lru_cache()
+@lru_cache
 def get_settings():
     return Settings()
 

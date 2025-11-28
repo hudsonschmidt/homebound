@@ -1,8 +1,10 @@
-from fastapi import APIRouter, status, HTTPException, Depends
-from pydantic import BaseModel
-from typing import List, Dict, Any
-import sqlalchemy
 import json
+from typing import Any
+
+import sqlalchemy
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+
 from src import database as db
 from src.api import auth
 
@@ -16,13 +18,13 @@ class Activity(BaseModel):
     name: str
     icon: str
     default_grace_minutes: int
-    colors: Dict[str, str]
-    messages: Dict[str, Any]  # Can contain strings or lists
-    safety_tips: List[str]
+    colors: dict[str, str]
+    messages: dict[str, Any]  # Can contain strings or lists
+    safety_tips: list[str]
     order: int
 
 
-@router.get("/", response_model=List[Activity])
+@router.get("/", response_model=list[Activity])
 def get_activities():
     """
     Returns all activity types and their data
@@ -67,12 +69,12 @@ def new_activity(activity: Activity, user_id: int = Depends(auth.get_current_use
     """
     with db.engine.begin() as connection:
         connection.execute(
-            sqlalchemy.text(
-                """
-                INSERT INTO activities (name, icon, default_grace_minutes, colors, messages, safety_tips, "order")
-                VALUES (:name, :icon, :default_grace_minutes, :colors, :messages, :safety_tips, :order)
-                """
-            ),
+            sqlalchemy.text("""
+                INSERT INTO activities
+                    (name, icon, default_grace_minutes, colors, messages, safety_tips, "order")
+                VALUES
+                    (:name, :icon, :default_grace_minutes, :colors, :messages, :safety_tips, :order)
+            """),
             {"name": activity.name,
              "icon": activity.icon,
              "default_grace_minutes": activity.default_grace_minutes,
@@ -80,7 +82,7 @@ def new_activity(activity: Activity, user_id: int = Depends(auth.get_current_use
              "messages": json.dumps(activity.messages),
              "safety_tips": json.dumps(activity.safety_tips),
              "order": activity.order},
-        ) 
+        )
 
 
 @router.delete("/{name}", status_code=status.HTTP_200_OK)
@@ -100,4 +102,3 @@ def delete_activity(name: str, user_id: int = Depends(auth.get_current_user_id))
         )
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Activity not found")
-        

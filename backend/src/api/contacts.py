@@ -1,10 +1,11 @@
 """Contact management endpoints"""
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends, status
+
+import sqlalchemy
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
+
 from src import database as db
 from src.api import auth
-import sqlalchemy
 
 router = APIRouter(
     prefix="/api/v1/contacts",
@@ -19,8 +20,8 @@ class ContactCreate(BaseModel):
 
 
 class ContactUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[EmailStr] = None
+    name: str | None = None
+    email: EmailStr | None = None
 
 
 class Contact(BaseModel):
@@ -30,7 +31,7 @@ class Contact(BaseModel):
     email: str  # Required field
 
 
-@router.get("/", response_model=List[Contact])
+@router.get("/", response_model=list[Contact])
 def get_contacts(user_id: int = Depends(auth.get_current_user_id)):
     """Get all contacts for the current user"""
     with db.engine.begin() as connection:
@@ -109,7 +110,11 @@ def create_contact(body: ContactCreate, user_id: int = Depends(auth.get_current_
 
 
 @router.put("/{contact_id}", response_model=Contact)
-def update_contact(contact_id: int, body: ContactUpdate, user_id: int = Depends(auth.get_current_user_id)):
+def update_contact(
+    contact_id: int,
+    body: ContactUpdate,
+    user_id: int = Depends(auth.get_current_user_id)
+):
     """Update a contact"""
     with db.engine.begin() as connection:
         # Verify ownership
@@ -200,9 +205,10 @@ def delete_contact(contact_id: int, user_id: int = Depends(auth.get_current_user
         ).fetchone()
 
         if trips_using_contact:
+            trip_title = trips_using_contact.title
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot delete contact. It is currently being used by trip: {trips_using_contact.title}"
+                detail=f"Cannot delete contact. Used by trip: {trip_title}"
             )
 
         # NULL out contact references in completed trips (they no longer need the reference)

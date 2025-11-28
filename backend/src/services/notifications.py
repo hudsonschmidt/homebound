@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
-from typing import List, Optional, Any, Tuple
+from typing import Any
 
 import pytz
 
@@ -13,7 +13,7 @@ from ..messaging.resend_backend import html_to_text
 settings = get_settings()
 log = logging.getLogger(__name__)
 
-def parse_datetime(dt_value: Any) -> Optional[datetime]:
+def parse_datetime(dt_value: Any) -> datetime | None:
     """Parse datetime from string or return as-is."""
     if dt_value is None:
         return None
@@ -22,7 +22,7 @@ def parse_datetime(dt_value: Any) -> Optional[datetime]:
     return dt_value
 
 
-def format_datetime_with_tz(dt: Optional[datetime], user_timezone: Optional[str]) -> Tuple[str, str]:
+def format_datetime_with_tz(dt: datetime | None, user_timezone: str | None) -> tuple[str, str]:
     """Convert datetime to user's timezone and format it.
 
     Returns: (formatted_string, timezone_display)
@@ -44,7 +44,7 @@ def format_datetime_with_tz(dt: Optional[datetime], user_timezone: Optional[str]
     return dt.strftime('%B %d, %Y at %I:%M %p') + timezone_display, timezone_display
 
 
-def get_current_time_formatted(user_timezone: Optional[str]) -> Tuple[str, str]:
+def get_current_time_formatted(user_timezone: str | None) -> tuple[str, str]:
     """Get current time formatted in user's timezone.
 
     Returns: (formatted_string, timezone_display)
@@ -60,7 +60,7 @@ def get_attr(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
-def should_display_location(location_text: Optional[str]) -> bool:
+def should_display_location(location_text: str | None) -> bool:
     """Check if location should be displayed in emails.
 
     Returns False for:
@@ -89,8 +89,8 @@ async def send_email(
     email: str,
     subject: str,
     body: str,
-    html_body: Optional[str] = None,
-    from_email: Optional[str] = None,
+    html_body: str | None = None,
+    from_email: str | None = None,
     high_priority: bool = False
 ):
     """Send email notification.
@@ -124,9 +124,10 @@ async def send_email(
 
 async def send_push_to_user(user_id: int, title: str, body: str, data: dict = None):
     """Send push notification to all user's devices."""
-    from ..messaging.apns import get_push_sender
-    from .. import database as db
     import sqlalchemy
+
+    from .. import database as db
+    from ..messaging.apns import get_push_sender
 
     if settings.PUSH_BACKEND == "dummy":
         log.info(f"[DUMMY PUSH] User: {user_id} - {title}: {body}")
@@ -184,7 +185,7 @@ async def send_magic_link_email(email: str, code: str):
     )
 
 # Overdue --------------------------------------------------------------------------------
-async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: str = "Someone", user_timezone: Optional[str] = None):
+async def send_overdue_notifications(trip: Any, contacts: list[Any], user_name: str = "Someone", user_timezone: str | None = None):
     """Send overdue notifications to contacts via email and push."""
     from ..messaging.resend_backend import create_overdue_notification_email_html
 
@@ -235,10 +236,10 @@ async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: 
 # Trip created --------------------------------------------------------------------------------
 async def send_trip_created_emails(
     trip: Any,
-    contacts: List[Any],
+    contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: Optional[str] = None
+    user_timezone: str | None = None
 ):
     """Send notification emails to contacts when they're added to a trip."""
     from ..messaging.resend_backend import create_trip_created_email_html
@@ -280,10 +281,10 @@ async def send_trip_created_emails(
 # Trip starting --------------------------------------------------------------------------------
 async def send_trip_starting_now_emails(
     trip: Any,
-    contacts: List[Any],
+    contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: Optional[str] = None
+    user_timezone: str | None = None
 ):
     """Send notification emails to contacts when a trip starts immediately."""
     from ..messaging.resend_backend import create_trip_starting_now_email_html
@@ -323,11 +324,11 @@ async def send_trip_starting_now_emails(
 # Check in --------------------------------------------------------------------------------
 async def send_checkin_update_emails(
     trip: Any,
-    contacts: List[Any],
+    contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: Optional[str] = None,
-    coordinates: Optional[str] = None
+    user_timezone: str | None = None,
+    coordinates: str | None = None
 ):
     """Send check-in update emails to contacts when user checks in."""
     from ..messaging.resend_backend import create_checkin_update_email_html
@@ -372,11 +373,11 @@ async def send_checkin_update_emails(
 # Trip extended --------------------------------------------------------------------------------
 async def send_trip_extended_emails(
     trip: Any,
-    contacts: List[Any],
+    contacts: list[Any],
     user_name: str,
     activity_name: str,
     extended_by_minutes: int,
-    user_timezone: Optional[str] = None
+    user_timezone: str | None = None
 ):
     """Send notification emails to contacts when user extends their trip."""
     from ..messaging.resend_backend import create_trip_extended_email_html
@@ -419,10 +420,10 @@ async def send_trip_extended_emails(
 # Trip completed --------------------------------------------------------------------------------
 async def send_trip_completed_emails(
     trip: Any,
-    contacts: List[Any],
+    contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: Optional[str] = None
+    user_timezone: str | None = None
 ):
     """Send notification emails to contacts when a trip is completed safely."""
     from ..messaging.resend_backend import create_trip_completed_email_html
@@ -460,10 +461,10 @@ async def send_trip_completed_emails(
 # Overdue resolved --------------------------------------------------------------------------------
 async def send_overdue_resolved_emails(
     trip: Any,
-    contacts: List[Any],
+    contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: Optional[str] = None
+    user_timezone: str | None = None
 ):
     """Send urgent "all clear" emails when an overdue trip is resolved."""
     from ..messaging.resend_backend import create_overdue_resolved_email_html

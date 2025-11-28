@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 from jose import jwt
@@ -20,7 +20,7 @@ class PushResult:
 
 
 class DummyPush:
-    async def send(self, device_token: str, title: str, body: str, data: Optional[dict] = None) -> PushResult:
+    async def send(self, device_token: str, title: str, body: str, data: dict | None = None) -> PushResult:
         print(f"[DUMMY PUSH] token={device_token} title={title!r} body={body!r} data={data}")
         return PushResult(ok=True, status=200, detail="dummy")
 
@@ -45,7 +45,7 @@ class APNsClient:
             if settings.APNS_USE_SANDBOX
             else "https://api.push.apple.com"
         )
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     def _provider_jwt(self) -> str:
         now = int(time.time())
@@ -63,7 +63,7 @@ class APNsClient:
             await self._client.aclose()
             self._client = None
 
-    async def send(self, device_token: str, title: str, body: str, data: Optional[dict] = None) -> PushResult:
+    async def send(self, device_token: str, title: str, body: str, data: dict | None = None) -> PushResult:
         c = await self._client_ctx()
         url = f"{self.base_url}/3/device/{device_token}"
         headers = {
@@ -73,7 +73,7 @@ class APNsClient:
             "apns-priority": "10",
             "content-type": "application/json",
         }
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "aps": {
                 "alert": {"title": title, "body": body},
                 "sound": "default",

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import re
-import resend
 import logging
+import re
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
+
+import resend
 
 from ..config import settings
 
@@ -99,12 +100,12 @@ def init_resend():
 
 
 async def send_resend_email(
-    to_email: str | List[str],
+    to_email: str | list[str],
     subject: str,
-    html_body: Optional[str] = None,
-    text_body: Optional[str] = None,
-    from_email: Optional[str] = None,
-    reply_to: Optional[str] = None,
+    html_body: str | None = None,
+    text_body: str | None = None,
+    from_email: str | None = None,
+    reply_to: str | None = None,
     high_priority: bool = False,
 ) -> bool:
     """
@@ -139,7 +140,7 @@ async def send_resend_email(
         to_email = [to_email]
 
     try:
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "from": from_email,
             "to": to_email,
             "subject": subject,
@@ -181,8 +182,8 @@ def create_overdue_notification_email_html(
     activity: str,
     start_time: str,
     expected_time: str,
-    location: Optional[str] = None,
-    notes: Optional[str] = None
+    location: str | None = None,
+    notes: str | None = None
 ) -> str:
     """Create HTML email template for overdue notifications."""
     location_html = location if location else "Not specified"
@@ -206,7 +207,7 @@ def create_trip_created_email_html(
     activity: str,
     start_time: str,
     expected_time: str,
-    location: Optional[str] = None
+    location: str | None = None
 ) -> str:
     """Create HTML email template for trip created notifications to contacts."""
     location_html = location if location else "Not specified"
@@ -227,7 +228,7 @@ def create_trip_starting_now_email_html(
     plan_title: str,
     activity: str,
     expected_time: str,
-    location: Optional[str] = None
+    location: str | None = None
 ) -> str:
     """Create HTML email template for trip starting immediately notifications."""
     location_html = location if location else "Not specified"
@@ -248,8 +249,8 @@ def create_checkin_update_email_html(
     activity: str,
     checkin_time: str,
     expected_time: str,
-    coordinates: Optional[str] = None,
-    location: Optional[str] = None
+    coordinates: str | None = None,
+    location: str | None = None
 ) -> str:
     """Create HTML email template for check-in update notifications."""
     location_html = location if location else "Not specified"
@@ -273,7 +274,7 @@ def create_trip_extended_email_html(
     activity: str,
     extended_by: int,
     new_eta: str,
-    location: Optional[str] = None
+    location: str | None = None
 ) -> str:
     """Create HTML email template for trip extended notifications."""
     location_html = location if location else "Not specified"
@@ -293,7 +294,7 @@ def create_trip_completed_email_html(
     user_name: str,
     plan_title: str,
     activity: str,
-    location: Optional[str] = None
+    location: str | None = None
 ) -> str:
     """Create HTML email template for trip completed notifications to contacts."""
     location_html = location if location else "Not specified"

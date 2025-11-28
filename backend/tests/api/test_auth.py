@@ -1,22 +1,23 @@
-from datetime import datetime, timedelta, timezone
-import pytest
 import asyncio
-from jose import jwt
-from jose.exceptions import JWTError, ExpiredSignatureError
-from src import database as db
-from src import config
+from datetime import UTC, datetime, timedelta
+
+import pytest
 import sqlalchemy
+from fastapi import HTTPException
+from jose import jwt
+
+from src import config
+from src import database as db
 from src.api.auth_endpoints import (
     MagicLinkRequest,
-    VerifyRequest,
     RefreshRequest,
     TokenResponse,
+    VerifyRequest,
     create_jwt_pair,
+    refresh_token,
     request_magic_link,
     verify_magic_code,
-    refresh_token
 )
-from fastapi import HTTPException
 
 settings = config.get_settings()
 
@@ -359,7 +360,7 @@ def test_verify_magic_code_success():
                 "user_id": user_id,
                 "email": test_email,
                 "token": test_code,
-                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15)
+                "expires_at": datetime.now(UTC) + timedelta(minutes=15)
             }
         )
 
@@ -434,7 +435,7 @@ def test_verify_magic_code_already_used():
                 "user_id": user_id,
                 "email": test_email,
                 "token": test_code,
-                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15)
+                "expires_at": datetime.now(UTC) + timedelta(minutes=15)
             }
         )
 
@@ -494,7 +495,7 @@ def test_verify_magic_code_expired():
                 "user_id": user_id,
                 "email": test_email,
                 "token": test_code,
-                "expires_at": datetime.now(timezone.utc) - timedelta(minutes=1)  # Expired 1 minute ago
+                "expires_at": datetime.now(UTC) - timedelta(minutes=1)  # Expired 1 minute ago
             }
         )
 

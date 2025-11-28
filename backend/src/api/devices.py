@@ -1,11 +1,12 @@
 """Device registration endpoints for push notifications"""
-from datetime import datetime, timezone
-from typing import List
-from fastapi import APIRouter, HTTPException, Depends, status
+from datetime import UTC, datetime
+
+import sqlalchemy
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+
 from src import database as db
 from src.api import auth
-import sqlalchemy
 
 router = APIRouter(
     prefix="/api/v1/devices",
@@ -62,7 +63,7 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
             {"token": body.token}
         ).fetchone()
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         if existing:
             # Update existing device
@@ -88,13 +89,13 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
         else:
             # Insert new device
             result = connection.execute(
-                sqlalchemy.text(
-                    """
-                    INSERT INTO devices (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
-                    VALUES (:user_id, :platform, :token, :bundle_id, :env, :created_at, :last_seen_at)
+                sqlalchemy.text("""
+                    INSERT INTO devices
+                        (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
+                    VALUES
+                        (:user_id, :platform, :token, :bundle_id, :env, :created_at, :last_seen_at)
                     RETURNING id
-                    """
-                ),
+                """),
                 {
                     "user_id": user_id,
                     "platform": body.platform,
@@ -130,7 +131,7 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
         )
 
 
-@router.get("/", response_model=List[DeviceResponse])
+@router.get("/", response_model=list[DeviceResponse])
 def get_devices(user_id: int = Depends(auth.get_current_user_id)):
     """Get all registered devices for the current user"""
     with db.engine.begin() as connection:

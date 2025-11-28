@@ -1,18 +1,19 @@
 """Tests for contacts API endpoints"""
 import pytest
-from src import database as db
 import sqlalchemy
+from fastapi import HTTPException
+
+from src import database as db
 from src.api.contacts import (
+    Contact,
     ContactCreate,
     ContactUpdate,
-    Contact,
-    get_contacts,
-    get_contact,
     create_contact,
+    delete_contact,
+    get_contact,
+    get_contacts,
     update_contact,
-    delete_contact
 )
-from fastapi import HTTPException
 
 
 def test_create_and_get_contact():
@@ -142,11 +143,11 @@ def test_get_all_contacts():
         user_id = result.fetchone()[0]
 
     # Create multiple contacts
-    contact1 = create_contact(
+    create_contact(
         ContactCreate(name="Alice Smith", email="test@homeboundapp.com"),
         user_id=user_id
     )
-    contact2 = create_contact(
+    create_contact(
         ContactCreate(name="Bob Jones", email="test@homeboundapp.com"),
         user_id=user_id
     )

@@ -19,7 +19,7 @@ dependencies = [
   "itsdangerous>=2.2",
   "email-validator>=2.1",
   "PyJWT>=2.9",
-  "httpx>=0.27",
+  "httpx[http2]>=0.27",
   "certifi>=2024.0.0",
   "apscheduler>=3.10",
   "twilio>=9.0",
@@ -47,3 +47,19 @@ pythonpath = ["."]
 
 [tool.uv]
 managed = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# Migration files contain long JSON data that shouldn't be reformatted
+"alembic/versions/*.py" = ["E501"]
+# Test files contain SQL fixtures and test data that's more readable as-is
+"tests/**/*.py" = ["E501"]
+# Services contain many log statements and SQL queries better kept on one line
+"src/services/*.py" = ["E501"]
+"src/messaging/*.py" = ["E501"]

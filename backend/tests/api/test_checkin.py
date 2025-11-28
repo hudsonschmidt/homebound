@@ -1,14 +1,12 @@
 """Tests for checkin API endpoints"""
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timezone, timedelta
-from src import database as db
 import sqlalchemy
-from src.api.checkin import (
-    CheckinResponse,
-    checkin_with_token,
-    checkout_with_token
-)
-from fastapi import HTTPException, BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
+
+from src import database as db
+from src.api.checkin import CheckinResponse, checkin_with_token, checkout_with_token
 
 
 def setup_test_trip_with_tokens():
@@ -87,7 +85,7 @@ def setup_test_trip_with_tokens():
         activity_id = activity_result[0]
 
         # Create trip with tokens
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         checkin_token = "test_checkin_token_123"
         checkout_token = "test_checkout_token_456"
 

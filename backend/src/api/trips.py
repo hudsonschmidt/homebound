@@ -1,18 +1,24 @@
 """Trip management endpoints"""
 import asyncio
-from datetime import datetime, timezone
+import json
+import logging
 import secrets
-from typing import Optional, List, Union
-from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
+from datetime import UTC, datetime
+from typing import Optional
+
+import sqlalchemy
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
+
 from src import database as db
 from src.api import auth
 from src.api.activities import Activity
-from src.services.notifications import send_trip_created_emails, send_trip_starting_now_emails, send_trip_extended_emails
 from src.services.geocoding import reverse_geocode_sync
-import sqlalchemy
-import json
-import logging
+from src.services.notifications import (
+    send_trip_created_emails,
+    send_trip_extended_emails,
+    send_trip_starting_now_emails,
+)
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +29,14 @@ router = APIRouter(
 )
 
 
-def to_iso8601(dt: Union[datetime, str, None]) -> Optional[str]:
+def parse_json_field(value, expected_type):
+    """Parse JSON field from database, handling both parsed and string forms."""
+    if isinstance(value, expected_type):
+        return value
+    return json.loads(value)
+
+
+def to_iso8601(dt: datetime | str | None) -> str | None:
     """Convert datetime to ISO8601 string format, handling both datetime objects and strings"""
     if dt is None:
         return None
@@ -47,14 +60,14 @@ class TripCreate(BaseModel):
     start: datetime
     eta: datetime
     grace_min: int
-    location_text: Optional[str] = None
-    gen_lat: Optional[float] = None
-    gen_lon: Optional[float] = None
-    notes: Optional[str] = None
-    contact1: Optional[int] = None  # Contact ID reference
-    contact2: Optional[int] = None
-    contact3: Optional[int] = None
-    timezone: Optional[str] = None  # User's timezone (e.g., "America/New_York")
+    location_text: str | None = None
+    gen_lat: float | None = None
+    gen_lon: float | None = None
+    notes: str | None = None
+    contact1: int | None = None  # Contact ID reference
+    contact2: int | None = None
+    contact3: int | None = None
+    timezone: str | None = None  # User's timezone (e.g., "America/New_York")
 
 
 class TripResponse(BaseModel):
@@ -65,28 +78,28 @@ class TripResponse(BaseModel):
     start: str
     eta: str
     grace_min: int
-    location_text: Optional[str]
-    gen_lat: Optional[float]
-    gen_lon: Optional[float]
-    notes: Optional[str]
+    location_text: str | None
+    gen_lat: float | None
+    gen_lon: float | None
+    notes: str | None
     status: str
-    completed_at: Optional[str]
-    last_checkin: Optional[str]
+    completed_at: str | None
+    last_checkin: str | None
     created_at: str
-    contact1: Optional[int]
-    contact2: Optional[int]
-    contact3: Optional[int]
-    checkin_token: Optional[str]
-    checkout_token: Optional[str]
+    contact1: int | None
+    contact2: int | None
+    contact3: int | None
+    checkin_token: str | None
+    checkout_token: str | None
 
 
 class TimelineEvent(BaseModel):
     id: int
     what: str
     timestamp: str
-    lat: Optional[float]
-    lon: Optional[float]
-    extended_by: Optional[int]
+    lat: float | None
+    lon: float | None
+    extended_by: int | None
 
 
 @router.post("/", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
@@ -98,9 +111,10 @@ def create_trip(
     """Create a new trip"""
     # Log incoming request for debugging
     log.info(f"[Trips] Creating trip for user_id={user_id}")
-    log.info(f"[Trips] Request body: title={body.title}, activity={body.activity}, start={body.start}, eta={body.eta}")
-    log.info(f"[Trips] Contacts: contact1={body.contact1}, contact2={body.contact2}, contact3={body.contact3}")
-    log.info(f"[Trips] Location: {body.location_text}, coords=({body.gen_lat}, {body.gen_lon})")
+    log.info(f"[Trips] title={body.title}, activity={body.activity}")
+    log.info(f"[Trips] start={body.start}, eta={body.eta}")
+    log.info(f"[Trips] Contacts: {body.contact1}, {body.contact2}, {body.contact3}")
+    log.info(f"[Trips] Location: {body.location_text}, ({body.gen_lat}, {body.gen_lon})")
 
     # Validate that at least contact1 is provided (required by database)
     if body.contact1 is None:
@@ -115,7 +129,7 @@ def create_trip(
         # Normalize activity name: convert to lowercase and replace underscores with spaces
         # This allows "scuba_diving" to match "Scuba Diving"
         normalized_activity = body.activity.lower().replace('_', ' ')
-        log.info(f"[Trips] Looking up activity: '{body.activity}' (normalized: '{normalized_activity}')")
+        log.info(f"[Trips] Looking up activity: '{body.activity}' -> '{normalized_activity}'")
 
         activity = connection.execute(
             sqlalchemy.text(
@@ -134,10 +148,11 @@ def create_trip(
                 sqlalchemy.text("SELECT id, name FROM activities")
             ).fetchall()
             log.warning(f"[Trips] Activity '{body.activity}' not found!")
-            log.info(f"[Trips] Available activities: {[a.name for a in all_activities]}")
+            available = [a.name for a in all_activities]
+            log.info(f"[Trips] Available activities: {available}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Activity '{body.activity}' not found. Available: {[a.name for a in all_activities]}"
+                detail=f"Activity '{body.activity}' not found. Available: {available}"
             )
 
         log.info(f"[Trips] Activity found: id={activity.id}, name='{activity.name}'")
@@ -163,14 +178,17 @@ def create_trip(
                 if not contact:
                     # List user's contacts for debugging
                     user_contacts = connection.execute(
-                        sqlalchemy.text("SELECT id, name FROM contacts WHERE user_id = :user_id"),
+                        sqlalchemy.text(
+                            "SELECT id, name FROM contacts WHERE user_id = :user_id"
+                        ),
                         {"user_id": user_id}
                     ).fetchall()
-                    log.warning(f"[Trips] Contact {contact_id} not found for user {user_id}!")
-                    log.info(f"[Trips] User's contacts: {[(c.id, c.name) for c in user_contacts]}")
+                    log.warning(f"[Trips] Contact {contact_id} not found!")
+                    contact_ids_available = [c.id for c in user_contacts]
+                    log.info(f"[Trips] User's contacts: {contact_ids_available}")
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Contact {contact_id} not found. Available: {[c.id for c in user_contacts]}"
+                        detail=f"Contact {contact_id} not found. Available: {contact_ids_available}"
                     )
 
                 log.info(f"[Trips] Contact {contact_id} verified")
@@ -180,16 +198,16 @@ def create_trip(
         checkout_token = secrets.token_urlsafe(32)
 
         # Determine initial status based on start time
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(UTC)
         # Ensure start time is timezone-aware for comparison
-        start_time = body.start if body.start.tzinfo else body.start.replace(tzinfo=timezone.utc)
+        start_time = body.start if body.start.tzinfo else body.start.replace(tzinfo=UTC)
         initial_status = 'planned' if start_time > current_time else 'active'
 
         # Resolve "Current Location" to a proper place name via reverse geocoding
         location_text = body.location_text
-        log.info(f"[Trips] Location check: text='{location_text}', lat={body.gen_lat}, lon={body.gen_lon}")
+        log.info(f"[Trips] Location: '{location_text}' at ({body.gen_lat}, {body.gen_lon})")
         if location_text and location_text.lower().strip() == "current location":
-            log.info(f"[Trips] Detected 'Current Location', checking coordinates...")
+            log.info("[Trips] Detected 'Current Location', checking coordinates...")
             # Check for valid coordinates (not None and not 0,0)
             has_valid_coords = (
                 body.gen_lat is not None and
@@ -205,7 +223,7 @@ def create_trip(
                 else:
                     log.warning("[Trips] Geocoding failed, keeping 'Current Location'")
             else:
-                log.warning(f"[Trips] No valid coordinates for 'Current Location': lat={body.gen_lat}, lon={body.gen_lon}")
+                log.warning(f"[Trips] No valid coords: ({body.gen_lat}, {body.gen_lon})")
 
         # Insert trip
         result = connection.execute(
@@ -240,7 +258,7 @@ def create_trip(
                 "contact1": body.contact1,
                 "contact2": body.contact2,
                 "contact3": body.contact3,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "checkin_token": checkin_token,
                 "checkout_token": checkout_token,
                 "timezone": body.timezone
@@ -273,9 +291,9 @@ def create_trip(
             name=trip["activity_name"],
             icon=trip["activity_icon"],
             default_grace_minutes=trip["default_grace_minutes"],
-            colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
-            messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
-            safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+            colors=parse_json_field(trip["activity_colors"], dict),
+            messages=parse_json_field(trip["activity_messages"], dict),
+            safety_tips=parse_json_field(trip["safety_tips"], list),
             order=trip["activity_order"]
         )
 
@@ -289,13 +307,15 @@ def create_trip(
             user_name = "A Homebound user"
 
         # Fetch contacts with email for notification
-        contact_ids = [cid for cid in [body.contact1, body.contact2, body.contact3] if cid is not None]
+        all_contact_ids = [body.contact1, body.contact2, body.contact3]
+        contact_ids = [cid for cid in all_contact_ids if cid is not None]
         contacts_for_email = []
         if contact_ids:
             placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
             params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
+            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
             contacts_result = connection.execute(
-                sqlalchemy.text(f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"),
+                sqlalchemy.text(query),
                 params
             ).fetchall()
             contacts_for_email = [dict(c._mapping) for c in contacts_result]
@@ -336,7 +356,8 @@ def create_trip(
 
         background_tasks.add_task(send_emails_sync)
         email_type = "starting now" if is_starting_now else "upcoming trip"
-        log.info(f"[Trips] Scheduled {email_type} email notifications for {len(contacts_for_email)} contacts")
+        num_contacts = len(contacts_for_email)
+        log.info(f"[Trips] Scheduled {email_type} emails for {num_contacts} contacts")
 
         return TripResponse(
             id=trip["id"],
@@ -362,7 +383,7 @@ def create_trip(
         )
 
 
-@router.get("/", response_model=List[TripResponse])
+@router.get("/", response_model=list[TripResponse])
 def get_trips(user_id: int = Depends(auth.get_current_user_id)):
     """Get all trips for the current user with full activity data"""
     with db.engine.begin() as connection:
@@ -393,9 +414,9 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                 name=trip["activity_name"],
                 icon=trip["activity_icon"],
                 default_grace_minutes=trip["default_grace_minutes"],
-                colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
-                messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
-                safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+                colors=parse_json_field(trip["activity_colors"], dict),
+                messages=parse_json_field(trip["activity_messages"], dict),
+                safety_tips=parse_json_field(trip["safety_tips"], list),
                 order=trip["activity_order"]
             )
 
@@ -463,9 +484,9 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             name=trip["activity_name"],
             icon=trip["activity_icon"],
             default_grace_minutes=trip["default_grace_minutes"],
-            colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
-            messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
-            safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+            colors=parse_json_field(trip["activity_colors"], dict),
+            messages=parse_json_field(trip["activity_messages"], dict),
+            safety_tips=parse_json_field(trip["safety_tips"], list),
             order=trip["activity_order"]
         )
 
@@ -527,9 +548,9 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             name=trip["activity_name"],
             icon=trip["activity_icon"],
             default_grace_minutes=trip["default_grace_minutes"],
-            colors=trip["activity_colors"] if isinstance(trip["activity_colors"], dict) else json.loads(trip["activity_colors"]),
-            messages=trip["activity_messages"] if isinstance(trip["activity_messages"], dict) else json.loads(trip["activity_messages"]),
-            safety_tips=trip["safety_tips"] if isinstance(trip["safety_tips"], list) else json.loads(trip["safety_tips"]),
+            colors=parse_json_field(trip["activity_colors"], dict),
+            messages=parse_json_field(trip["activity_messages"], dict),
+            safety_tips=parse_json_field(trip["safety_tips"], list),
             order=trip["activity_order"]
         )
 
@@ -595,7 +616,7 @@ def complete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)
                 WHERE id = :trip_id
                 """
             ),
-            {"trip_id": trip_id, "completed_at": datetime.now(timezone.utc).isoformat()}
+            {"trip_id": trip_id, "completed_at": datetime.now(UTC).isoformat()}
         )
 
         return {"ok": True, "message": "Trip completed successfully"}
@@ -685,10 +706,13 @@ def extend_trip(
 
         # Parse current ETA and add minutes
         from datetime import timedelta
-        current_eta = trip.eta if isinstance(trip.eta, datetime) else datetime.fromisoformat(trip.eta)
+        if isinstance(trip.eta, datetime):
+            current_eta = trip.eta
+        else:
+            current_eta = datetime.fromisoformat(trip.eta)
         new_eta = current_eta + timedelta(minutes=minutes)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Log checkin event first (extending is also a check-in) and get the event ID
         result = connection.execute(
@@ -750,13 +774,15 @@ def extend_trip(
             user_name = "A Homebound user"
 
         # Fetch contacts with email for notification
-        contact_ids = [cid for cid in [trip.contact1, trip.contact2, trip.contact3] if cid is not None]
+        all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+        contact_ids = [cid for cid in all_contact_ids if cid is not None]
         contacts_for_email = []
         if contact_ids:
             placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
             params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
+            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
             contacts_result = connection.execute(
-                sqlalchemy.text(f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"),
+                sqlalchemy.text(query),
                 params
             ).fetchall()
             contacts_for_email = [dict(c._mapping) for c in contacts_result]
@@ -782,9 +808,15 @@ def extend_trip(
             ))
 
         background_tasks.add_task(send_emails_sync)
-        log.info(f"[Trips] Scheduled trip extended email notifications for {len(contacts_for_email)} contacts")
+        num_contacts = len(contacts_for_email)
+        log.info(f"[Trips] Scheduled extended trip emails for {num_contacts} contacts")
 
-        return {"ok": True, "message": f"Trip extended by {minutes} minutes", "new_eta": new_eta.isoformat()}
+        new_eta_iso = new_eta.isoformat()
+        return {
+            "ok": True,
+            "message": f"Trip extended by {minutes} minutes",
+            "new_eta": new_eta_iso
+        }
 
 
 @router.delete("/{trip_id}")
@@ -824,7 +856,7 @@ def delete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
         return {"ok": True, "message": "Trip deleted successfully"}
 
 
-@router.get("/{trip_id}/timeline", response_model=List[TimelineEvent])
+@router.get("/{trip_id}/timeline", response_model=list[TimelineEvent])
 def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
     """Get timeline events for a specific trip"""
     with db.engine.begin() as connection:

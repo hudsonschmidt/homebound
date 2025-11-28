@@ -1,6 +1,7 @@
+from fastapi import HTTPException, Request, status
 from jose import jwt
-from jose.exceptions import JWTError, ExpiredSignatureError
-from fastapi import Request, HTTPException, status
+from jose.exceptions import ExpiredSignatureError, JWTError
+
 from src import config
 
 settings = config.get_settings()
@@ -50,7 +51,7 @@ async def get_current_user_id(request: Request) -> int:
 
         sub = payload.get("sub")
         if sub is None:
-            print(f"[Auth] ❌ No 'sub' claim in token")
+            print("[Auth] ❌ No 'sub' claim in token")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token (no sub)"

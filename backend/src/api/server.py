@@ -1,10 +1,11 @@
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from src.api import auth_endpoints, trips, activities, contacts, devices, checkin, profile
-from src.services.scheduler import start_scheduler, stop_scheduler
 from starlette.middleware.cors import CORSMiddleware
+
+from src.api import activities, auth_endpoints, checkin, contacts, devices, profile, trips
+from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

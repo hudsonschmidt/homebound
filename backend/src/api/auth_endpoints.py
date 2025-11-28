@@ -1,14 +1,16 @@
-from datetime import datetime, timedelta, timezone
 import secrets
-from jose import jwt
-from jose.exceptions import JWTError, ExpiredSignatureError
+from datetime import UTC, datetime, timedelta
+
+import sqlalchemy
 from fastapi import APIRouter, HTTPException, status
+from jose import jwt
+from jose.exceptions import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, EmailStr
-from src import database as db
+
 from src import config
+from src import database as db
 from src.api.apple_auth import validate_apple_identity_token
 from src.services.notifications import send_magic_link_email
-import sqlalchemy
 
 router = APIRouter(
     prefix="/api/v1/auth",
@@ -118,7 +120,7 @@ async def request_magic_link(body: MagicLinkRequest):
 
         # Generate 6-digit code
         code = f"{secrets.randbelow(1000000):06d}"
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expires_at = datetime.now(UTC) + timedelta(minutes=15)
 
         # Store the token
         connection.execute(
@@ -183,9 +185,9 @@ def verify_magic_code(body: VerifyRequest):
 
         # Ensure expires_at is timezone-aware
         if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
+            expires_at = expires_at.replace(tzinfo=UTC)
 
-        if datetime.now(timezone.utc) > expires_at:
+        if datetime.now(UTC) > expires_at:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Code expired"
@@ -405,7 +407,7 @@ def apple_sign_in(body: AppleSignInRequest):
 
             if email_match:
                 # Account exists with this email - prompt user to link
-                print(f"[AppleAuth] ⚠️  Email {body.email} matches existing account - requiring user confirmation")
+                print(f"[AppleAuth] ⚠️  Email {body.email} exists - requiring confirmation")
                 return AppleSignInResponse(
                     account_exists=True,
                     email=body.email,

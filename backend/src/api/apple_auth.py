@@ -1,22 +1,21 @@
 """Apple Sign In JWT validation utilities."""
 import time
-from typing import Dict, Optional
-import requests
-from jose import jwt, jwk
-from jose.exceptions import JWTError, ExpiredSignatureError, JWTClaimsError
-from fastapi import HTTPException, status
 
+import requests
+from fastapi import HTTPException, status
+from jose import jwk, jwt
+from jose.exceptions import ExpiredSignatureError, JWTClaimsError, JWTError
 
 # Apple's public keys endpoint
 APPLE_PUBLIC_KEYS_URL = "https://appleid.apple.com/auth/keys"
 
 # Cache for Apple's public keys (prevents fetching on every request)
-_apple_keys_cache: Optional[Dict] = None
+_apple_keys_cache: dict | None = None
 _apple_keys_cache_time: float = 0
 _apple_keys_cache_ttl: int = 3600  # Cache for 1 hour
 
 
-def _fetch_apple_public_keys() -> Dict:
+def _fetch_apple_public_keys() -> dict:
     """
     Fetch Apple's public keys from their JWKS endpoint.
 
@@ -48,7 +47,7 @@ def _fetch_apple_public_keys() -> Dict:
         )
 
 
-def _get_apple_public_key(token: str) -> Optional[Dict]:
+def _get_apple_public_key(token: str) -> dict | None:
     """
     Get the specific public key from Apple's JWKS that matches the token's key ID.
 
@@ -82,8 +81,8 @@ def _get_apple_public_key(token: str) -> Optional[Dict]:
 def validate_apple_identity_token(
     identity_token: str,
     expected_audience: str,
-    expected_user_id: Optional[str] = None
-) -> Dict:
+    expected_user_id: str | None = None
+) -> dict:
     """
     Validate an Apple Sign In identity token.
 
@@ -163,7 +162,8 @@ def validate_apple_identity_token(
                     detail="Token user ID does not match expected user ID"
                 )
 
-        print(f"[AppleAuth] ✅ Successfully validated Apple identity token for user: {payload.get('sub')}")
+        user_id = payload.get('sub')
+        print(f"[AppleAuth] ✅ Validated Apple identity token for user: {user_id}")
         return payload
 
     except HTTPException:

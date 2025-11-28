@@ -1,5 +1,6 @@
-from src import config
 from sqlalchemy import create_engine
+
+from src import config
 
 # Get connection URL from config
 connection_url = config.get_settings().POSTGRES_URI
@@ -12,7 +13,8 @@ if "postgresql+psycopg:" in connection_url and "postgresql+psycopg2:" not in con
 # Transaction mode supports many more concurrent connections and is recommended for web apps
 # Session mode has very low connection limits and causes "MaxClientsInSessionMode" errors
 if "supabase.com" in connection_url and ":5432" in connection_url:
-    print("[Database] ⚠️  Supabase Session Mode detected (port 5432) - switching to Transaction Mode (port 6543)")
+    print("[Database] ⚠️  Supabase Session Mode (port 5432) detected")
+    print("[Database] Switching to Transaction Mode (port 6543)")
     connection_url = connection_url.replace(":5432", ":6543")
 
 # Add SSL mode for Supabase if not already present
@@ -31,4 +33,4 @@ engine = create_engine(
     echo=False  # Set to True for SQL debugging
 )
 
-print(f"[Database] ✅ SQLAlchemy engine created with pool_size=3, max_overflow=7")
+print("[Database] ✅ SQLAlchemy engine created with pool_size=3, max_overflow=7")

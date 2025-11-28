@@ -1,17 +1,18 @@
 """Tests for profile API endpoints"""
 import pytest
-from src import database as db
 import sqlalchemy
-from src.api.profile import (
-    ProfileUpdate,
-    ProfileResponse,
-    ProfileUpdateResponse,
-    get_profile,
-    update_profile,
-    patch_profile,
-    delete_account
-)
 from fastapi import HTTPException
+
+from src import database as db
+from src.api.profile import (
+    ProfileResponse,
+    ProfileUpdate,
+    ProfileUpdateResponse,
+    delete_account,
+    get_profile,
+    patch_profile,
+    update_profile,
+)
 
 
 def test_get_profile():

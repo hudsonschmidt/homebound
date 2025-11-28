@@ -1,12 +1,5 @@
-from src import database as db
-import sqlalchemy
-from src.api.activities import (
-    Activity,
-    get_activities,
-    get_activity,
-    new_activity,
-    delete_activity
-)
+from src.api.activities import Activity, delete_activity, get_activities, get_activity, new_activity
+
 
 def test_get_all() -> None:
     activities = get_activities()
@@ -23,7 +16,7 @@ def test_get_all() -> None:
     assert "Camping" in names
     assert "Climbing" in names
 
-    
+
 def test_get_one():
     activity = get_activity("Hiking")
 
@@ -62,4 +55,4 @@ def test_new_delete():
 
     activity = get_activity("Test Activity")
     assert activity is None
-    
+

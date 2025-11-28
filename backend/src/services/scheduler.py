@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 
+import sqlalchemy
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-import sqlalchemy
 
-from ..config import get_settings
 from .. import database as db
+from ..config import get_settings
 from .notifications import send_overdue_notifications, send_push_to_user
 
 settings = get_settings()
@@ -23,7 +21,7 @@ CHECKIN_REMINDER_INTERVAL = 30  # Remind to check in every 30 min
 GRACE_WARNING_INTERVAL = 5  # Warn every 5 min during grace period
 
 # Global scheduler instance
-scheduler: Optional[AsyncIOScheduler] = None
+scheduler: AsyncIOScheduler | None = None
 
 
 async def check_overdue_trips():

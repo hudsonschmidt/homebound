@@ -1,10 +1,11 @@
 """User profile management endpoints"""
-from fastapi import APIRouter, HTTPException, Depends, status
+
+import sqlalchemy
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from typing import Optional
+
 from src import database as db
 from src.api import auth
-import sqlalchemy
 
 router = APIRouter(
     prefix="/api/v1/profile",
@@ -14,9 +15,9 @@ router = APIRouter(
 
 
 class ProfileUpdate(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    age: Optional[int] = None
+    first_name: str | None = None
+    last_name: str | None = None
+    age: int | None = None
 
 
 class ProfileResponse(BaseModel):

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import logging
+
 import httpx
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
 
-async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
+async def reverse_geocode(lat: float, lon: float) -> str | None:
     """Reverse geocode coordinates to a human-readable location name.
 
     Returns a broad location like city, park, or region name.
@@ -113,7 +113,7 @@ async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
         return None
 
 
-def reverse_geocode_sync(lat: float, lon: float) -> Optional[str]:
+def reverse_geocode_sync(lat: float, lon: float) -> str | None:
     """Synchronous version of reverse geocode for use in sync contexts.
 
     Args:

@@ -1,26 +1,15 @@
 """End-to-end tests for complete user workflows"""
-import pytest
-from unittest.mock import MagicMock
-from src import database as db
-import sqlalchemy
-from src.api.profile import (
-    get_profile,
-    update_profile,
-    delete_account,
-    ProfileUpdate
-)
-from src.api.contacts import (
-    create_contact,
-    get_contacts,
-    ContactCreate
-)
-from src.api.trips import (
-    create_trip,
-    get_trip,
-    TripCreate
-)
 from datetime import datetime, timedelta
-from fastapi import HTTPException, BackgroundTasks
+from unittest.mock import MagicMock
+
+import pytest
+import sqlalchemy
+from fastapi import BackgroundTasks
+
+from src import database as db
+from src.api.contacts import ContactCreate, create_contact, get_contacts
+from src.api.profile import ProfileUpdate, delete_account, get_profile, update_profile
+from src.api.trips import TripCreate, create_trip, get_trip
 
 
 def test_e2e_complete_user_journey():
@@ -101,7 +90,7 @@ def test_e2e_complete_user_journey():
         ContactCreate(name="Emergency One", email="test@homeboundapp.com"),
         user_id=user_id
     )
-    contact2 = create_contact(
+    create_contact(
         ContactCreate(name="Emergency Two", email="test@homeboundapp.com"),
         user_id=user_id
     )
@@ -440,7 +429,7 @@ def test_e2e_trip_lifecycle():
         user_id = result.fetchone()[0]
 
     # Step 2: Create an emergency contact (required for trips)
-    from src.api.contacts import create_contact, ContactCreate
+    from src.api.contacts import ContactCreate, create_contact
     contact = create_contact(
         ContactCreate(
             name="Emergency Contact",

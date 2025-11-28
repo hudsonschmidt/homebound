@@ -1,22 +1,24 @@
 """Tests for trips API endpoints"""
-import pytest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
-from datetime import datetime, timezone, timedelta
-from src import database as db
+
+import pytest
 import sqlalchemy
+from fastapi import BackgroundTasks, HTTPException
+
+from src import database as db
 from src.api.trips import (
+    TimelineEvent,
     TripCreate,
     TripResponse,
-    TimelineEvent,
+    complete_trip,
     create_trip,
-    get_trips,
+    delete_trip,
     get_active_trip,
     get_trip,
-    complete_trip,
-    delete_trip,
-    get_trip_timeline
+    get_trip_timeline,
+    get_trips,
 )
-from fastapi import HTTPException, BackgroundTasks
 
 
 def setup_test_user_and_contact():
@@ -114,7 +116,7 @@ def test_create_trip():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create trip
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     trip_data = TripCreate(
         title="Hiking Trip",
         activity="Hiking",
@@ -151,7 +153,7 @@ def test_create_trip_invalid_activity():
     """Test creating trip with non-existent activity"""
     user_id, contact_id = setup_test_user_and_contact()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     trip_data = TripCreate(
         title="Invalid Trip",
         activity="NonExistentActivity",
@@ -175,7 +177,7 @@ def test_create_trip_invalid_contact():
     """Test creating trip with non-existent contact"""
     user_id, _ = setup_test_user_and_contact()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     trip_data = TripCreate(
         title="Invalid Contact Trip",
         activity="Hiking",
@@ -200,7 +202,7 @@ def test_get_trips():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create multiple trips
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     background_tasks = MagicMock(spec=BackgroundTasks)
 
     create_trip(
@@ -252,7 +254,7 @@ def test_get_active_trip():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create active trip
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     trip_data = TripCreate(
         title="Active Trip",
         activity="Running",
@@ -294,7 +296,7 @@ def test_get_trip():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create trip
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     background_tasks = MagicMock(spec=BackgroundTasks)
     created = create_trip(
         TripCreate(
@@ -336,7 +338,7 @@ def test_complete_trip():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create trip
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
@@ -371,7 +373,7 @@ def test_complete_already_completed_trip():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create and complete trip
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
@@ -406,7 +408,7 @@ def test_delete_trip():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create trip
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
@@ -450,7 +452,7 @@ def test_get_trip_timeline():
     user_id, contact_id = setup_test_user_and_contact()
 
     # Create trip
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(
         TripCreate(
