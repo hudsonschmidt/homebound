@@ -78,6 +78,7 @@ class Settings:
     # Notification backend settings
     EMAIL_BACKEND: str = os.getenv("EMAIL_BACKEND", "console")  # "resend" or "console"
     PUSH_BACKEND: str = os.getenv("PUSH_BACKEND", "dummy")  # "apns" or "dummy"
+    SUPPRESS_EMAILS: bool = os.getenv("SUPPRESS_EMAILS", "false").lower() == "true"  # Disable all emails
 
 
 @lru_cache

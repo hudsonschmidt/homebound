@@ -103,6 +103,11 @@ async def send_email(
         from_email: Optional from address (defaults to RESEND_FROM_EMAIL)
         high_priority: If True, mark email as high priority/urgent
     """
+    # Global email suppression for development/testing
+    if settings.SUPPRESS_EMAILS:
+        log.info(f"[Email] Suppressed: to={email} subject={subject}")
+        return
+
     if settings.EMAIL_BACKEND == "resend":
         from ..messaging.resend_backend import send_resend_email
         success = await send_resend_email(
