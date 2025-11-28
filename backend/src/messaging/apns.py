@@ -58,7 +58,8 @@ class APNsClient:
 
     def _provider_jwt(self) -> str:
         now = int(time.time())
-        headers = {"alg": "ES256", "kid": self.key_id, "typ": "JWT"}
+        # Note: Apple APNs only requires 'alg' and 'kid' - do NOT include 'typ'
+        headers = {"alg": "ES256", "kid": self.key_id}
         payload = {"iss": self.team_id, "iat": now}
         return jwt.encode(payload, self.private_key, algorithm="ES256", headers=headers)
 
