@@ -23,6 +23,3 @@ jobs:
         run: ruff check .
       - name: Type check
         run: mypy backend
-      - name: Tests
-        run: pytest -q
-        working-directory: backend

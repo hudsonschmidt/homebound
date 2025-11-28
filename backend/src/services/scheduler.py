@@ -412,7 +412,7 @@ def init_scheduler() -> AsyncIOScheduler:
     # Check for push notifications every minute
     scheduler.add_job(
         check_push_notifications,
-        IntervalTrigger(minutes=1),
+        IntervalTrigger(minutes=0.2),
         id="check_push_notifications",
         name="Check for push notifications",
         replace_existing=True,

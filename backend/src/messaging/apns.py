@@ -51,10 +51,11 @@ class APNsClient:
         self._client: httpx.AsyncClient | None = None
 
         # Log configuration for debugging
-        key_preview = self.private_key[:50] + "..." if self.private_key else "MISSING"
+        key_len = len(self.private_key) if self.private_key else 0
+        key_valid = self.private_key.startswith("-----BEGIN PRIVATE KEY-----") if self.private_key else False
         log.info(f"[APNS] Initialized: team={self.team_id}, key={self.key_id}, "
                  f"bundle={self.bundle_id}, sandbox={settings.APNS_USE_SANDBOX}")
-        log.debug(f"[APNS] Private key preview: {key_preview}")
+        log.info(f"[APNS] Private key: len={key_len}, valid_format={key_valid}")
 
     def _provider_jwt(self) -> str:
         now = int(time.time())
