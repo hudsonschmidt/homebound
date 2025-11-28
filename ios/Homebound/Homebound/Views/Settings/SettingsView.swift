@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import Combine
+import UserNotifications
 
 // MARK: - App Preferences
 enum AppColorScheme: String, CaseIterable {
@@ -124,6 +125,25 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - Notifications
+    @Published var tripRemindersEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(tripRemindersEnabled, forKey: "tripRemindersEnabled")
+        }
+    }
+
+    @Published var checkInAlertsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(checkInAlertsEnabled, forKey: "checkInAlertsEnabled")
+        }
+    }
+
+    @Published var emergencyNotificationsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(emergencyNotificationsEnabled, forKey: "emergencyNotificationsEnabled")
+        }
+    }
+
     init() {
         // Appearance
         let schemeRaw = UserDefaults.standard.string(forKey: "colorScheme") ?? "system"
@@ -153,6 +173,11 @@ class AppPreferences: ObservableObject {
         // Units & Formats - default to locale-appropriate
         self.useMetricUnits = UserDefaults.standard.object(forKey: "useMetricUnits") == nil ? Locale.current.measurementSystem == .metric : UserDefaults.standard.bool(forKey: "useMetricUnits")
         self.use24HourTime = UserDefaults.standard.object(forKey: "use24HourTime") == nil ? false : UserDefaults.standard.bool(forKey: "use24HourTime")
+
+        // Notifications - defaults to enabled
+        self.tripRemindersEnabled = UserDefaults.standard.object(forKey: "tripRemindersEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "tripRemindersEnabled")
+        self.checkInAlertsEnabled = UserDefaults.standard.object(forKey: "checkInAlertsEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "checkInAlertsEnabled")
+        self.emergencyNotificationsEnabled = UserDefaults.standard.object(forKey: "emergencyNotificationsEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "emergencyNotificationsEnabled")
     }
 
     // MARK: - Formatting Helpers
@@ -286,30 +311,32 @@ struct SettingsView: View {
                     }
                 }
 
-                // Developer Section
-                Section("Developer") {
-                    Toggle(isOn: Binding(
-                        get: { session.useLocalServer },
-                        set: { newValue in
-                            session.useLocalServer = newValue
-                        }
-                    )) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Use Local Server")
-                                Text(session.useLocalServer ? "Local Mac" : "Render")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                // Developer Section (only visible to developer)
+                if session.userEmail == "hudsonschmidt08@gmail.com" {
+                    Section("Developer") {
+                        Toggle(isOn: Binding(
+                            get: { session.useLocalServer },
+                            set: { newValue in
+                                session.useLocalServer = newValue
                             }
-                        } icon: {
-                            Image(systemName: "server.rack")
-                                .foregroundStyle(session.useLocalServer ? .green : .purple)
+                        )) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Use Local Server")
+                                    Text(session.useLocalServer ? "Local Mac" : "Render")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "server.rack")
+                                    .foregroundStyle(session.useLocalServer ? .green : .purple)
+                            }
                         }
                     }
                 }
 
                 // Support Section
-                Section("Support") {
+                Section("Support (Coming Soon)") {
                     Link(destination: URL(string: "https://homeboundapp.com/help")!) {
                         Label {
                             HStack {
@@ -328,7 +355,7 @@ struct SettingsView: View {
                     Link(destination: URL(string: "mailto:support@homeboundapp.com")!) {
                         Label {
                             HStack {
-                                Text("Contact Us")
+                                Text("Contact Us (Coming Soon)")
                                 Spacer()
                                 Image(systemName: "arrow.up.right.square")
                                     .font(.caption)
@@ -343,9 +370,7 @@ struct SettingsView: View {
 
                 // Resources Section
                 Section("Resources") {
-                    Button(action: {
-                        // TODO: Implement feature request
-                    }) {
+                    Link(destination: URL(string: "https://homebound.canny.io/feature-requests")!) {
                         Label {
                             HStack {
                                 Text("Request a Feature")
@@ -359,11 +384,8 @@ struct SettingsView: View {
                                 .foregroundStyle(.yellow)
                         }
                     }
-                    .foregroundStyle(.primary)
 
-                    Button(action: {
-                        // TODO: Implement bug report
-                    }) {
+                    Link(destination: URL(string: "https://homebound.canny.io/bugs")!) {
                         Label {
                             HStack {
                                 Text("Report a Bug")
@@ -377,14 +399,13 @@ struct SettingsView: View {
                                 .foregroundStyle(.red)
                         }
                     }
-                    .foregroundStyle(.primary)
 
                     Button(action: {
                         // TODO: Open App Store for rating
                     }) {
                         Label {
                             HStack {
-                                Text("Rate in App Store")
+                                Text("Rate in App Store (Coming Soon)")
                                 Spacer()
                                 Image(systemName: "arrow.up.right.square")
                                     .font(.caption)
@@ -871,18 +892,105 @@ struct CustomizationView: View {
     }
 }
 
-// MARK: - Placeholder Views
+// MARK: - Notification Settings View
 struct NotificationSettingsView: View {
+    @EnvironmentObject var preferences: AppPreferences
+    @State private var notificationsAuthorized = false
+    @State private var showingSystemSettings = false
+
     var body: some View {
         List {
-            Section("Push Notifications") {
-                Toggle("Trip Reminders", isOn: .constant(true))
-                Toggle("Check-in Alerts", isOn: .constant(true))
-                Toggle("Emergency Notifications", isOn: .constant(true))
+            // System permissions section
+            Section {
+                HStack {
+                    Label {
+                        Text("System Notifications")
+                    } icon: {
+                        Image(systemName: notificationsAuthorized ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(notificationsAuthorized ? .green : .red)
+                    }
+
+                    Spacer()
+
+                    if !notificationsAuthorized {
+                        Button("Enable") {
+                            openSystemSettings()
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(Color.hbBrand)
+                    } else {
+                        Text("Enabled")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } footer: {
+                if !notificationsAuthorized {
+                    Text("Enable notifications in System Settings to receive alerts about your trips.")
+                }
+            }
+
+            // Trip notifications
+            Section {
+                Toggle(isOn: $preferences.tripRemindersEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Trip Reminders")
+                        Text("Get notified before trips start and when approaching ETA")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!notificationsAuthorized)
+
+                Toggle(isOn: $preferences.checkInAlertsEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Check-in Alerts")
+                        Text("Reminders to check in during active trips")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!notificationsAuthorized)
+            } header: {
+                Text("Trip Notifications")
+            }
+
+            // Emergency notifications
+            Section {
+                Toggle(isOn: $preferences.emergencyNotificationsEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Emergency Notifications")
+                        Text("Critical alerts when you're overdue")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!notificationsAuthorized)
+            } header: {
+                Text("Safety Alerts")
+            } footer: {
+                Text("Emergency notifications are high priority and will override Do Not Disturb.")
             }
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            checkNotificationStatus()
+        }
+    }
+
+    private func checkNotificationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                notificationsAuthorized = settings.authorizationStatus == .authorized
+            }
+        }
+    }
+
+    private func openSystemSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
     }
 }
 

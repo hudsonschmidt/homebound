@@ -29,16 +29,16 @@ class APNsClient:
     """
     Token-based APNs using HTTP/2.
     Requires:
-      - IOS_TEAM_ID  (Apple Developer Team ID)
+      - APNS_TEAM_ID  (Apple Developer Team ID)
       - APNS_KEY_ID  (Key ID of your .p8)
-      - APNS_PRIVATE_KEY or APNS_PRIVATE_KEY_PATH
-      - IOS_BUNDLE_ID (topic)
+      - APNS_PRIVATE_KEY or APNS_AUTH_KEY_PATH
+      - APNS_BUNDLE_ID (topic)
     """
 
     def __init__(self) -> None:
-        self.team_id = settings.IOS_TEAM_ID
+        self.team_id = settings.APNS_TEAM_ID
         self.key_id = settings.APNS_KEY_ID
-        self.bundle_id = settings.IOS_BUNDLE_ID
+        self.bundle_id = settings.APNS_BUNDLE_ID
         self.private_key = settings.get_apns_private_key()
         self.base_url = (
             "https://api.development.push.apple.com"

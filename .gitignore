@@ -23,6 +23,10 @@ build/
 .env
 backend/.env
 
+# APNs keys (never commit these!)
+*.p8
+backend/keys/
+
 # Node (if you add a frontend)
 node_modules/
 

@@ -122,17 +122,46 @@ async def send_email(
         log.warning(f"Unknown email backend: {settings.EMAIL_BACKEND}")
 
 
-async def send_push_to_user(user_id: int, title: str, body: str):
+async def send_push_to_user(user_id: int, title: str, body: str, data: dict = None):
     """Send push notification to all user's devices."""
-    if settings.PUSH_BACKEND == "apns":
-        # TODO: Implement APNs push
-        log.info(f"[APNS PUSH] User: {user_id} - {title}: {body}")
-    elif settings.PUSH_BACKEND == "dummy":
+    from ..messaging.apns import get_push_sender
+    from .. import database as db
+    import sqlalchemy
+
+    if settings.PUSH_BACKEND == "dummy":
         log.info(f"[DUMMY PUSH] User: {user_id} - {title}: {body}")
-    else:
+        return
+
+    if settings.PUSH_BACKEND != "apns":
         log.warning(f"Unknown push backend: {settings.PUSH_BACKEND}")
+        return
 
+    # Query user's iOS devices
+    with db.engine.begin() as conn:
+        devices = conn.execute(
+            sqlalchemy.text(
+                "SELECT token, env FROM devices WHERE user_id = :uid AND platform = 'ios'"
+            ),
+            {"uid": user_id}
+        ).fetchall()
 
+    if not devices:
+        log.debug(f"No iOS devices registered for user {user_id}")
+        return
+
+    # Send to each device
+    sender = get_push_sender()
+    for device in devices:
+        try:
+            result = await sender.send(device.token, title, body, data)
+            if result.ok:
+                log.info(f"[APNS] Sent to user {user_id}: {title}")
+            else:
+                log.warning(f"[APNS] Failed for user {user_id}: status={result.status} detail={result.detail}")
+        except Exception as e:
+            log.error(f"[APNS] Error sending to user {user_id}: {e}")
+
+# Magic Link --------------------------------------------------------------------------------
 async def send_magic_link_email(email: str, code: str):
     """Send magic link code via email."""
     from ..messaging.resend_backend import create_magic_link_email_html
@@ -140,10 +169,10 @@ async def send_magic_link_email(email: str, code: str):
     subject = "Your Homebound Login Code"
     body = f"""Your verification code is: {code}
 
-This code will expire in 10 minutes.
+        This code will expire in 10 minutes.
 
-If you didn't request this code, please ignore this email.
-"""
+        If you didn't request this code, please ignore this email.
+        """
 
     html_body = create_magic_link_email_html(email, code) if settings.EMAIL_BACKEND == "resend" else None
     await send_email(
@@ -154,7 +183,7 @@ If you didn't request this code, please ignore this email.
         from_email=settings.RESEND_FROM_EMAIL  # noreply@
     )
 
-
+# Overdue --------------------------------------------------------------------------------
 async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: str = "Someone", user_timezone: Optional[str] = None):
     """Send overdue notifications to contacts via email and push."""
     from ..messaging.resend_backend import create_overdue_notification_email_html
@@ -176,7 +205,7 @@ async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: 
         contact_email = get_attr(contact, 'email')
 
         if contact_email:
-            subject = f"⚠️ URGENT: {user_name} is overdue - {trip_title}"
+            subject = f"URGENT: {user_name} is overdue on their {trip_title}"
 
             html_body = create_overdue_notification_email_html(
                 user_name=user_name,
@@ -203,7 +232,7 @@ async def send_overdue_notifications(trip: Any, contacts: List[Any], user_name: 
     message = f"URGENT: {trip_title} was expected by {eta_formatted} but hasn't checked in."
     await send_push_to_user(trip_user_id, "Check-in Overdue", message)
 
-
+# Trip created --------------------------------------------------------------------------------
 async def send_trip_created_emails(
     trip: Any,
     contacts: List[Any],
@@ -226,7 +255,7 @@ async def send_trip_created_emails(
         contact_email = get_attr(contact, 'email')
 
         if contact_email:
-            subject = f"{user_name} added you as an emergency contact"
+            subject = f"{user_name} added you as an emergency contact to their trip"
 
             html_body = create_trip_created_email_html(
                 user_name=user_name,
@@ -248,7 +277,7 @@ async def send_trip_created_emails(
 
             log.info(f"Sent trip created notification to {contact_email} for trip '{trip_title}'")
 
-
+# Trip starting --------------------------------------------------------------------------------
 async def send_trip_starting_now_emails(
     trip: Any,
     contacts: List[Any],
@@ -270,7 +299,7 @@ async def send_trip_starting_now_emails(
         contact_email = get_attr(contact, 'email')
 
         if contact_email:
-            subject = f"🚀 {user_name} just started a trip"
+            subject = f"{user_name}'s trip just started!"
 
             html_body = create_trip_starting_now_email_html(
                 user_name=user_name,
@@ -291,7 +320,7 @@ async def send_trip_starting_now_emails(
 
             log.info(f"Sent trip starting now notification to {contact_email} for trip '{trip_title}'")
 
-
+# Check in --------------------------------------------------------------------------------
 async def send_checkin_update_emails(
     trip: Any,
     contacts: List[Any],
@@ -317,7 +346,7 @@ async def send_checkin_update_emails(
         contact_email = get_attr(contact, 'email')
 
         if contact_email:
-            subject = f"📍 {user_name} checked in"
+            subject = f"{user_name} checked in"
 
             html_body = create_checkin_update_email_html(
                 user_name=user_name,
@@ -340,7 +369,7 @@ async def send_checkin_update_emails(
 
             log.info(f"Sent checkin update to {contact_email} for trip '{trip_title}'")
 
-
+# Trip extended --------------------------------------------------------------------------------
 async def send_trip_extended_emails(
     trip: Any,
     contacts: List[Any],
@@ -365,7 +394,7 @@ async def send_trip_extended_emails(
         contact_email = get_attr(contact, 'email')
 
         if contact_email:
-            subject = f"⏱️ {user_name} extended their trip"
+            subject = f"{user_name} extended their trip"
 
             html_body = create_trip_extended_email_html(
                 user_name=user_name,
@@ -387,7 +416,7 @@ async def send_trip_extended_emails(
 
             log.info(f"Sent trip extended notification to {contact_email} for trip '{trip_title}'")
 
-
+# Trip completed --------------------------------------------------------------------------------
 async def send_trip_completed_emails(
     trip: Any,
     contacts: List[Any],
@@ -408,7 +437,7 @@ async def send_trip_completed_emails(
         contact_email = get_attr(contact, 'email')
 
         if contact_email:
-            subject = f"✅ Good news! {user_name} is safe"
+            subject = f"{user_name} is Homebound!"
 
             html_body = create_trip_completed_email_html(
                 user_name=user_name,
@@ -428,7 +457,7 @@ async def send_trip_completed_emails(
 
             log.info(f"Sent trip completed notification to {contact_email} for trip '{trip_title}'")
 
-
+# Overdue resolved --------------------------------------------------------------------------------
 async def send_overdue_resolved_emails(
     trip: Any,
     contacts: List[Any],
@@ -446,7 +475,7 @@ async def send_overdue_resolved_emails(
         contact_email = get_attr(contact, 'email')
 
         if contact_email:
-            subject = f"🎉 ALL CLEAR: {user_name} is safe!"
+            subject = f"{user_name} is safe!"
 
             html_body = create_overdue_resolved_email_html(
                 user_name=user_name,
@@ -465,7 +494,6 @@ async def send_overdue_resolved_emails(
             )
 
             log.info(f"Sent overdue resolved notification to {contact_email} for trip '{trip_title}'")
-
 
 async def send_plan_created_notification(plan: Any):
     """Send push notification when a plan is created (to the user)."""

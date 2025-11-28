@@ -34,6 +34,11 @@ struct HomeboundApp: App {
                         .environmentObject(session)
                         .environmentObject(preferences)
                         .task { await requestPush() }
+                        .onReceive(NotificationCenter.default.publisher(for: .hbGotAPNsToken)) { notification in
+                            if let token = notification.object as? String {
+                                session.handleAPNsToken(token)
+                            }
+                        }
                         .onOpenURL { url in
                             // Handle universal links for check-in/out
                             handleUniversalLink(url)
@@ -68,7 +73,16 @@ struct HomeboundApp: App {
     }
 }
 
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Set ourselves as the notification center delegate
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
@@ -83,8 +97,41 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         print("APNs registration failed:", error)
     }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Handle notifications when app is in foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Show notification even when app is in foreground
+        completionHandler([.banner, .sound, .badge])
+    }
+
+    /// Handle notification tap
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+
+        // Handle any custom data from the notification
+        if let tripId = userInfo["trip_id"] as? Int {
+            // Post notification to navigate to trip
+            NotificationCenter.default.post(
+                name: .hbNavigateToTrip,
+                object: tripId
+            )
+        }
+
+        completionHandler()
+    }
 }
 
 extension Notification.Name {
     static let hbGotAPNsToken = Notification.Name("hbGotAPNsToken")
+    static let hbNavigateToTrip = Notification.Name("hbNavigateToTrip")
 }

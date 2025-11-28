@@ -73,5 +73,7 @@
 	<string>Homebound needs your location to show nearby places and set your trip location.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Homebound needs your location to track your safety during trips and notify contacts if needed.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

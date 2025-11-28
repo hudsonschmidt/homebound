@@ -72,7 +72,8 @@ final class Session: ObservableObject {
     // MARK: API & Base URL
 
     static let productionURL = URL(string: "https://api.homeboundapp.com")!
-    static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
+    static let localURL = URL(string: "http://192.168.6.108:3001")!
+    // static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
 
     @Published var useLocalServer: Bool = UserDefaults.standard.bool(forKey: "useLocalServer") {
         didSet {

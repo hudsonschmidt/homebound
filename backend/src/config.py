@@ -41,6 +41,19 @@ class Settings:
     APNS_TEAM_ID: str = os.getenv("APNS_TEAM_ID", "")
     APNS_BUNDLE_ID: str = os.getenv("APNS_BUNDLE_ID", "com.homeboundapp.Homebound")
     APNS_AUTH_KEY_PATH: str = os.getenv("APNS_AUTH_KEY_PATH", "")
+    APNS_PRIVATE_KEY: str = os.getenv("APNS_PRIVATE_KEY", "")  # For production (key contents)
+    APNS_USE_SANDBOX: bool = os.getenv("APNS_USE_SANDBOX", "true").lower() == "true"
+
+    def get_apns_private_key(self) -> str:
+        """Load APNs private key from env var or file."""
+        # First check for direct key in environment (production)
+        if self.APNS_PRIVATE_KEY:
+            return self.APNS_PRIVATE_KEY
+        # Fall back to file path (local development)
+        if self.APNS_AUTH_KEY_PATH and os.path.exists(self.APNS_AUTH_KEY_PATH):
+            with open(self.APNS_AUTH_KEY_PATH, 'r') as f:
+                return f.read()
+        return ""
 
     # Apple Sign In settings
     APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID", "com.hudsonschmidt.Homebound")

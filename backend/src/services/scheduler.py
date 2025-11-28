@@ -11,10 +11,16 @@ import sqlalchemy
 
 from ..config import get_settings
 from .. import database as db
-from .notifications import send_overdue_notifications
+from .notifications import send_overdue_notifications, send_push_to_user
 
 settings = get_settings()
 log = logging.getLogger(__name__)
+
+# Notification timing constants (in minutes)
+STARTING_SOON_MINUTES = 15  # Notify 15 min before scheduled start
+APPROACHING_ETA_MINUTES = 15  # Notify 15 min before ETA
+CHECKIN_REMINDER_INTERVAL = 30  # Remind to check in every 30 min
+GRACE_WARNING_INTERVAL = 5  # Warn every 5 min during grace period
 
 # Global scheduler instance
 scheduler: Optional[AsyncIOScheduler] = None
@@ -184,6 +190,176 @@ async def check_overdue_trips():
         log.error(f"Error checking overdue trips: {e}", exc_info=True)
 
 
+async def check_push_notifications():
+    """Check for and send push notifications to users."""
+    try:
+        now = datetime.utcnow()
+
+        with db.engine.begin() as conn:
+            # 1. Trip Starting Soon - notify 15 min before scheduled start
+            starting_soon = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, title, start
+                    FROM trips
+                    WHERE status = 'planned'
+                    AND notified_starting_soon = false
+                    AND start > :now
+                    AND start <= :soon
+                """),
+                {"now": now, "soon": now + timedelta(minutes=STARTING_SOON_MINUTES)}
+            ).fetchall()
+
+            for trip in starting_soon:
+                await send_push_to_user(
+                    trip.user_id,
+                    "Trip Starting Soon",
+                    f"Your trip '{trip.title}' starts in about 15 minutes!"
+                )
+                conn.execute(
+                    sqlalchemy.text("UPDATE trips SET notified_starting_soon = true WHERE id = :id"),
+                    {"id": trip.id}
+                )
+                log.info(f"[Push] Sent 'starting soon' notification for trip {trip.id}")
+
+            # 2. Trip Started - when planned trip becomes active
+            just_started = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, title
+                    FROM trips
+                    WHERE status = 'active'
+                    AND notified_trip_started = false
+                """)
+            ).fetchall()
+
+            for trip in just_started:
+                await send_push_to_user(
+                    trip.user_id,
+                    "Trip Started",
+                    f"Your trip '{trip.title}' has started. Stay safe!"
+                )
+                conn.execute(
+                    sqlalchemy.text("UPDATE trips SET notified_trip_started = true WHERE id = :id"),
+                    {"id": trip.id}
+                )
+                log.info(f"[Push] Sent 'trip started' notification for trip {trip.id}")
+
+            # 3. Approaching ETA - notify 15 min before ETA
+            approaching_eta = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, title, eta
+                    FROM trips
+                    WHERE status = 'active'
+                    AND notified_approaching_eta = false
+                    AND eta > :now
+                    AND eta <= :soon
+                """),
+                {"now": now, "soon": now + timedelta(minutes=APPROACHING_ETA_MINUTES)}
+            ).fetchall()
+
+            for trip in approaching_eta:
+                await send_push_to_user(
+                    trip.user_id,
+                    "Almost Time",
+                    f"You're expected back from '{trip.title}' in about 15 minutes."
+                )
+                conn.execute(
+                    sqlalchemy.text("UPDATE trips SET notified_approaching_eta = true WHERE id = :id"),
+                    {"id": trip.id}
+                )
+                log.info(f"[Push] Sent 'approaching ETA' notification for trip {trip.id}")
+
+            # 4. ETA Reached - notify when ETA passes
+            eta_reached = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, title, eta, grace_min
+                    FROM trips
+                    WHERE status IN ('active', 'overdue')
+                    AND notified_eta_reached = false
+                    AND eta <= :now
+                """),
+                {"now": now}
+            ).fetchall()
+
+            for trip in eta_reached:
+                await send_push_to_user(
+                    trip.user_id,
+                    "Time to Check Out",
+                    f"Your expected return time has passed. Check out or extend your trip '{trip.title}'."
+                )
+                conn.execute(
+                    sqlalchemy.text("UPDATE trips SET notified_eta_reached = true WHERE id = :id"),
+                    {"id": trip.id}
+                )
+                log.info(f"[Push] Sent 'ETA reached' notification for trip {trip.id}")
+
+            # 5. Check-in Reminders - during active trips (every 30 min)
+            need_checkin_reminder = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, title, last_checkin_reminder
+                    FROM trips
+                    WHERE status = 'active'
+                    AND (last_checkin_reminder IS NULL OR last_checkin_reminder <= :cutoff)
+                """),
+                {"cutoff": now - timedelta(minutes=CHECKIN_REMINDER_INTERVAL)}
+            ).fetchall()
+
+            for trip in need_checkin_reminder:
+                # Skip if this is a brand new trip (don't spam immediately)
+                if trip.last_checkin_reminder is None:
+                    # Just mark the time, don't send notification on first pass
+                    conn.execute(
+                        sqlalchemy.text("UPDATE trips SET last_checkin_reminder = :now WHERE id = :id"),
+                        {"now": now, "id": trip.id}
+                    )
+                else:
+                    await send_push_to_user(
+                        trip.user_id,
+                        "Check-in Reminder",
+                        f"Don't forget to check in on your trip '{trip.title}'!"
+                    )
+                    conn.execute(
+                        sqlalchemy.text("UPDATE trips SET last_checkin_reminder = :now WHERE id = :id"),
+                        {"now": now, "id": trip.id}
+                    )
+                    log.info(f"[Push] Sent check-in reminder for trip {trip.id}")
+
+            # 6. Grace Period Warnings - every 5 min during grace period
+            in_grace_period = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, title, eta, grace_min, last_grace_warning
+                    FROM trips
+                    WHERE status IN ('overdue', 'overdue_notified')
+                    AND (last_grace_warning IS NULL OR last_grace_warning <= :cutoff)
+                """),
+                {"cutoff": now - timedelta(minutes=GRACE_WARNING_INTERVAL)}
+            ).fetchall()
+
+            for trip in in_grace_period:
+                # Parse eta
+                if isinstance(trip.eta, str):
+                    eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
+                else:
+                    eta_dt = trip.eta.replace(tzinfo=None) if trip.eta.tzinfo else trip.eta
+
+                grace_expires = eta_dt + timedelta(minutes=trip.grace_min)
+                remaining = (grace_expires - now).total_seconds() / 60
+
+                if remaining > 0:
+                    await send_push_to_user(
+                        trip.user_id,
+                        "Urgent: Check In Now",
+                        f"You're overdue! {int(remaining)} minutes left before contacts are notified."
+                    )
+                    conn.execute(
+                        sqlalchemy.text("UPDATE trips SET last_grace_warning = :now WHERE id = :id"),
+                        {"now": now, "id": trip.id}
+                    )
+                    log.info(f"[Push] Sent grace warning for trip {trip.id}, {int(remaining)} min remaining")
+
+    except Exception as e:
+        log.error(f"Error checking push notifications: {e}", exc_info=True)
+
+
 async def clean_expired_tokens():
     """Clean up expired login tokens."""
     try:
@@ -231,6 +407,16 @@ def init_scheduler() -> AsyncIOScheduler:
         IntervalTrigger(minutes=10),
         id="clean_tokens",
         name="Clean expired tokens",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    # Check for push notifications every minute
+    scheduler.add_job(
+        check_push_notifications,
+        IntervalTrigger(minutes=1),
+        id="check_push_notifications",
+        name="Check for push notifications",
         replace_existing=True,
         max_instances=1,
     )
