@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 import httpx
-from jose import jwt
+import jwt  # PyJWT
 
 from ..config import settings
 
@@ -62,7 +62,9 @@ class APNsClient:
         # Note: Apple APNs only requires 'alg' and 'kid' - do NOT include 'typ'
         headers = {"alg": "ES256", "kid": self.key_id}
         payload = {"iss": self.team_id, "iat": now}
-        return jwt.encode(payload, self.private_key, algorithm="ES256", headers=headers)
+        # PyJWT returns str directly (not bytes) in recent versions
+        token = jwt.encode(payload, self.private_key, algorithm="ES256", headers=headers)
+        return token if isinstance(token, str) else token.decode("utf-8")
 
     async def _client_ctx(self) -> httpx.AsyncClient:
         if self._client is None:
