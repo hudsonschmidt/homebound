@@ -51,7 +51,16 @@ def to_iso8601(dt: datetime | str | None) -> str | None:
         except (ValueError, AttributeError):
             # If parsing fails, return as-is
             return dt
-    return str(dt)
+    # Fallback for any other type
+    return str(dt)  # pragma: no cover
+
+
+def to_iso8601_required(dt: datetime | str | None) -> str:
+    """Convert datetime to ISO8601 string, raises if None."""
+    result = to_iso8601(dt)
+    if result is None:
+        raise ValueError("Required datetime field is None")
+    return result
 
 
 class TripCreate(BaseModel):
@@ -68,6 +77,7 @@ class TripCreate(BaseModel):
     contact2: int | None = None
     contact3: int | None = None
     timezone: str | None = None  # User's timezone (e.g., "America/New_York")
+    suppress_emails: bool | None = None  # Developer option to suppress email notifications
 
 
 class TripResponse(BaseModel):
@@ -332,32 +342,35 @@ def create_trip(
         user_timezone = body.timezone
         is_starting_now = initial_status == 'active'
 
-        # Schedule background task to send emails to contacts
-        # Use different email templates based on whether trip is starting now or upcoming
-        def send_emails_sync():
-            if is_starting_now:
-                # Trip is starting immediately - send "starting now" email
-                asyncio.run(send_trip_starting_now_emails(
-                    trip=trip_data,
-                    contacts=contacts_for_email,
-                    user_name=user_name,
-                    activity_name=activity_obj.name,
-                    user_timezone=user_timezone
-                ))
-            else:
-                # Trip is scheduled for later - send "upcoming trip" email
-                asyncio.run(send_trip_created_emails(
-                    trip=trip_data,
-                    contacts=contacts_for_email,
-                    user_name=user_name,
-                    activity_name=activity_obj.name,
-                    user_timezone=user_timezone
-                ))
+        # Schedule background task to send emails to contacts (unless suppressed)
+        if body.suppress_emails:
+            log.info("[Trips] Email notifications suppressed by developer option")
+        else:
+            # Use different email templates based on whether trip is starting now or upcoming
+            def send_emails_sync():
+                if is_starting_now:
+                    # Trip is starting immediately - send "starting now" email
+                    asyncio.run(send_trip_starting_now_emails(
+                        trip=trip_data,
+                        contacts=contacts_for_email,
+                        user_name=user_name,
+                        activity_name=activity_obj.name,
+                        user_timezone=user_timezone
+                    ))
+                else:
+                    # Trip is scheduled for later - send "upcoming trip" email
+                    asyncio.run(send_trip_created_emails(
+                        trip=trip_data,
+                        contacts=contacts_for_email,
+                        user_name=user_name,
+                        activity_name=activity_obj.name,
+                        user_timezone=user_timezone
+                    ))
 
-        background_tasks.add_task(send_emails_sync)
-        email_type = "starting now" if is_starting_now else "upcoming trip"
-        num_contacts = len(contacts_for_email)
-        log.info(f"[Trips] Scheduled {email_type} emails for {num_contacts} contacts")
+            background_tasks.add_task(send_emails_sync)
+            email_type = "starting now" if is_starting_now else "upcoming trip"
+            num_contacts = len(contacts_for_email)
+            log.info(f"[Trips] Scheduled {email_type} emails for {num_contacts} contacts")
 
         return TripResponse(
             id=trip["id"],

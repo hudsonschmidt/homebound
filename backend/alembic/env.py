@@ -10,7 +10,8 @@ config = context.config
 
 # Load DB URI from environment and override config
 # Check DATABASE_URL first (Render sets this), then POSTGRES_URI, then default to local Docker
-database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI", "postgresql://myuser:mypassword@localhost:5432/mydatabase")
+_db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI")
+database_url: str = _db_url if _db_url else "postgresql://myuser:mypassword@localhost:5432/mydatabase"
 
 # Debug: Print original URL (remove credentials for security)
 if '@' in database_url:

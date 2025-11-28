@@ -86,6 +86,12 @@ final class Session: ObservableObject {
         }
     }
 
+    @Published var suppressTripEmails: Bool = UserDefaults.standard.bool(forKey: "suppressTripEmails") {
+        didSet {
+            UserDefaults.standard.set(suppressTripEmails, forKey: "suppressTripEmails")
+        }
+    }
+
     var baseURL: URL {
         useLocalServer ? Self.localURL : Self.productionURL
     }

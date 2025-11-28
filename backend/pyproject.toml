@@ -28,6 +28,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "types-pytz",
+  "types-requests",
   "ruff>=0.5",
   "mypy>=1.11",
   "pytest>=8",
@@ -44,6 +46,15 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+# SQLAlchemy Row types cause many false positives
+# arg-type for to_iso8601 returning Optional but TripResponse expecting str
+disable_error_code = ["index", "union-attr", "import-untyped", "arg-type"]
 
 [tool.uv]
 managed = false

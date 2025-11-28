@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -7,6 +8,8 @@ import httpx
 from jose import jwt
 
 from ..config import settings
+
+log = logging.getLogger(__name__)
 
 
 class PushResult:
@@ -47,6 +50,12 @@ class APNsClient:
         )
         self._client: httpx.AsyncClient | None = None
 
+        # Log configuration for debugging
+        key_preview = self.private_key[:50] + "..." if self.private_key else "MISSING"
+        log.info(f"[APNS] Initialized: team={self.team_id}, key={self.key_id}, "
+                 f"bundle={self.bundle_id}, sandbox={settings.APNS_USE_SANDBOX}")
+        log.debug(f"[APNS] Private key preview: {key_preview}")
+
     def _provider_jwt(self) -> str:
         now = int(time.time())
         headers = {"alg": "ES256", "kid": self.key_id, "typ": "JWT"}
@@ -84,7 +93,15 @@ class APNsClient:
 
         r = await c.post(url, headers=headers, json=payload)
         ok = 200 <= r.status_code < 300
-        detail = r.headers.get("apns-id", r.text)
+        if ok:
+            detail = r.headers.get("apns-id", "success")
+        else:
+            # For errors, the reason is in the response JSON body
+            try:
+                error_body = r.json()
+                detail = error_body.get("reason", r.text)
+            except Exception:
+                detail = r.text or r.headers.get("apns-id", "unknown error")
         return PushResult(ok=ok, status=r.status_code, detail=detail)
 
 

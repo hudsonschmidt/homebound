@@ -332,6 +332,25 @@ struct SettingsView: View {
                                     .foregroundStyle(session.useLocalServer ? .green : .purple)
                             }
                         }
+
+                        Toggle(isOn: Binding(
+                            get: { session.suppressTripEmails },
+                            set: { newValue in
+                                session.suppressTripEmails = newValue
+                            }
+                        )) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Suppress Trip Emails")
+                                    Text(session.suppressTripEmails ? "Emails logged to console" : "Emails sent normally")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "envelope.badge.shield.half.filled")
+                                    .foregroundStyle(session.suppressTripEmails ? .orange : .blue)
+                            }
+                        }
                     }
                 }
 

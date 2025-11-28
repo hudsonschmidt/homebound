@@ -122,7 +122,7 @@ async def send_email(
         log.warning(f"Unknown email backend: {settings.EMAIL_BACKEND}")
 
 
-async def send_push_to_user(user_id: int, title: str, body: str, data: dict = None):
+async def send_push_to_user(user_id: int, title: str, body: str, data: dict | None = None):
     """Send push notification to all user's devices."""
     import sqlalchemy
 

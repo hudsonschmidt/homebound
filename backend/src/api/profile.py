@@ -78,8 +78,8 @@ def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_
     """Update current user's profile"""
     with db.engine.begin() as connection:
         # Build dynamic update query
-        updates = []
-        params = {"user_id": user_id}
+        updates: list[str] = []
+        params: dict[str, str | int] = {"user_id": user_id}
 
         if body.first_name is not None:
             updates.append("first_name = :first_name")
@@ -111,6 +111,9 @@ def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_
             {"user_id": user_id}
         ).fetchone()
 
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
         # Check if profile is complete (non-empty strings and valid age)
         profile_completed = bool(
             user.first_name and
@@ -135,8 +138,8 @@ def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_u
     """Partially update current user's profile"""
     with db.engine.begin() as connection:
         # Build dynamic update query
-        updates = []
-        params = {"user_id": user_id}
+        updates: list[str] = []
+        params: dict[str, str | int] = {"user_id": user_id}
 
         if body.first_name is not None:
             updates.append("first_name = :first_name")

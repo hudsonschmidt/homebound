@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import resend
 
@@ -161,7 +161,7 @@ async def send_resend_email(
                 "Importance": "high",
             }
 
-        response = resend.Emails.send(params)
+        response = resend.Emails.send(cast(resend.Emails.SendParams, params))
 
         log.info(f"Email sent successfully to {', '.join(to_email)}, ID: {response.get('id')}")
         return True

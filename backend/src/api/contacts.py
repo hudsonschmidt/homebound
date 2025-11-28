@@ -136,8 +136,8 @@ def update_contact(
             )
 
         # Build update query
-        updates = []
-        params = {"contact_id": contact_id}
+        updates: list[str] = []
+        params: dict[str, int | str] = {"contact_id": contact_id}
 
         if body.name is not None:
             updates.append("name = :name")
