@@ -46,10 +46,22 @@ class Settings:
     APNS_USE_SANDBOX: bool = os.getenv("APNS_USE_SANDBOX", "true").lower() == "true"
 
     def get_apns_private_key(self) -> str:
-        """Load APNs private key from env var or file."""
+        """Load APNs private key from env var or file.
+
+        Supports base64-encoded keys to avoid newline issues in env vars.
+        """
+        import base64
+
         # First check for direct key in environment (production)
         if self.APNS_PRIVATE_KEY:
-            return self.APNS_PRIVATE_KEY
+            key = self.APNS_PRIVATE_KEY
+            # Check if it's base64 encoded (doesn't start with -----)
+            if not key.startswith("-----"):
+                try:
+                    key = base64.b64decode(key).decode("utf-8")
+                except Exception:
+                    pass  # Not base64, use as-is
+            return key
         # Fall back to file path (local development)
         if self.APNS_AUTH_KEY_PATH and os.path.exists(self.APNS_AUTH_KEY_PATH):
             with open(self.APNS_AUTH_KEY_PATH) as f:

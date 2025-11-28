@@ -66,7 +66,9 @@ def checkin_with_token(
             ),
             {"user_id": trip.user_id, "trip_id": trip.id, "timestamp": now.isoformat()}
         )
-        event_id = result.fetchone()[0]
+        row = result.fetchone()
+        assert row is not None
+        event_id = row[0]
 
         # Update last check-in reference and reset status to active
         connection.execute(

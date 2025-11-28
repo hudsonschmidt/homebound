@@ -51,8 +51,8 @@ def to_iso8601(dt: datetime | str | None) -> str | None:
         except (ValueError, AttributeError):
             # If parsing fails, return as-is
             return dt
-    # Fallback for any other type
-    return str(dt)  # pragma: no cover
+    # Fallback for any other type (unreachable with current type hints but kept for safety)
+    return str(dt)  # type: ignore[unreachable]  # pragma: no cover
 
 
 def to_iso8601_required(dt: datetime | str | None) -> str:
@@ -226,6 +226,7 @@ def create_trip(
             )
             if has_valid_coords:
                 log.info(f"[Trips] Reverse geocoding at ({body.gen_lat}, {body.gen_lon})")
+                assert body.gen_lat is not None and body.gen_lon is not None
                 geocoded = reverse_geocode_sync(body.gen_lat, body.gen_lon)
                 if geocoded:
                     location_text = geocoded
@@ -274,7 +275,9 @@ def create_trip(
                 "timezone": body.timezone
             }
         )
-        trip_id = result.fetchone()[0]
+        row = result.fetchone()
+        assert row is not None
+        trip_id = row[0]
 
         # Fetch created trip with full activity data
         trip = connection.execute(
@@ -294,6 +297,7 @@ def create_trip(
             ),
             {"trip_id": trip_id}
         ).mappings().fetchone()
+        assert trip is not None
 
         # Construct Activity object from trip data
         activity_obj = Activity(
@@ -377,8 +381,8 @@ def create_trip(
             user_id=trip["user_id"],
             title=trip["title"],
             activity=activity_obj,
-            start=to_iso8601(trip["start"]),
-            eta=to_iso8601(trip["eta"]),
+            start=to_iso8601_required(trip["start"]),
+            eta=to_iso8601_required(trip["eta"]),
             grace_min=trip["grace_min"],
             location_text=trip["location_text"],
             gen_lat=trip["gen_lat"],
@@ -387,7 +391,7 @@ def create_trip(
             status=trip["status"],
             completed_at=to_iso8601(trip["completed_at"]),
             last_checkin=to_iso8601(trip["last_checkin"]),
-            created_at=to_iso8601(trip["created_at"]),
+            created_at=to_iso8601_required(trip["created_at"]),
             contact1=trip["contact1"],
             contact2=trip["contact2"],
             contact3=trip["contact3"],
@@ -439,8 +443,8 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     user_id=trip["user_id"],
                     title=trip["title"],
                     activity=activity,
-                    start=to_iso8601(trip["start"]),
-                    eta=to_iso8601(trip["eta"]),
+                    start=to_iso8601_required(trip["start"]),
+                    eta=to_iso8601_required(trip["eta"]),
                     grace_min=trip["grace_min"],
                     location_text=trip["location_text"],
                     gen_lat=trip["gen_lat"],
@@ -449,7 +453,7 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     status=trip["status"],
                     completed_at=to_iso8601(trip["completed_at"]),
                     last_checkin=to_iso8601(trip["last_checkin"]),
-                    created_at=to_iso8601(trip["created_at"]),
+                    created_at=to_iso8601_required(trip["created_at"]),
                     contact1=trip["contact1"],
                     contact2=trip["contact2"],
                     contact3=trip["contact3"],
@@ -508,8 +512,8 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             user_id=trip["user_id"],
             title=trip["title"],
             activity=activity,
-            start=to_iso8601(trip["start"]),
-            eta=to_iso8601(trip["eta"]),
+            start=to_iso8601_required(trip["start"]),
+            eta=to_iso8601_required(trip["eta"]),
             grace_min=trip["grace_min"],
             location_text=trip["location_text"],
             gen_lat=trip["gen_lat"],
@@ -518,7 +522,7 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             status=trip["status"],
             completed_at=to_iso8601(trip["completed_at"]),
             last_checkin=to_iso8601(trip["last_checkin"]),
-            created_at=to_iso8601(trip["created_at"]),
+            created_at=to_iso8601_required(trip["created_at"]),
             contact1=trip["contact1"],
             contact2=trip["contact2"],
             contact3=trip["contact3"],
@@ -572,8 +576,8 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             user_id=trip["user_id"],
             title=trip["title"],
             activity=activity,
-            start=to_iso8601(trip["start"]),
-            eta=to_iso8601(trip["eta"]),
+            start=to_iso8601_required(trip["start"]),
+            eta=to_iso8601_required(trip["eta"]),
             grace_min=trip["grace_min"],
             location_text=trip["location_text"],
             gen_lat=trip["gen_lat"],
@@ -582,7 +586,7 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             status=trip["status"],
             completed_at=to_iso8601(trip["completed_at"]),
             last_checkin=to_iso8601(trip["last_checkin"]),
-            created_at=to_iso8601(trip["created_at"]),
+            created_at=to_iso8601_required(trip["created_at"]),
             contact1=trip["contact1"],
             contact2=trip["contact2"],
             contact3=trip["contact3"],
@@ -742,7 +746,9 @@ def extend_trip(
                 "timestamp": now.isoformat()
             }
         )
-        checkin_event_id = result.fetchone()[0]
+        row = result.fetchone()
+        assert row is not None
+        checkin_event_id = row[0]
 
         # Update trip ETA and reset status to active (user is checking in)
         # last_checkin stores the event ID, not a timestamp

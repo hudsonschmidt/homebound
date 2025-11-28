@@ -92,7 +92,9 @@ def create_contact(body: ContactCreate, user_id: int = Depends(auth.get_current_
                 "email": body.email
             }
         )
-        contact_id = result.fetchone()[0]
+        row = result.fetchone()
+        assert row is not None
+        contact_id = row[0]
 
         # Fetch created contact
         contact = connection.execute(
@@ -105,6 +107,7 @@ def create_contact(body: ContactCreate, user_id: int = Depends(auth.get_current_
             ),
             {"contact_id": contact_id}
         ).fetchone()
+        assert contact is not None
 
         return Contact(**dict(contact._mapping))
 
@@ -164,6 +167,7 @@ def update_contact(
             ),
             {"contact_id": contact_id}
         ).fetchone()
+        assert contact is not None
 
         return Contact(**dict(contact._mapping))
 

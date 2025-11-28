@@ -105,6 +105,7 @@ async def request_magic_link(body: MagicLinkRequest):
                 }
             )
             user = result.fetchone()
+            assert user is not None
         else:
             # Update last login for existing user
             connection.execute(
@@ -216,6 +217,7 @@ def verify_magic_code(body: VerifyRequest):
             ),
             {"user_id": token.user_id}
         ).fetchone()
+        assert user is not None
 
         # Create JWT pair
         access, refresh = create_jwt_pair(user.id, user.email)
@@ -436,6 +438,7 @@ def apple_sign_in(body: AppleSignInRequest):
             }
         )
         new_user = result.fetchone()
+        assert new_user is not None
 
         access, refresh = create_jwt_pair(new_user.id, new_user.email)
 

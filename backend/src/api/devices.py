@@ -106,7 +106,9 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
                     "last_seen_at": now
                 }
             )
-            device_id = result.fetchone()[0]
+            row = result.fetchone()
+            assert row is not None
+            device_id = row[0]
 
         # Fetch device
         device = connection.execute(
@@ -119,6 +121,7 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
             ),
             {"device_id": device_id}
         ).fetchone()
+        assert device is not None
 
         return DeviceResponse(
             id=device.id,
