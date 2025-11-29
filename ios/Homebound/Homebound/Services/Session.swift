@@ -117,6 +117,13 @@ final class Session: ObservableObject {
                 let refreshToken = keychain.getRefreshToken()
                 LocalStorage.shared.saveAuthTokens(access: token, refresh: refreshToken)
                 print("[Session] ✅ Access token saved to keychain and local storage")
+
+                // Register pending APNs token if we have one
+                if let apns = apnsToken {
+                    Task { @MainActor in
+                        self.handleAPNsToken(apns)
+                    }
+                }
             } else {
                 print("[Session] ⚠️ Access token set to nil")
             }
@@ -235,9 +242,14 @@ final class Session: ObservableObject {
     @MainActor
     func handleAPNsToken(_ token: String) {
         self.apnsToken = token
+        print("[APNs] Received token: \(token.prefix(20))...")
 
         // Register device token with backend once signed-in.
-        guard let bearer = self.accessToken else { return }
+        guard let bearer = self.accessToken else {
+            print("[APNs] Not signed in, will register later")
+            return
+        }
+        print("[APNs] Registering device with backend...")
         struct DeviceRegister: Encodable {
             let platform: String
             let token: String
@@ -263,8 +275,10 @@ final class Session: ObservableObject {
                     ),
                     bearer: bearer
                 )
+                print("[APNs] ✅ Device registered successfully")
             } catch {
                 // Non-fatal; just surface a notice in your dev UI.
+                print("[APNs] ❌ Registration failed: \(error.localizedDescription)")
                 await MainActor.run { self.notice = "APNs register failed: \(error.localizedDescription)" }
             }
         }
