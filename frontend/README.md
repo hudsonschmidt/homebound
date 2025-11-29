@@ -1,2 +1,1 @@
-# Frontend
-Future website to support iOS app.
+Website for homeboundapp.com
