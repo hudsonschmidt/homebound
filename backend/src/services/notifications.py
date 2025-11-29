@@ -157,15 +157,31 @@ async def send_push_to_user(user_id: int, title: str, body: str, data: dict | No
 
     # Send to each device
     sender = get_push_sender()
+    tokens_to_remove: list[str] = []
+
     for device in devices:
         try:
             result = await sender.send(device.token, title, body, data)
             if result.ok:
                 log.info(f"[APNS] Sent to user {user_id}: {title}")
+            elif result.status == 410:
+                # 410 Gone = device unregistered, mark for removal
+                log.info(f"[APNS] Device unregistered for user {user_id}, will remove token")
+                tokens_to_remove.append(device.token)
             else:
                 log.warning(f"[APNS] Failed for user {user_id}: status={result.status} detail={result.detail}")
         except Exception as e:
             log.error(f"[APNS] Error sending to user {user_id}: {e}")
+
+    # Remove unregistered device tokens
+    if tokens_to_remove:
+        with db.engine.begin() as conn:
+            for token in tokens_to_remove:
+                conn.execute(
+                    sqlalchemy.text("DELETE FROM devices WHERE token = :token"),
+                    {"token": token}
+                )
+            log.info(f"[APNS] Removed {len(tokens_to_remove)} unregistered device(s) for user {user_id}")
 
 # Magic Link --------------------------------------------------------------------------------
 async def send_magic_link_email(email: str, code: str):
