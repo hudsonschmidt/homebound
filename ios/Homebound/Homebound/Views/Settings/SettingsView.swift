@@ -332,31 +332,12 @@ struct SettingsView: View {
                                     .foregroundStyle(session.useLocalServer ? .green : .purple)
                             }
                         }
-
-                        Toggle(isOn: Binding(
-                            get: { session.suppressTripEmails },
-                            set: { newValue in
-                                session.suppressTripEmails = newValue
-                            }
-                        )) {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Suppress Trip Emails")
-                                    Text(session.suppressTripEmails ? "Emails logged to console" : "Emails sent normally")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "envelope.badge.shield.half.filled")
-                                    .foregroundStyle(session.suppressTripEmails ? .orange : .blue)
-                            }
-                        }
                     }
                 }
 
                 // Support Section
-                Section("Support (Coming Soon)") {
-                    Link(destination: URL(string: "https://homeboundapp.com/help")!) {
+                Section("Support") {
+                    Link(destination: URL(string: "https://www.homeboundapp.com/help")!) {
                         Label {
                             HStack {
                                 Text("Help Center")
@@ -374,7 +355,7 @@ struct SettingsView: View {
                     Link(destination: URL(string: "mailto:support@homeboundapp.com")!) {
                         Label {
                             HStack {
-                                Text("Contact Us (Coming Soon)")
+                                Text("Contact Us")
                                 Spacer()
                                 Image(systemName: "arrow.up.right.square")
                                     .font(.caption)
@@ -1046,8 +1027,8 @@ struct AboutView: View {
             }
 
             Section {
-                Link("Terms of Service", destination: URL(string: "https://homeboundapp.com/terms")!)
-                Link("Privacy Policy", destination: URL(string: "https://homeboundapp.com/privacy")!)
+                Link("Terms of Service", destination: URL(string: "https://www.homeboundapp.com/termsofservice")!)
+                Link("Privacy Policy", destination: URL(string: "https://www.homeboundapp.com/privacypolicy")!)
             }
         }
         .navigationTitle("About")

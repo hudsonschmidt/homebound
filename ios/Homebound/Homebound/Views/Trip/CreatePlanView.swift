@@ -324,8 +324,7 @@ struct CreatePlanView: View {
                 contact1: contactIds.count > 0 ? contactIds[0] : nil,
                 contact2: contactIds.count > 1 ? contactIds[1] : nil,
                 contact3: contactIds.count > 2 ? contactIds[2] : nil,
-                timezone: userTimezone,
-                suppress_emails: session.suppressTripEmails ? true : nil
+                timezone: userTimezone
             )
 
             let createdPlan = await session.createPlan(plan)

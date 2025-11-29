@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help Center - Homebound</title>
+    <meta name="description" content="Get help with Homebound - FAQs, contact information, and support resources.">
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="icon" type="image/png" href="../favicon.png">
+    <style>
+        .help-hero {
+            text-align: center;
+            padding: 4rem 2rem;
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+        }
+        .help-hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .help-hero p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+        .help-content {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .contact-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        .contact-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .contact-card h3 {
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+        .contact-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .contact-card a {
+            color: var(--brand-color);
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .contact-card a:hover {
+            text-decoration: underline;
+        }
+        .faq-section {
+            margin: 3rem 0;
+        }
+        .faq-section h2 {
+            font-size: 1.75rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+        }
+        .faq-item {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .faq-item:last-child {
+            border-bottom: none;
+        }
+        .faq-item h3 {
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+        .faq-item p {
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+        .quick-links {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+        }
+        .quick-links h3 {
+            margin-bottom: 1rem;
+        }
+        .quick-links ul {
+            list-style: none;
+            padding: 0;
+        }
+        .quick-links li {
+            margin-bottom: 0.75rem;
+        }
+        .quick-links a {
+            color: var(--brand-color);
+            text-decoration: none;
+        }
+        .quick-links a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <a href="/" class="logo">Homebound</a>
+            <ul class="nav-links">
+                <li><a href="/help">Help</a></li>
+                <li><a href="/privacypolicy">Privacy</a></li>
+                <li><a href="/termsofservice">Terms</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section class="help-hero">
+        <h1>Help Center</h1>
+        <p>Find answers to common questions and get in touch with our team.</p>
+    </section>
+
+    <main class="help-content">
+        <!-- Contact Cards -->
+        <section>
+            <h2 style="font-size: 1.75rem; margin-bottom: 1rem;">Contact Us</h2>
+            <div class="contact-grid">
+                <div class="contact-card">
+                    <h3>General Support</h3>
+                    <p>Questions about using Homebound? We're here to help.</p>
+                    <a href="mailto:support@homeboundapp.com">support@homeboundapp.com</a>
+                </div>
+                <div class="contact-card">
+                    <h3>Privacy Inquiries</h3>
+                    <p>Questions about your data or privacy rights.</p>
+                    <a href="mailto:privacy@homeboundapp.com">privacy@homeboundapp.com</a>
+                </div>
+                <div class="contact-card">
+                    <h3>Legal</h3>
+                    <p>Legal questions or formal inquiries.</p>
+                    <a href="mailto:legal@homeboundapp.com">legal@homeboundapp.com</a>
+                </div>
+                <div class="contact-card">
+                    <h3>Feedback</h3>
+                    <p>Share ideas or report issues.</p>
+                    <a href="mailto:feedback@homeboundapp.com">feedback@homeboundapp.com</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Links -->
+        <div class="quick-links">
+            <h3>Quick Links</h3>
+            <ul>
+                <li><a href="https://homebound.canny.io/feature-requests" target="_blank">Request a Feature</a></li>
+                <li><a href="https://homebound.canny.io/bugs" target="_blank">Report a Bug</a></li>
+                <li><a href="/privacypolicy">Privacy Policy</a></li>
+                <li><a href="/termsofservice">Terms of Service</a></li>
+            </ul>
+        </div>
+
+        <!-- FAQ Section -->
+        <section class="faq-section">
+            <h2>Frequently Asked Questions</h2>
+
+            <div class="faq-item">
+                <h3>What is Homebound?</h3>
+                <p>Homebound is a personal safety app that helps you stay connected with loved ones during outdoor activities. Create trip plans with your expected return time, and if you don't check in on time, your emergency contacts are automatically notified.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>How do I create a trip?</h3>
+                <p>Tap the "+" button on the home screen, select your activity type, set your destination and expected arrival time, add any emergency contacts you'd like to notify, and you're all set. You can start the trip immediately or schedule it for later.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>What happens if I don't check in on time?</h3>
+                <p>If you don't check out by your ETA plus your grace period, Homebound will automatically send notifications to your designated emergency contacts with your trip details and last known location. This helps ensure someone knows to check on you.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>How do I add emergency contacts?</h3>
+                <p>Go to Settings > Emergency Contacts to add people you trust. You can add their name and email address. When you create trips, you can choose which contacts to notify for each specific trip.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Does Homebound track my location continuously?</h3>
+                <p>No. Homebound only collects location data when you explicitly set a trip location or choose to share your current location during a check-in. We do not track your location in the background or continuously monitor your movements.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Is Homebound a replacement for calling 911?</h3>
+                <p><strong>No.</strong> Homebound is a supplementary safety tool designed to notify your personal contacts. It is not an emergency response service and does not contact emergency services. In an emergency, always call 911 or your local emergency number first.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>What is a grace period?</h3>
+                <p>The grace period is extra time added to your ETA before alerts are sent to your emergency contacts. For example, if your ETA is 5:00 PM and you set a 30-minute grace period, your contacts won't be notified until 5:30 PM if you haven't checked out. This helps avoid false alarms for minor delays.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Can I check in during a trip?</h3>
+                <p>Yes! You can check in at any time during an active trip to let your contacts know you're okay. Check-ins can optionally include your current location, which will be shared with your emergency contacts.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>How do I delete my account?</h3>
+                <p>Go to Settings > Account and scroll to the bottom. Tap "Delete Account" and follow the confirmation steps. This will permanently delete all your data including trips, contacts, and profile information. This action cannot be undone.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>What data does Homebound collect?</h3>
+                <p>We collect only what's necessary to provide the service: your email, name, trip details, and emergency contacts. We don't sell your data or share it with advertisers. See our <a href="/privacypolicy">Privacy Policy</a> for complete details.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Do my emergency contacts need to have the app?</h3>
+                <p>No. Your emergency contacts receive notifications via email. They don't need to download Homebound or create an account to receive alerts about your trips.</p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Is Homebound free?</h3>
+                <p>Homebound is free to download and use. All core safety features are available at no cost.</p>
+            </div>
+        </section>
+
+        <!-- Still need help -->
+        <section style="text-align: center; padding: 3rem 0; background: var(--bg-secondary); border-radius: 12px; margin-top: 2rem;">
+            <h2 style="margin-bottom: 0.5rem;">Still need help?</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">We're here for you. Reach out and we'll get back to you as soon as possible.</p>
+            <a href="mailto:support@homeboundapp.com" class="cta-button" style="display: inline-block; background: var(--brand-color); color: white; padding: 0.75rem 1.5rem; border-radius: 8px; text-decoration: none; font-weight: 600;">
+                Contact Support
+            </a>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <div class="footer-links">
+                <a href="/help">Help Center</a>
+                <a href="/privacypolicy">Privacy Policy</a>
+                <a href="/termsofservice">Terms of Service</a>
+                <a href="mailto:support@homeboundapp.com">Contact</a>
+            </div>
+            <p class="copyright">&copy; 2025 Hudson Schmidt. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>

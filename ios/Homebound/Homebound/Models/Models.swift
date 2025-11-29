@@ -29,7 +29,6 @@ struct TripCreateRequest: Codable {
     var contact2: Int?
     var contact3: Int?
     var timezone: String?  // User's timezone (e.g., "America/New_York")
-    var suppress_emails: Bool?  // Developer option to suppress email notifications
 }
 
 struct Trip: Codable, Identifiable, Equatable {
