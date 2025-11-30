@@ -113,9 +113,149 @@ nav .nav-links a:hover {
 
 /* Main Content */
 main {
-    max-width: var(--max-width);
+    max-width: 1000px;
     margin: 0 auto;
     padding: 2rem;
+}
+
+/* Sections */
+.section {
+    padding: 4rem 0;
+    text-align: center;
+}
+
+.section h2 {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+}
+
+.section-subtitle {
+    color: var(--text-secondary);
+    max-width: 600px;
+    margin: 0 auto 2rem;
+}
+
+.section-alt {
+    background: var(--bg-secondary);
+    margin: 0 -2rem;
+    padding: 4rem 2rem;
+}
+
+/* Steps */
+.steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+.step {
+    text-align: center;
+}
+
+.step-number {
+    width: 48px;
+    height: 48px;
+    background: var(--brand-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0 auto 1rem;
+}
+
+.step h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.step p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+/* Activities */
+.activities {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 2rem;
+}
+
+.activity {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--bg-primary);
+    padding: 0.75rem 1.25rem;
+    border-radius: 100px;
+    border: 1px solid var(--border-color);
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.activity-icon {
+    font-size: 1.25rem;
+}
+
+/* Features */
+.features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+    text-align: left;
+}
+
+.feature {
+    background: var(--bg-secondary);
+    padding: 1.5rem;
+    border-radius: 12px;
+}
+
+.feature h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.feature p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+/* CTA Section */
+.cta-section {
+    background: linear-gradient(135deg, var(--brand-color) 0%, var(--brand-dark) 100%);
+    margin: 0 -2rem;
+    padding: 4rem 2rem;
+    color: white;
+}
+
+.cta-section h2 {
+    color: white;
+}
+
+.cta-section p {
+    color: rgba(255, 255, 255, 0.9);
+    max-width: 500px;
+    margin: 0 auto 2rem;
+}
+
+.cta-section .cta-button {
+    background: white;
+    color: var(--brand-color);
+}
+
+.cta-section .cta-button:hover {
+    background: var(--bg-secondary);
 }
 
 /* Legal Document Styles */
@@ -279,6 +419,38 @@ footer .copyright {
         font-size: 1.1rem;
     }
 
+    .section {
+        padding: 3rem 0;
+    }
+
+    .section h2 {
+        font-size: 1.5rem;
+    }
+
+    .section-alt,
+    .cta-section {
+        margin: 0 -1rem;
+        padding: 3rem 1rem;
+    }
+
+    .steps {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+    }
+
+    .features {
+        grid-template-columns: 1fr;
+    }
+
+    .activities {
+        gap: 0.75rem;
+    }
+
+    .activity {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+
     .legal-document {
         padding: 2rem 1rem;
     }
@@ -294,5 +466,11 @@ footer .copyright {
     footer .footer-links {
         flex-direction: column;
         gap: 1rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .steps {
+        grid-template-columns: 1fr;
     }
 }
