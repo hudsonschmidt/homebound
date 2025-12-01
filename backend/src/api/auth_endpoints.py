@@ -19,6 +19,11 @@ router = APIRouter(
 
 settings = config.get_settings()
 
+# Apple App Store Review test account
+# This allows Apple reviewers to sign in without a real magic link
+APPLE_REVIEW_EMAIL = "apple-review@homeboundapp.com"
+APPLE_REVIEW_CODE = "123456"
+
 
 class MagicLinkRequest(BaseModel):
     email: EmailStr
@@ -153,6 +158,58 @@ async def request_magic_link(body: MagicLinkRequest):
 def verify_magic_code(body: VerifyRequest):
     """Verify magic link code and return JWT tokens"""
     with db.engine.begin() as connection:
+        # Special case: Apple App Store Review test account
+        if body.email == APPLE_REVIEW_EMAIL and body.code == APPLE_REVIEW_CODE:
+            print(f"[Auth] 🍎 Apple Review test account login")
+
+            # Get or create the test user
+            user = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id, email, first_name, last_name, age
+                    FROM users
+                    WHERE email = :email
+                    """
+                ),
+                {"email": APPLE_REVIEW_EMAIL}
+            ).fetchone()
+
+            if not user:
+                # Create the test user with completed profile
+                result = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        INSERT INTO users (email, first_name, last_name, age)
+                        VALUES (:email, :first_name, :last_name, :age)
+                        RETURNING id, email, first_name, last_name, age
+                        """
+                    ),
+                    {
+                        "email": APPLE_REVIEW_EMAIL,
+                        "first_name": "Apple",
+                        "last_name": "Reviewer",
+                        "age": 30
+                    }
+                )
+                user = result.fetchone()
+                print(f"[Auth] 🍎 Created Apple Review test user: id={user.id}")
+
+            # Create JWT pair for test user
+            access, refresh = create_jwt_pair(user.id, user.email)
+
+            return TokenResponse(
+                access=access,
+                refresh=refresh,
+                user={
+                    "id": user.id,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "age": user.age,
+                    "profile_completed": True
+                }
+            )
+
         # Find valid token
         token = connection.execute(
             sqlalchemy.text(
