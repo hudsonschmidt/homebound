@@ -192,7 +192,7 @@ def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
                 """
                 SELECT t.*, a.name as activity_name, a.icon as activity_icon
                 FROM trips t
-                LEFT JOIN activities a ON t.activity = a.name
+                LEFT JOIN activities a ON t.activity = a.id
                 WHERE t.user_id = :user_id
                 ORDER BY t.created_at DESC
                 """
@@ -204,10 +204,10 @@ def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
         contacts = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, name, phone, email, relationship, created_at
+                SELECT id, name, email
                 FROM contacts
                 WHERE user_id = :user_id
-                ORDER BY created_at DESC
+                ORDER BY id DESC
                 """
             ),
             {"user_id": user_id}
@@ -230,16 +230,16 @@ def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
                     "title": t.title,
                     "activity": t.activity_name,
                     "activity_icon": t.activity_icon,
-                    "start_at": str(t.start_at) if t.start_at else None,
-                    "eta_at": str(t.eta_at) if t.eta_at else None,
-                    "grace_minutes": t.grace_minutes,
+                    "start_at": str(t.start) if t.start else None,
+                    "eta_at": str(t.eta) if t.eta else None,
+                    "grace_minutes": t.grace_min,
                     "location_text": t.location_text,
-                    "location_lat": t.location_lat,
-                    "location_lng": t.location_lng,
+                    "location_lat": float(t.gen_lat) if t.gen_lat else None,
+                    "location_lng": float(t.gen_lon) if t.gen_lon else None,
                     "notes": t.notes,
                     "status": t.status,
-                    "completed_at": str(t.completed_at) if t.completed_at else None,
-                    "created_at": str(t.created_at) if t.created_at else None
+                    "completed_at": str(t.completed_at) if hasattr(t, 'completed_at') and t.completed_at else None,
+                    "created_at": str(t.created_at) if hasattr(t, 'created_at') and t.created_at else None
                 }
                 for t in trips
             ],
@@ -247,10 +247,7 @@ def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
                 {
                     "id": c.id,
                     "name": c.name,
-                    "phone": c.phone,
-                    "email": c.email,
-                    "relationship": c.relationship,
-                    "created_at": str(c.created_at) if c.created_at else None
+                    "email": c.email
                 }
                 for c in contacts
             ],

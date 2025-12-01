@@ -9,6 +9,7 @@ from src.api.profile import (
     ProfileUpdate,
     ProfileUpdateResponse,
     delete_account,
+    export_user_data,
     get_profile,
     patch_profile,
     update_profile,
@@ -1071,3 +1072,375 @@ def test_delete_account_full_cascade():
             {"user_id": user_id}
         ).fetchone()[0]
         assert devices_check == 0, "Devices should be deleted"
+
+
+def test_export_user_data_basic():
+    """Test exporting user data with just profile (no trips or contacts)"""
+    test_email = "export-test@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Export",
+                "last_name": "Test",
+                "age": 30
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    # Export data
+    export = export_user_data(user_id=user_id)
+
+    # Verify structure
+    assert "exported_at" in export
+    assert "profile" in export
+    assert "trips" in export
+    assert "contacts" in export
+    assert "total_trips" in export
+    assert "total_contacts" in export
+
+    # Verify profile data
+    assert export["profile"]["id"] == user_id
+    assert export["profile"]["email"] == test_email
+    assert export["profile"]["first_name"] == "Export"
+    assert export["profile"]["last_name"] == "Test"
+    assert export["profile"]["age"] == 30
+
+    # Verify counts
+    assert export["total_trips"] == 0
+    assert export["total_contacts"] == 0
+    assert len(export["trips"]) == 0
+    assert len(export["contacts"]) == 0
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+def test_export_user_data_with_contacts():
+    """Test exporting user data with contacts"""
+    test_email = "export-contacts@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Export",
+                "last_name": "Contacts",
+                "age": 25
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create contacts
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES
+                    (:user_id, 'Contact One', 'contact1@test.com'),
+                    (:user_id, 'Contact Two', 'contact2@test.com')
+                """
+            ),
+            {"user_id": user_id}
+        )
+
+    # Export data
+    export = export_user_data(user_id=user_id)
+
+    # Verify contacts
+    assert export["total_contacts"] == 2
+    assert len(export["contacts"]) == 2
+
+    contact_names = [c["name"] for c in export["contacts"]]
+    assert "Contact One" in contact_names
+    assert "Contact Two" in contact_names
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+def test_export_user_data_with_trips():
+    """Test exporting user data with trips"""
+    test_email = "export-trips@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Export",
+                "last_name": "Trips",
+                "age": 28
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create a contact for the trip
+        contact_result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, 'Emergency Contact', 'emergency@test.com')
+                RETURNING id
+                """
+            ),
+            {"user_id": user_id}
+        )
+        contact_id = contact_result.fetchone()[0]
+
+        # Create trips
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text, gen_lat, gen_lon, contact1, contact2, contact3, status)
+                VALUES
+                    (:user_id, 'Morning Hike', 1, :start1, :eta1, 30, 'Mountain Trail', 37.7749, -122.4194, :contact_id, NULL, NULL, 'completed'),
+                    (:user_id, 'Evening Run', 3, :start2, :eta2, 15, 'Park Loop', 37.7849, -122.4094, :contact_id, NULL, NULL, 'active')
+                """
+            ),
+            {
+                "user_id": user_id,
+                "start1": now - timedelta(days=1),
+                "eta1": now - timedelta(days=1) + timedelta(hours=2),
+                "start2": now,
+                "eta2": now + timedelta(hours=1),
+                "contact_id": contact_id
+            }
+        )
+
+    # Export data
+    export = export_user_data(user_id=user_id)
+
+    # Verify trips
+    assert export["total_trips"] == 2
+    assert len(export["trips"]) == 2
+
+    trip_titles = [t["title"] for t in export["trips"]]
+    assert "Morning Hike" in trip_titles
+    assert "Evening Run" in trip_titles
+
+    # Verify trip has expected fields
+    trip = export["trips"][0]
+    assert "id" in trip
+    assert "title" in trip
+    assert "activity" in trip or "activity_name" in trip
+    assert "status" in trip
+    assert "location_text" in trip
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+def test_export_user_data_nonexistent_user():
+    """Test exporting data for non-existent user returns 404"""
+    with pytest.raises(HTTPException) as exc_info:
+        export_user_data(user_id=999999)
+    assert exc_info.value.status_code == 404
+    assert "not found" in exc_info.value.detail.lower()
+
+
+def test_export_user_data_full():
+    """Test exporting complete user data with profile, trips, and contacts"""
+    test_email = "export-full@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Full",
+                "last_name": "Export",
+                "age": 35
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create multiple contacts
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES
+                    (:user_id, 'Mom', 'mom@family.com'),
+                    (:user_id, 'Best Friend', 'friend@email.com'),
+                    (:user_id, 'Work Contact', 'work@company.com')
+                """
+            ),
+            {"user_id": user_id}
+        )
+
+        # Get a contact ID for trips
+        contact_result = connection.execute(
+            sqlalchemy.text("SELECT id FROM contacts WHERE user_id = :user_id LIMIT 1"),
+            {"user_id": user_id}
+        )
+        contact_id = contact_result.fetchone()[0]
+
+        # Create trips with activity join
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text, gen_lat, gen_lon, contact1, contact2, contact3, status, notes)
+                VALUES
+                    (:user_id, 'Weekend Camping', 4, :start1, :eta1, 60, 'Yosemite National Park', 37.8651, -119.5383, :contact_id, NULL, NULL, 'completed', 'Bring extra water'),
+                    (:user_id, 'City Walk', 5, :start2, :eta2, 15, 'Downtown', 37.7749, -122.4194, :contact_id, NULL, NULL, 'active', NULL)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "start1": now - timedelta(days=7),
+                "eta1": now - timedelta(days=5),
+                "start2": now,
+                "eta2": now + timedelta(hours=2),
+                "contact_id": contact_id
+            }
+        )
+
+    # Export data
+    export = export_user_data(user_id=user_id)
+
+    # Verify complete export
+    assert export["total_trips"] == 2
+    assert export["total_contacts"] == 3
+
+    # Verify profile
+    assert export["profile"]["first_name"] == "Full"
+    assert export["profile"]["last_name"] == "Export"
+
+    # Verify contacts have all fields
+    contact = export["contacts"][0]
+    assert "id" in contact
+    assert "name" in contact
+    assert "email" in contact
+
+    # Verify trips have activity info (from JOIN)
+    trip = export["trips"][0]
+    assert "title" in trip
+    # activity_name and activity_icon come from the JOIN
+    assert "activity_name" in trip or "activity" in trip
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
