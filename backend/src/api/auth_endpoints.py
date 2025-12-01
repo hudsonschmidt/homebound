@@ -20,7 +20,6 @@ router = APIRouter(
 settings = config.get_settings()
 
 # Apple App Store Review test account
-# This allows Apple reviewers to sign in without a real magic link
 APPLE_REVIEW_EMAIL = "apple-review@homeboundapp.com"
 APPLE_REVIEW_CODE = "123456"
 
@@ -160,7 +159,6 @@ def verify_magic_code(body: VerifyRequest):
     with db.engine.begin() as connection:
         # Special case: Apple App Store Review test account
         if body.email == APPLE_REVIEW_EMAIL and body.code == APPLE_REVIEW_CODE:
-            print(f"[Auth] 🍎 Apple Review test account login")
 
             # Get or create the test user
             user = connection.execute(
@@ -192,7 +190,6 @@ def verify_magic_code(body: VerifyRequest):
                     }
                 )
                 user = result.fetchone()
-                print(f"[Auth] 🍎 Created Apple Review test user: id={user.id}")
 
             # Create JWT pair for test user
             access, refresh = create_jwt_pair(user.id, user.email)

@@ -192,7 +192,7 @@ def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
                 """
                 SELECT t.*, a.name as activity_name, a.icon as activity_icon
                 FROM trips t
-                LEFT JOIN activities a ON t.activity_id = a.id
+                LEFT JOIN activities a ON t.activity = a.name
                 WHERE t.user_id = :user_id
                 ORDER BY t.created_at DESC
                 """
