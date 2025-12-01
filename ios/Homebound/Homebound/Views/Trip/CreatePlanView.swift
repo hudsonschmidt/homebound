@@ -34,11 +34,6 @@ struct CreatePlanView: View {
     @State private var showError = false
     @State private var errorMessage = ""
 
-    // Contact confirmation dialog
-    @State private var showSaveContactConfirmation = false
-    @State private var contactsToConfirm: [EmergencyContact] = []
-    @State private var contactsToSave: [EmergencyContact] = []
-
     // Activities from session (dynamic from database)
     var activities: [ActivityTypeAdapter] {
         session.activities.toAdapters()
@@ -60,44 +55,44 @@ struct CreatePlanView: View {
                         .padding(.horizontal)
                         .padding(.top, 20)
 
-                    // Content
-                    TabView(selection: $currentStep) {
-                        Step1TripDetails(
-                            planTitle: $planTitle,
-                            selectedActivity: $selectedActivity,
-                            location: $location,
-                            locationCoordinates: $locationCoordinates,
-                            showingLocationSearch: $showingLocationSearch,
-                            activities: activities
-                        )
-                        .tag(1)
-
-                        Step2TimeSettings(
-                            startTime: $startTime,
-                            etaTime: $etaTime,
-                            isManualETA: $isManualETA,
-                            graceMinutes: $graceMinutes,
-                            showZeroGraceWarning: $showZeroGraceWarning
-                        )
-                        .tag(2)
-
-                        Step3EmergencyContacts(
-                            contacts: $contacts,
-                            showAddContact: $showAddContact,
-                            newContactName: $newContactName,
-                            newContactEmail: $newContactEmail
-                        )
-                        .environmentObject(session)
-                        .tag(3)
-
-                        Step4AdditionalNotes(
-                            notes: $notes,
-                            isCreating: $isCreating,
-                            onSubmit: createPlan
-                        )
-                        .tag(4)
+                    // Content - using Group with switch to prevent swipe navigation
+                    Group {
+                        switch currentStep {
+                        case 1:
+                            Step1TripDetails(
+                                planTitle: $planTitle,
+                                selectedActivity: $selectedActivity,
+                                location: $location,
+                                locationCoordinates: $locationCoordinates,
+                                showingLocationSearch: $showingLocationSearch,
+                                activities: activities
+                            )
+                        case 2:
+                            Step2TimeSettings(
+                                startTime: $startTime,
+                                etaTime: $etaTime,
+                                isManualETA: $isManualETA,
+                                graceMinutes: $graceMinutes,
+                                showZeroGraceWarning: $showZeroGraceWarning
+                            )
+                        case 3:
+                            Step3EmergencyContacts(
+                                contacts: $contacts,
+                                showAddContact: $showAddContact,
+                                newContactName: $newContactName,
+                                newContactEmail: $newContactEmail
+                            )
+                            .environmentObject(session)
+                        case 4:
+                            Step4AdditionalNotes(
+                                notes: $notes,
+                                isCreating: $isCreating,
+                                onSubmit: createPlan
+                            )
+                        default:
+                            EmptyView()
+                        }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
                     .animation(.easeInOut, value: currentStep)
 
                     // Navigation Buttons
@@ -194,29 +189,6 @@ struct CreatePlanView: View {
             } message: {
                 Text("Setting a zero grace period means your emergency contacts will be notified immediately if you don't check out on time. Are you sure?")
             }
-            .confirmationDialog(
-                "Save Contacts?",
-                isPresented: $showSaveContactConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Save to My Contacts") {
-                    contactsToSave = contactsToConfirm
-                    proceedWithPlanCreation()
-                }
-                Button("Don't Save") {
-                    contactsToSave = []
-                    proceedWithPlanCreation()
-                }
-                Button("Cancel", role: .cancel) {
-                    contactsToConfirm = []
-                }
-            } message: {
-                if contactsToConfirm.count == 1 {
-                    Text("Would you like to save \(contactsToConfirm[0].name) to your saved contacts for future trips?")
-                } else {
-                    Text("Would you like to save these \(contactsToConfirm.count) contacts to your saved contacts for future trips?")
-                }
-            }
         }
     }
 
@@ -253,18 +225,6 @@ struct CreatePlanView: View {
 
     private func createPlan() {
         guard canProceedFromCurrentStep() else { return }
-
-        // Check if there are any new contacts that need to be saved
-        let newContacts = contacts.filter { $0.savedContactId == nil }
-
-        if !newContacts.isEmpty {
-            // Show confirmation dialog for saving new contacts
-            contactsToConfirm = newContacts
-            showSaveContactConfirmation = true
-            return
-        }
-
-        // If no new contacts or user confirmed, proceed with plan creation
         proceedWithPlanCreation()
     }
 
@@ -272,28 +232,15 @@ struct CreatePlanView: View {
         isCreating = true
 
         Task {
-            // Step 1: Handle contacts - use existing IDs or create new ones if user confirmed
+            // Step 1: Handle contacts - use existing IDs or create new ones
+            // Note: All contacts must be saved to create a trip (backend requires contact IDs)
             var contactIds: [Int] = []
             for contact in contacts {
                 if let savedId = contact.savedContactId {
                     // Use existing saved contact ID (no duplication)
                     contactIds.append(savedId)
-                } else if contactsToSave.contains(where: { $0.id == contact.id }) {
-                    // User confirmed to save this new contact
-                    if let savedContact = await session.addContact(name: contact.name, email: contact.email) {
-                        contactIds.append(savedContact.id)
-                    } else {
-                        await MainActor.run {
-                            isCreating = false
-                            errorMessage = "Failed to save contact: \(contact.name)"
-                            showError = true
-                        }
-                        return
-                    }
                 } else {
-                    // New contact that user chose not to save - we still need to handle this
-                    // For now, we'll create it temporarily to get an ID
-                    // TODO: Backend should support ephemeral contacts for trips
+                    // New contact - save it to get an ID for the trip
                     if let savedContact = await session.addContact(name: contact.name, email: contact.email) {
                         contactIds.append(savedContact.id)
                     } else {
@@ -1482,7 +1429,7 @@ struct Step3EmergencyContacts: View {
         await MainActor.run {
             self.savedContacts = loaded
             self.isLoadingSaved = false
-            print("DEBUG: Loaded \(loaded.count) saved contacts")
+            debugLog("DEBUG: Loaded \(loaded.count) saved contacts")
         }
     }
 }

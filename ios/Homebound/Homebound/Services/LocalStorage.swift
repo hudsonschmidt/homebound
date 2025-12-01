@@ -17,7 +17,7 @@ final class LocalStorage {
             try setupDatabase()
             try runMigrations()
         } catch {
-            print("[LocalStorage] Failed to setup database: \(error)")
+            debugLog("[LocalStorage] Failed to setup database: \(error)")
         }
     }
 
@@ -29,7 +29,7 @@ final class LocalStorage {
 
     private func setDatabaseVersion(_ version: Int) {
         UserDefaults.standard.set(version, forKey: userDefaultsSchemaKey)
-        print("[LocalStorage] ✅ Schema version updated to \(version)")
+        debugLog("[LocalStorage] ✅ Schema version updated to \(version)")
     }
 
     private func needsMigration() -> Bool {
@@ -49,19 +49,19 @@ final class LocalStorage {
     /// Run pending database migrations
     private func runMigrations() throws {
         guard let dbQueue = dbQueue else {
-            print("[LocalStorage] ⚠️ No database queue available for migrations")
+            debugLog("[LocalStorage] ⚠️ No database queue available for migrations")
             return
         }
 
         let currentVersion = getDatabaseVersion()
-        print("[LocalStorage] Current schema version: \(currentVersion)")
+        debugLog("[LocalStorage] Current schema version: \(currentVersion)")
 
         if !needsMigration() {
-            print("[LocalStorage] ✅ No migrations needed")
+            debugLog("[LocalStorage] ✅ No migrations needed")
             return
         }
 
-        print("[LocalStorage] 🔄 Running migrations from v\(currentVersion) to v\(currentSchemaVersion)...")
+        debugLog("[LocalStorage] 🔄 Running migrations from v\(currentVersion) to v\(currentSchemaVersion)...")
 
         // Define all migrations
         let migrations: [Migration] = [
@@ -85,17 +85,17 @@ final class LocalStorage {
         let pendingMigrations = migrations.filter { $0.version > currentVersion }
 
         for migration in pendingMigrations.sorted(by: { $0.version < $1.version }) {
-            print("[LocalStorage] 🔄 Applying migration v\(migration.version): \(migration.description)")
+            debugLog("[LocalStorage] 🔄 Applying migration v\(migration.version): \(migration.description)")
 
             try dbQueue.write { db in
                 try migration.execute(db)
                 setDatabaseVersion(migration.version)
             }
 
-            print("[LocalStorage] ✅ Migration v\(migration.version) completed successfully")
+            debugLog("[LocalStorage] ✅ Migration v\(migration.version) completed successfully")
         }
 
-        print("[LocalStorage] ✅ All migrations completed")
+        debugLog("[LocalStorage] ✅ All migrations completed")
     }
 
     /// Migration v1: Convert activity TEXT to activity_id INTEGER
@@ -106,20 +106,20 @@ final class LocalStorage {
         let hasNewActivityIdColumn = columns.contains { $0.name == "activity_id" }
 
         if hasNewActivityIdColumn && !hasOldActivityColumn {
-            print("[LocalStorage] ✅ Schema already correct (has activity_id), skipping migration")
+            debugLog("[LocalStorage] ✅ Schema already correct (has activity_id), skipping migration")
             return
         }
 
         if !hasOldActivityColumn {
-            print("[LocalStorage] ✅ No old activity column found, skipping migration")
+            debugLog("[LocalStorage] ✅ No old activity column found, skipping migration")
             return
         }
 
-        print("[LocalStorage] 🔄 Found legacy activity TEXT column, converting to activity_id INTEGER...")
+        debugLog("[LocalStorage] 🔄 Found legacy activity TEXT column, converting to activity_id INTEGER...")
 
         // Count existing trips (for logging)
         let oldTripCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cached_trips") ?? 0
-        print("[LocalStorage] Found \(oldTripCount) cached trips (will be cleared and re-cached from API)")
+        debugLog("[LocalStorage] Found \(oldTripCount) cached trips (will be cleared and re-cached from API)")
 
         // Strategy: Clear old cached trips rather than migrate
         // Reason: Activities may not be cached yet, leading to orphaned trips
@@ -156,7 +156,7 @@ final class LocalStorage {
         try db.execute(sql: "DROP TABLE cached_trips")
         try db.execute(sql: "ALTER TABLE cached_trips_new RENAME TO cached_trips")
 
-        print("[LocalStorage] ✅ Activity column migration completed (trips cleared, will re-cache from API)")
+        debugLog("[LocalStorage] ✅ Activity column migration completed (trips cleared, will re-cache from API)")
     }
 
     /// Migration v2: Clear orphaned trips from buggy v1 migration
@@ -170,11 +170,11 @@ final class LocalStorage {
         """) ?? 0
 
         if orphanedCount == 0 {
-            print("[LocalStorage] ✅ No orphaned trips found")
+            debugLog("[LocalStorage] ✅ No orphaned trips found")
             return
         }
 
-        print("[LocalStorage] 🔄 Found \(orphanedCount) orphaned trips, clearing...")
+        debugLog("[LocalStorage] 🔄 Found \(orphanedCount) orphaned trips, clearing...")
 
         // Delete orphaned trips
         try db.execute(sql: """
@@ -188,7 +188,7 @@ final class LocalStorage {
         """)
 
         let remainingCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cached_trips") ?? 0
-        print("[LocalStorage] ✅ Cleared \(orphanedCount) orphaned trips, \(remainingCount) trips remaining")
+        debugLog("[LocalStorage] ✅ Cleared \(orphanedCount) orphaned trips, \(remainingCount) trips remaining")
     }
 
     // MARK: - Database Setup
@@ -270,7 +270,7 @@ final class LocalStorage {
             """)
         }
 
-        print("[LocalStorage] Database initialized at \(dbURL.path)")
+        debugLog("[LocalStorage] Database initialized at \(dbURL.path)")
     }
 
     // MARK: - Trip Caching
@@ -323,7 +323,7 @@ final class LocalStorage {
                 """, arguments: [maxCachedTrips])
             }
         } catch {
-            print("[LocalStorage] Failed to cache trip: \(error)")
+            debugLog("[LocalStorage] Failed to cache trip: \(error)")
         }
     }
 
@@ -393,9 +393,9 @@ final class LocalStorage {
                     ])
                 }
             }
-            print("[LocalStorage] Cached \(min(trips.count, maxCachedTrips)) trips")
+            debugLog("[LocalStorage] Cached \(min(trips.count, maxCachedTrips)) trips")
         } catch {
-            print("[LocalStorage] Failed to cache trips: \(error)")
+            debugLog("[LocalStorage] Failed to cache trips: \(error)")
         }
     }
 
@@ -420,7 +420,7 @@ final class LocalStorage {
                     guard let activityId = row["act_id"] as? Int else {
                         let tripId = row["id"] as? Int ?? -1
                         let tripTitle = row["title"] as? String ?? "Unknown"
-                        print("[LocalStorage] ⚠️ Skipping orphaned trip #\(tripId) '\(tripTitle)' - missing activity")
+                        debugLog("[LocalStorage] ⚠️ Skipping orphaned trip #\(tripId) '\(tripTitle)' - missing activity")
                         return nil
                     }
 
@@ -448,7 +448,7 @@ final class LocalStorage {
                           let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
                           let tips = try? JSONDecoder().decode([String].self, from: tipsData)
                     else {
-                        print("[LocalStorage] ⚠️ Failed to parse cached trip data")
+                        debugLog("[LocalStorage] ⚠️ Failed to parse cached trip data")
                         return nil
                     }
 
@@ -496,7 +496,7 @@ final class LocalStorage {
                 }
             }
         } catch {
-            print("[LocalStorage] Failed to get cached trips: \(error)")
+            debugLog("[LocalStorage] Failed to get cached trips: \(error)")
             return []
         }
     }
@@ -516,14 +516,14 @@ final class LocalStorage {
                     JOIN cached_activities ca ON ct.activity_id = ca.id
                     WHERE ct.id = ?
                 """, arguments: [id]) else {
-                    print("[LocalStorage] ⚠️ Trip #\(id) not found in cache")
+                    debugLog("[LocalStorage] ⚠️ Trip #\(id) not found in cache")
                     return nil
                 }
 
                 // Check for orphaned trip (missing activity)
                 guard let activityId = row["act_id"] as? Int else {
                     let tripTitle = row["title"] as? String ?? "Unknown"
-                    print("[LocalStorage] ⚠️ Trip #\(id) '\(tripTitle)' has missing activity - cannot load")
+                    debugLog("[LocalStorage] ⚠️ Trip #\(id) '\(tripTitle)' has missing activity - cannot load")
                     return nil
                 }
 
@@ -551,7 +551,7 @@ final class LocalStorage {
                       let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
                       let tips = try? JSONDecoder().decode([String].self, from: tipsData)
                 else {
-                    print("[LocalStorage] ⚠️ Failed to parse cached trip #\(id)")
+                    debugLog("[LocalStorage] ⚠️ Failed to parse cached trip #\(id)")
                     return nil
                 }
 
@@ -598,7 +598,7 @@ final class LocalStorage {
                 )
             }
         } catch {
-            print("[LocalStorage] Failed to get cached trip: \(error)")
+            debugLog("[LocalStorage] Failed to get cached trip: \(error)")
             return nil
         }
     }
@@ -612,7 +612,7 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM cached_trips")
             }
         } catch {
-            print("[LocalStorage] Failed to clear cached trips: \(error)")
+            debugLog("[LocalStorage] Failed to clear cached trips: \(error)")
         }
     }
 
@@ -637,9 +637,9 @@ final class LocalStorage {
                     ISO8601DateFormatter().string(from: Date())
                 ])
             }
-            print("[LocalStorage] Queued pending action: \(type)")
+            debugLog("[LocalStorage] Queued pending action: \(type)")
         } catch {
-            print("[LocalStorage] Failed to queue pending action: \(error)")
+            debugLog("[LocalStorage] Failed to queue pending action: \(error)")
         }
     }
 
@@ -665,7 +665,7 @@ final class LocalStorage {
                 }
             }
         } catch {
-            print("[LocalStorage] Failed to get pending actions: \(error)")
+            debugLog("[LocalStorage] Failed to get pending actions: \(error)")
             return []
         }
     }
@@ -679,7 +679,7 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM pending_actions WHERE id = ?", arguments: [id])
             }
         } catch {
-            print("[LocalStorage] Failed to remove pending action: \(error)")
+            debugLog("[LocalStorage] Failed to remove pending action: \(error)")
         }
     }
 
@@ -715,7 +715,7 @@ final class LocalStorage {
                 ])
             }
         } catch {
-            print("[LocalStorage] Failed to save auth tokens: \(error)")
+            debugLog("[LocalStorage] Failed to save auth tokens: \(error)")
         }
     }
 
@@ -731,7 +731,7 @@ final class LocalStorage {
                 return (row["access_token"] as? String, row["refresh_token"] as? String)
             }
         } catch {
-            print("[LocalStorage] Failed to get auth tokens: \(error)")
+            debugLog("[LocalStorage] Failed to get auth tokens: \(error)")
             return (nil, nil)
         }
     }
@@ -745,7 +745,7 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM auth_tokens")
             }
         } catch {
-            print("[LocalStorage] Failed to clear auth tokens: \(error)")
+            debugLog("[LocalStorage] Failed to clear auth tokens: \(error)")
         }
     }
 
@@ -783,9 +783,9 @@ final class LocalStorage {
                     ])
                 }
             }
-            print("[LocalStorage] Cached \(activities.count) activities")
+            debugLog("[LocalStorage] Cached \(activities.count) activities")
         } catch {
-            print("[LocalStorage] Failed to cache activities: \(error)")
+            debugLog("[LocalStorage] Failed to cache activities: \(error)")
         }
     }
 
@@ -829,7 +829,7 @@ final class LocalStorage {
                 }
             }
         } catch {
-            print("[LocalStorage] Failed to get cached activities: \(error)")
+            debugLog("[LocalStorage] Failed to get cached activities: \(error)")
             return []
         }
     }
@@ -847,9 +847,53 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM auth_tokens")
                 try db.execute(sql: "DELETE FROM cached_activities")
             }
-            print("[LocalStorage] Cleared all data")
+            debugLog("[LocalStorage] Cleared all data")
         } catch {
-            print("[LocalStorage] Failed to clear all data: \(error)")
+            debugLog("[LocalStorage] Failed to clear all data: \(error)")
+        }
+    }
+
+    // MARK: - Storage Info (for Privacy View)
+
+    /// Get count of cached trips
+    func getCachedTripsCount() -> Int {
+        guard let dbQueue = dbQueue else { return 0 }
+
+        do {
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cached_trips") ?? 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get cached trips count: \(error)")
+            return 0
+        }
+    }
+
+    /// Get count of cached activities
+    func getCachedActivitiesCount() -> Int {
+        guard let dbQueue = dbQueue else { return 0 }
+
+        do {
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cached_activities") ?? 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get cached activities count: \(error)")
+            return 0
+        }
+    }
+
+    /// Get count of pending offline actions
+    func getPendingActionsCount() -> Int {
+        guard let dbQueue = dbQueue else { return 0 }
+
+        do {
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM pending_actions") ?? 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get pending actions count: \(error)")
+            return 0
         }
     }
 
@@ -858,43 +902,43 @@ final class LocalStorage {
     /// Print database schema information for debugging
     func debugSchema() {
         guard let dbQueue = dbQueue else {
-            print("[LocalStorage] ⚠️ No database queue available")
+            debugLog("[LocalStorage] ⚠️ No database queue available")
             return
         }
 
         do {
             try dbQueue.read { db in
-                print("[LocalStorage] 📊 Database Schema Information")
-                print(String(repeating: "=", count: 60))
-                print("Schema Version: \(getDatabaseVersion())")
-                print("Target Version: \(currentSchemaVersion)")
-                print("")
+                debugLog("[LocalStorage] 📊 Database Schema Information")
+                debugLog(String(repeating: "=", count: 60))
+                debugLog("Schema Version: \(getDatabaseVersion())")
+                debugLog("Target Version: \(currentSchemaVersion)")
+                debugLog("")
 
                 let tables = ["cached_trips", "cached_activities", "pending_actions", "auth_tokens"]
 
                 for tableName in tables {
                     if try db.tableExists(tableName) {
-                        print("Table: \(tableName)")
+                        debugLog("Table: \(tableName)")
                         let columns = try db.columns(in: tableName)
                         for column in columns {
                             let nullable = column.isNotNull ? "NOT NULL" : "NULL"
-                            print("  - \(column.name): \(column.type) (\(nullable))")
+                            debugLog("  - \(column.name): \(column.type) (\(nullable))")
                         }
 
                         // Get row count
                         let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(tableName)") ?? 0
-                        print("  Rows: \(count)")
-                        print("")
+                        debugLog("  Rows: \(count)")
+                        debugLog("")
                     } else {
-                        print("Table: \(tableName) - NOT FOUND")
-                        print("")
+                        debugLog("Table: \(tableName) - NOT FOUND")
+                        debugLog("")
                     }
                 }
 
-                print(String(repeating: "=", count: 60))
+                debugLog(String(repeating: "=", count: 60))
             }
         } catch {
-            print("[LocalStorage] ⚠️ Failed to inspect schema: \(error)")
+            debugLog("[LocalStorage] ⚠️ Failed to inspect schema: \(error)")
         }
     }
 

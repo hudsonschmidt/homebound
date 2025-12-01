@@ -40,7 +40,7 @@ class AppleSignInCoordinator: NSObject, ASAuthorizationControllerDelegate {
                 // Check if user cancelled
                 if let authError = error as? ASAuthorizationError,
                    authError.code == .canceled {
-                    print("[AppleAuth] User cancelled")
+                    debugLog("[AppleAuth] User cancelled")
                     return
                 }
 

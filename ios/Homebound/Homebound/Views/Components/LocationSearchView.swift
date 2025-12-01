@@ -185,7 +185,7 @@ struct LocationSearchView: View {
             switch locationManager.authorizationStatus {
             case .notDetermined:
                 // Request permission
-                print("[LocationSearch] Requesting location permission...")
+                debugLog("[LocationSearch] Requesting location permission...")
                 locationManager.requestPermission()
                 // Wait for permission response
                 try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
@@ -196,7 +196,7 @@ struct LocationSearchView: View {
 
             case .denied, .restricted:
                 // Show alert to open settings
-                print("[LocationSearch] Location denied/restricted - showing alert")
+                debugLog("[LocationSearch] Location denied/restricted - showing alert")
                 await MainActor.run {
                     showLocationDeniedAlert = true
                 }
@@ -204,7 +204,7 @@ struct LocationSearchView: View {
 
             case .authorizedWhenInUse, .authorizedAlways:
                 // Already authorized, proceed
-                print("[LocationSearch] Already authorized: \(locationManager.authorizationStatus.rawValue)")
+                debugLog("[LocationSearch] Already authorized: \(locationManager.authorizationStatus.rawValue)")
                 break
 
             @unknown default:
@@ -214,7 +214,7 @@ struct LocationSearchView: View {
             // Get current location - check both status and flag for safety
             let currentStatus = locationManager.authorizationStatus
             guard currentStatus == .authorizedWhenInUse || currentStatus == .authorizedAlways else {
-                print("[LocationSearch] Not authorized after permission request. Status: \(currentStatus.rawValue)")
+                debugLog("[LocationSearch] Not authorized after permission request. Status: \(currentStatus.rawValue)")
                 return
             }
 
@@ -262,7 +262,7 @@ struct LocationSearchView: View {
                             selectedCoordinates = location
                             isGettingCurrentLocation = false
                             isPresented = false
-                            print("[LocationSearch] ✅ Current location: \(locationDescription)")
+                            debugLog("[LocationSearch] ✅ Current location: \(locationDescription)")
                         }
                     } else {
                         // Fallback if no items found - use "Current Location" (coordinates stored separately)
@@ -274,7 +274,7 @@ struct LocationSearchView: View {
                         }
                     }
                 } catch {
-                    print("[LocationSearch] Reverse geocoding failed: \(error)")
+                    debugLog("[LocationSearch] Reverse geocoding failed: \(error)")
                     // Fallback to "Current Location" if geocoding fails (coordinates stored separately)
                     await MainActor.run {
                         selectedLocation = "Current Location"
@@ -286,7 +286,7 @@ struct LocationSearchView: View {
             } else {
                 await MainActor.run {
                     isGettingCurrentLocation = false
-                    print("[LocationSearch] ❌ Failed to get current location")
+                    debugLog("[LocationSearch] ❌ Failed to get current location")
                 }
             }
         }
@@ -307,7 +307,7 @@ struct LocationSearchView: View {
                 }
             }
         } catch {
-            print("Error converting search result: \(error)")
+            debugLog("Error converting search result: \(error)")
             await MainActor.run {
                 selectedLocation = result.title
                 isPresented = false
@@ -386,7 +386,7 @@ extension LocationSearchCompleter: MKLocalSearchCompleterDelegate {
     }
 
     func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
-        print("Search completer error: \(error)")
+        debugLog("Search completer error: \(error)")
     }
 }
 

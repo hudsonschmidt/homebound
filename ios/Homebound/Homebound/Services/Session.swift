@@ -116,7 +116,7 @@ final class Session: ObservableObject {
                 // Also save to local storage as backup
                 let refreshToken = keychain.getRefreshToken()
                 LocalStorage.shared.saveAuthTokens(access: token, refresh: refreshToken)
-                print("[Session] ✅ Access token saved to keychain and local storage")
+                debugLog("[Session] ✅ Access token saved to keychain and local storage")
 
                 // Register pending APNs token if we have one
                 if let apns = apnsToken {
@@ -125,7 +125,7 @@ final class Session: ObservableObject {
                     }
                 }
             } else {
-                print("[Session] ⚠️ Access token set to nil")
+                debugLog("[Session] ⚠️ Access token set to nil")
             }
         }
     }
@@ -191,7 +191,7 @@ final class Session: ObservableObject {
         if accessToken == nil {
             let tokens = LocalStorage.shared.getAuthTokens()
             if let access = tokens.access {
-                print("[Session] ℹ️ Loaded access token from LocalStorage backup")
+                debugLog("[Session] ℹ️ Loaded access token from LocalStorage backup")
                 accessToken = access
                 // Restore to keychain
                 keychain.saveAccessToken(access)
@@ -216,9 +216,9 @@ final class Session: ObservableObject {
         // If we have a token, we're authenticated
         if accessToken != nil {
             isAuthenticated = true
-            print("[Session] ✅ Loaded auth token - user authenticated")
+            debugLog("[Session] ✅ Loaded auth token - user authenticated")
         } else {
-            print("[Session] ℹ️ No auth token found - user not authenticated")
+            debugLog("[Session] ℹ️ No auth token found - user not authenticated")
         }
     }
 
@@ -242,14 +242,14 @@ final class Session: ObservableObject {
     @MainActor
     func handleAPNsToken(_ token: String) {
         self.apnsToken = token
-        print("[APNs] Received token: \(token.prefix(20))...")
+        debugLog("[APNs] Received token: \(token.prefix(20))...")
 
         // Register device token with backend once signed-in.
         guard let bearer = self.accessToken else {
-            print("[APNs] Not signed in, will register later")
+            debugLog("[APNs] Not signed in, will register later")
             return
         }
-        print("[APNs] Registering device with backend...")
+        debugLog("[APNs] Registering device with backend...")
         struct DeviceRegister: Encodable {
             let platform: String
             let token: String
@@ -275,10 +275,10 @@ final class Session: ObservableObject {
                     ),
                     bearer: bearer
                 )
-                print("[APNs] ✅ Device registered successfully")
+                debugLog("[APNs] ✅ Device registered successfully")
             } catch {
                 // Non-fatal; just surface a notice in your dev UI.
-                print("[APNs] ❌ Registration failed: \(error.localizedDescription)")
+                debugLog("[APNs] ❌ Registration failed: \(error.localizedDescription)")
                 await MainActor.run { self.notice = "APNs register failed: \(error.localizedDescription)" }
             }
         }
@@ -330,7 +330,7 @@ final class Session: ObservableObject {
                 keychain.saveRefreshToken(refresh)
                 // Also save to local storage as backup
                 LocalStorage.shared.saveAuthTokens(access: accessToken, refresh: refresh)
-                print("[Session] ✅ Refresh token saved to keychain and local storage")
+                debugLog("[Session] ✅ Refresh token saved to keychain and local storage")
             }
 
             // Store user profile data
@@ -437,7 +437,7 @@ final class Session: ObservableObject {
 
             // Check if account exists and needs linking
             if resp.account_exists {
-                print("[Session] ⚠️  Account exists with email \(resp.email) - prompting for linking")
+                debugLog("[Session] ⚠️  Account exists with email \(resp.email) - prompting for linking")
                 // Store Apple credentials for linking later
                 self.pendingAppleUserID = userID
                 self.pendingAppleEmail = resp.email
@@ -475,7 +475,7 @@ final class Session: ObservableObject {
             }
 
             isAuthenticated = true
-            print("[Session] ✅ Apple Sign In successful")
+            debugLog("[Session] ✅ Apple Sign In successful")
 
             // Load activities after successful authentication
             await loadActivities()
@@ -548,7 +548,7 @@ final class Session: ObservableObject {
             self.pendingAppleIdentityToken = nil
             self.showAppleLinkAlert = false
 
-            print("[Session] ✅ Apple account linked successfully")
+            debugLog("[Session] ✅ Apple account linked successfully")
 
         } catch let API.APIError.server(msg) {
             self.error = msg
@@ -567,19 +567,19 @@ final class Session: ObservableObject {
             let tokens = LocalStorage.shared.getAuthTokens()
             refreshToken = tokens.refresh
             if refreshToken != nil {
-                print("[Session] ℹ️ Using refresh token from LocalStorage backup")
+                debugLog("[Session] ℹ️ Using refresh token from LocalStorage backup")
             }
         }
 
         guard let refreshToken = refreshToken else {
-            print("[Session] ❌ No refresh token available - user needs to re-authenticate")
+            debugLog("[Session] ❌ No refresh token available - user needs to re-authenticate")
             // No refresh token available, user needs to re-authenticate
             isAuthenticated = false
             accessToken = nil
             return false
         }
 
-        print("[Session] ℹ️ Attempting to refresh access token...")
+        debugLog("[Session] ℹ️ Attempting to refresh access token...")
 
         do {
             let resp: RefreshResponse = try await api.post(
@@ -598,7 +598,7 @@ final class Session: ObservableObject {
                 keychain.saveRefreshToken(newRefresh)
                 // Also save to local storage as backup
                 LocalStorage.shared.saveAuthTokens(access: accessToken, refresh: newRefresh)
-                print("[Session] ✅ Token refreshed successfully - saved to keychain and local storage")
+                debugLog("[Session] ✅ Token refreshed successfully - saved to keychain and local storage")
             }
 
             // Update user profile data if provided
@@ -623,10 +623,10 @@ final class Session: ObservableObject {
                 }
             }
 
-            print("[Session] ✅ Access token refresh successful")
+            debugLog("[Session] ✅ Access token refresh successful")
             return true
         } catch {
-            print("[Session] ❌ Token refresh failed: \(error)")
+            debugLog("[Session] ❌ Token refresh failed: \(error)")
             // Token refresh failed, user needs to re-authenticate
             isAuthenticated = false
             accessToken = nil
@@ -640,23 +640,23 @@ final class Session: ObservableObject {
     @MainActor
     private func withAuth<T>(_ operation: @escaping (String) async throws -> T) async throws -> T {
         guard let bearer = accessToken else {
-            print("[Session] ❌ No access token available - unauthorized")
+            debugLog("[Session] ❌ No access token available - unauthorized")
             throw API.APIError.unauthorized
         }
 
         do {
             return try await operation(bearer)
         } catch API.APIError.unauthorized {
-            print("[Session] ⚠️ Got 401 Unauthorized - attempting token refresh...")
+            debugLog("[Session] ⚠️ Got 401 Unauthorized - attempting token refresh...")
 
             // Try to refresh the token
             let refreshed = await refreshAccessToken()
             guard refreshed, let newBearer = accessToken else {
-                print("[Session] ❌ Token refresh failed - user needs to re-authenticate")
+                debugLog("[Session] ❌ Token refresh failed - user needs to re-authenticate")
                 throw API.APIError.unauthorized
             }
 
-            print("[Session] ✅ Token refreshed - retrying request with new token")
+            debugLog("[Session] ✅ Token refreshed - retrying request with new token")
             // Retry the operation with the new token
             return try await operation(newBearer)
         }
@@ -861,7 +861,7 @@ final class Session: ObservableObject {
                 LocalStorage.shared.removePendingAction(id: action.id)
             } catch {
                 // Keep action in queue for next sync attempt
-                print("[Session] Failed to sync action \(action.type): \(error)")
+                debugLog("[Session] Failed to sync action \(action.type): \(error)")
             }
         }
     }
@@ -1125,7 +1125,39 @@ final class Session: ObservableObject {
         } catch {
             // If profile endpoint fails, just keep existing cached data
             // Don't auto-signout - tokens last 30 days and user should stay signed in
-            print("Failed to load user profile: \(error.localizedDescription)")
+            debugLog("Failed to load user profile: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Export User Data
+    func exportUserData() async -> Data? {
+        do {
+            let data: Data = try await withAuth { bearer in
+                // Get raw JSON data instead of decoding
+                guard let url = URL(string: "\(self.baseURL)/api/v1/profile/export") else {
+                    throw API.APIError.server("Invalid URL")
+                }
+
+                var request = URLRequest(url: url)
+                request.httpMethod = "GET"
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) else {
+                    throw API.APIError.server("Failed to export data")
+                }
+
+                return data
+            }
+            return data
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to export data: \(error.localizedDescription)"
+            }
+            return nil
         }
     }
 
@@ -1140,7 +1172,7 @@ final class Session: ObservableObject {
             }
             return contacts
         } catch {
-            print("Failed to load saved contacts: \(error.localizedDescription)")
+            debugLog("Failed to load saved contacts: \(error.localizedDescription)")
             return []
         }
     }
@@ -1213,7 +1245,7 @@ final class Session: ObservableObject {
     // MARK: - Activities Management
     @MainActor
     func loadActivities() async {
-        print("[Session] 🔄 Loading activities from backend...")
+        debugLog("[Session] 🔄 Loading activities from backend...")
         do {
             let response: [Activity] = try await api.get(
                 url("/api/v1/activities/"),
@@ -1222,14 +1254,14 @@ final class Session: ObservableObject {
 
             await MainActor.run {
                 self.activities = response.sorted { $0.order < $1.order }
-                print("[Session] ✅ Loaded \(response.count) activities from backend")
+                debugLog("[Session] ✅ Loaded \(response.count) activities from backend")
 
                 // Cache for offline access
                 LocalStorage.shared.cacheActivities(response)
-                print("[Session] 💾 Activities cached to local storage")
+                debugLog("[Session] 💾 Activities cached to local storage")
             }
         } catch {
-            print("[Session] ❌ Failed to load activities from backend: \(error)")
+            debugLog("[Session] ❌ Failed to load activities from backend: \(error)")
 
             // Fall back to cached activities on error
             let cachedActivities = LocalStorage.shared.getCachedActivities()
@@ -1237,12 +1269,12 @@ final class Session: ObservableObject {
                 if !cachedActivities.isEmpty {
                     self.activities = cachedActivities
                     self.notice = "Showing cached activities (offline mode)"
-                    print("[Session] 📦 Using \(cachedActivities.count) cached activities")
+                    debugLog("[Session] 📦 Using \(cachedActivities.count) cached activities")
                 } else {
                     // No activities available - user needs internet connection
                     self.activities = []
                     self.lastError = "Unable to load activities. Please check your internet connection."
-                    print("[Session] ❌ No activities available (no backend or cache)")
+                    debugLog("[Session] ❌ No activities available (no backend or cache)")
                 }
             }
         }
@@ -1258,7 +1290,7 @@ final class Session: ObservableObject {
     // MARK: - Sign Out
     @MainActor
     func signOut() {
-        print("[Session] 🔒 Signing out - clearing all data")
+        debugLog("[Session] 🔒 Signing out - clearing all data")
 
         // Clear keychain
         keychain.clearAll()
@@ -1283,6 +1315,6 @@ final class Session: ObservableObject {
         activeTrip = nil
         activities = []
 
-        print("[Session] ✅ Sign out complete")
+        debugLog("[Session] ✅ Sign out complete")
     }
 }

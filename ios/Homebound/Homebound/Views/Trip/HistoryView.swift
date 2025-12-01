@@ -160,7 +160,7 @@ struct HistoryView: View {
                     bearer: bearer
                 )
 
-                print("[HistoryView] 📥 Loaded \(plans.count) total trips from backend")
+                debugLog("[HistoryView] 📥 Loaded \(plans.count) total trips from backend")
 
                 // Check if task was cancelled before updating UI
                 guard !Task.isCancelled else { return }
@@ -170,9 +170,9 @@ struct HistoryView: View {
                     self.isLoading = false
                 }
             } catch {
-                print("[HistoryView] ❌ Failed to load history: \(error)")
+                debugLog("[HistoryView] ❌ Failed to load history: \(error)")
                 if let decodingError = error as? DecodingError {
-                    print("[HistoryView] Decoding error details: \(decodingError)")
+                    debugLog("[HistoryView] Decoding error details: \(decodingError)")
                 }
 
                 // Only show error if not cancelled

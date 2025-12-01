@@ -53,9 +53,9 @@ struct API {
             // Use both headers - X-Auth-Token as primary (Cloudflare-safe) and Authorization as fallback
             req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
             req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
-            print("[API] ✅ GET \(url.path) - Added auth headers with token: \(b.prefix(20))...")
+            debugLog("[API] ✅ GET \(url.path) - Added auth headers with token: \(b.prefix(20))...")
         } else {
-            print("[API] ⚠️ GET \(url.path) - NO bearer token provided!")
+            debugLog("[API] ⚠️ GET \(url.path) - NO bearer token provided!")
         }
         let (data, resp) = try await URLSession.shared.data(for: req)
         try check(resp: resp, data: data)
@@ -69,9 +69,9 @@ struct API {
             // Use both headers - X-Auth-Token as primary (Cloudflare-safe) and Authorization as fallback
             req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
             req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
-            print("[API] ✅ POST \(url.path) - Added auth headers with token: \(b.prefix(20))...")
+            debugLog("[API] ✅ POST \(url.path) - Added auth headers with token: \(b.prefix(20))...")
         } else {
-            print("[API] ⚠️ POST \(url.path) - NO bearer token provided!")
+            debugLog("[API] ⚠️ POST \(url.path) - NO bearer token provided!")
         }
         req.httpBody = try encoder.encode(body)
         let (data, resp) = try await URLSession.shared.data(for: req)

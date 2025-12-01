@@ -1,7 +1,8 @@
 import SwiftUI
-import PhotosUI
 import Combine
 import UserNotifications
+import CoreLocation
+import UniformTypeIdentifiers
 
 // MARK: - App Preferences
 enum AppColorScheme: String, CaseIterable {
@@ -401,24 +402,6 @@ struct SettingsView: View {
                     }
 
                     Button(action: {
-                        // TODO: Open App Store for rating
-                    }) {
-                        Label {
-                            HStack {
-                                Text("Rate in App Store (Coming Soon)")
-                                Spacer()
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "star.fill")
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .foregroundStyle(.primary)
-
-                    Button(action: {
                         showingClearCacheAlert = true
                     }) {
                         Label {
@@ -437,13 +420,46 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
                 }
 
+                // Legal Section
+                Section("Legal") {
+                    Link(destination: URL(string: "https://www.homeboundapp.com/privacypolicy")!) {
+                        Label {
+                            HStack {
+                                Text("Privacy Policy")
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "hand.raised.fill")
+                                .foregroundStyle(.blue)
+                        }
+                    }
+
+                    Link(destination: URL(string: "https://www.homeboundapp.com/termsofservice")!) {
+                        Label {
+                            HStack {
+                                Text("Terms of Service")
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "doc.text.fill")
+                                .foregroundStyle(.gray)
+                        }
+                    }
+                }
+
                 // Version info at bottom
                 Section {
                     HStack {
                         Text("Version")
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("1.0.0")
+                        Text("0.1.0")
                             .foregroundStyle(.secondary)
                     }
                     .listRowBackground(Color.clear)
@@ -488,10 +504,6 @@ struct AccountView: View {
     @State private var tempLastName = ""
     @State private var tempAge = ""
 
-    @State private var showingImagePicker = false
-    @State private var selectedImage: PhotosPickerItem?
-    @State private var profileImage: UIImage?
-
     @State private var showingDeleteAlert = false
     @State private var deleteConfirmation = ""
     @State private var isDeleting = false
@@ -505,56 +517,21 @@ struct AccountView: View {
                 HStack {
                     Spacer()
 
-                    PhotosPicker(selection: $selectedImage, matching: .images) {
-                        ZStack {
-                            if let profileImage = profileImage {
-                                Image(uiImage: profileImage)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 120, height: 120)
-                                    .clipShape(Circle())
-                            } else {
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [Color.hbBrand, Color.hbTeal],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .frame(width: 120, height: 120)
-                                    .overlay(
-                                        Text(String(firstName.prefix(1).uppercased()))
-                                            .font(.largeTitle)
-                                            .fontWeight(.semibold)
-                                            .foregroundStyle(.white)
-                                    )
-                            }
-
-                            // Camera icon overlay
-                            Circle()
-                                .fill(Color(.systemBackground))
-                                .frame(width: 36, height: 36)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color(.systemGray4), lineWidth: 1)
-                                )
-                                .overlay(
-                                    Image(systemName: "camera.fill")
-                                        .font(.system(size: 16))
-                                        .foregroundStyle(Color.hbBrand)
-                                )
-                                .offset(x: 40, y: 40)
-                        }
-                    }
-                    .onChange(of: selectedImage) { _, newItem in
-                        Task {
-                            if let data = try? await newItem?.loadTransferable(type: Data.self),
-                               let image = UIImage(data: data) {
-                                profileImage = image
-                            }
-                        }
-                    }
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.hbBrand, Color.hbTeal],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 120, height: 120)
+                        .overlay(
+                            Text(String(firstName.prefix(1).uppercased()))
+                                .font(.largeTitle)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                        )
 
                     Spacer()
                 }
@@ -995,16 +972,208 @@ struct NotificationSettingsView: View {
 }
 
 struct PrivacyView: View {
+    @EnvironmentObject var session: Session
+    @State private var locationStatus: CLAuthorizationStatus = .notDetermined
+    @State private var isExporting = false
+    @State private var showShareSheet = false
+    @State private var exportData: Data?
+
+    // Local storage counts
+    @State private var cachedTripsCount = 0
+    @State private var cachedActivitiesCount = 0
+    @State private var pendingActionsCount = 0
+
     var body: some View {
         List {
-            Section("Data & Privacy") {
-                Text("Your data is encrypted and secure")
-                    .foregroundStyle(.secondary)
+            // Location Section
+            Section {
+                HStack {
+                    Label {
+                        Text("Location Access")
+                    } icon: {
+                        Image(systemName: "location.fill")
+                            .foregroundStyle(locationStatusColor)
+                    }
+
+                    Spacer()
+
+                    Text(locationStatusText)
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                }
+
+                if locationStatus == .denied || locationStatus == .restricted {
+                    Button {
+                        openSystemSettings()
+                    } label: {
+                        Label("Open Settings", systemImage: "gear")
+                    }
+                }
+            } header: {
+                Text("Location")
+            } footer: {
+                Text("Homebound uses your location to set trip locations and show nearby places. Your location is never tracked in the background.")
+            }
+
+            // Your Data Section
+            Section {
+                Button {
+                    Task {
+                        await exportUserData()
+                    }
+                } label: {
+                    HStack {
+                        Label {
+                            Text("Export My Data")
+                        } icon: {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(.blue)
+                        }
+
+                        Spacer()
+
+                        if isExporting {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .disabled(isExporting)
+            } header: {
+                Text("Your Data")
+            } footer: {
+                Text("Download a copy of your profile, trips, and contacts as a JSON file.")
+            }
+
+            // Local Storage Section
+            Section {
+                HStack {
+                    Text("Cached Trips")
+                    Spacer()
+                    Text("\(cachedTripsCount)")
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Cached Activities")
+                    Spacer()
+                    Text("\(cachedActivitiesCount)")
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Pending Offline Actions")
+                    Spacer()
+                    Text("\(pendingActionsCount)")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Local Storage")
+            } footer: {
+                Text("Data cached on your device for offline access. Clear this in Settings > Resources > Clear Cache.")
             }
         }
         .navigationTitle("Privacy")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            checkLocationStatus()
+            loadStorageCounts()
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let data = exportData {
+                ShareSheet(activityItems: [
+                    ExportedDataFile(data: data, filename: "homebound-export.json")
+                ])
+            }
+        }
     }
+
+    private var locationStatusColor: Color {
+        switch locationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            return .green
+        case .denied, .restricted:
+            return .red
+        default:
+            return .orange
+        }
+    }
+
+    private var locationStatusText: String {
+        switch locationStatus {
+        case .authorizedWhenInUse:
+            return "While Using"
+        case .authorizedAlways:
+            return "Always"
+        case .denied:
+            return "Denied"
+        case .restricted:
+            return "Restricted"
+        case .notDetermined:
+            return "Not Set"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    private func checkLocationStatus() {
+        locationStatus = CLLocationManager().authorizationStatus
+    }
+
+    private func openSystemSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    private func loadStorageCounts() {
+        cachedTripsCount = LocalStorage.shared.getCachedTripsCount()
+        cachedActivitiesCount = LocalStorage.shared.getCachedActivitiesCount()
+        pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+    }
+
+    private func exportUserData() async {
+        isExporting = true
+        defer { isExporting = false }
+
+        if let data = await session.exportUserData() {
+            await MainActor.run {
+                exportData = data
+                showShareSheet = true
+            }
+        }
+    }
+}
+
+// Helper for sharing exported data as a file
+struct ExportedDataFile: Transferable {
+    let data: Data
+    let filename: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .json) { file in
+            file.data
+        }
+    }
+}
+
+// UIKit share sheet wrapper
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 struct AboutView: View {
@@ -1012,23 +1181,9 @@ struct AboutView: View {
         List {
             Section {
                 HStack {
-                    Text("Version")
-                    Spacer()
-                    Text("1.0.0")
+                    Text("Made with ❤️ in California")
                         .foregroundStyle(.secondary)
                 }
-
-                HStack {
-                    Text("Build")
-                    Spacer()
-                    Text("100")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section {
-                Link("Terms of Service", destination: URL(string: "https://www.homeboundapp.com/termsofservice")!)
-                Link("Privacy Policy", destination: URL(string: "https://www.homeboundapp.com/privacypolicy")!)
             }
         }
         .navigationTitle("About")

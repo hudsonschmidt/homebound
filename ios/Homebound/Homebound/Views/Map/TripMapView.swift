@@ -99,7 +99,7 @@ struct TripMapView: View {
                                 // All button
                                 FilterChip(
                                     label: "All",
-                                    icon: "map.fill",
+                                    icon: "📍",
                                     isSelected: selectedActivity == nil,
                                     count: tripsWithLocations.count
                                 ) {
@@ -209,7 +209,7 @@ struct TripMapView: View {
                 }
             }
         } catch {
-            print("Failed to load trips: \(error)")
+            debugLog("Failed to load trips: \(error)")
         }
     }
 
@@ -251,12 +251,12 @@ struct TripMapView: View {
         switch locationManager.authorizationStatus {
         case .notDetermined:
             // Request permission
-            print("[TripMap] Requesting location permission...")
+            debugLog("[TripMap] Requesting location permission...")
             locationManager.requestPermission()
 
         case .denied, .restricted:
             // Show alert to open settings
-            print("[TripMap] Location denied/restricted - showing alert")
+            debugLog("[TripMap] Location denied/restricted - showing alert")
             showLocationDeniedAlert = true
 
         case .authorizedWhenInUse, .authorizedAlways:
@@ -271,9 +271,9 @@ struct TripMapView: View {
                     mapPosition = .region(newRegion)
                     region = newRegion
                 }
-                print("[TripMap] ✅ Centered on user location: \(userLocation)")
+                debugLog("[TripMap] ✅ Centered on user location: \(userLocation)")
             } else {
-                print("[TripMap] ⚠️  User location not available yet")
+                debugLog("[TripMap] ⚠️  User location not available yet")
                 // Start updates if not already running
                 locationManager.startUpdatingLocation()
             }

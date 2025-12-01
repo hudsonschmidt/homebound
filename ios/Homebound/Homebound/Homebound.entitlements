@@ -10,7 +10,7 @@
 	</array>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:homebound.onrender.com</string>
+		<string>applinks:api.homeboundapp.com</string>
 	</array>
 </dict>
 </plist>

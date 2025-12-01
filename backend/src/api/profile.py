@@ -1,5 +1,7 @@
 """User profile management endpoints"""
 
+from datetime import datetime, UTC
+
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -160,6 +162,101 @@ def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_u
             )
 
         return {"ok": True, "message": "Profile updated successfully"}
+
+
+@router.get("/export")
+def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
+    """Export all user data (profile, trips, contacts) for GDPR compliance"""
+    with db.engine.begin() as connection:
+        # Get user profile
+        user = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, email, first_name, last_name, age, created_at
+                FROM users
+                WHERE id = :user_id
+                """
+            ),
+            {"user_id": user_id}
+        ).fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Get all trips
+        trips = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT t.*, a.name as activity_name, a.icon as activity_icon
+                FROM trips t
+                LEFT JOIN activities a ON t.activity_id = a.id
+                WHERE t.user_id = :user_id
+                ORDER BY t.created_at DESC
+                """
+            ),
+            {"user_id": user_id}
+        ).fetchall()
+
+        # Get all contacts
+        contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, name, phone, email, relationship, created_at
+                FROM contacts
+                WHERE user_id = :user_id
+                ORDER BY created_at DESC
+                """
+            ),
+            {"user_id": user_id}
+        ).fetchall()
+
+        # Format response
+        return {
+            "exported_at": datetime.now(UTC).isoformat(),
+            "profile": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "age": user.age,
+                "created_at": str(user.created_at) if user.created_at else None
+            },
+            "trips": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "activity": t.activity_name,
+                    "activity_icon": t.activity_icon,
+                    "start_at": str(t.start_at) if t.start_at else None,
+                    "eta_at": str(t.eta_at) if t.eta_at else None,
+                    "grace_minutes": t.grace_minutes,
+                    "location_text": t.location_text,
+                    "location_lat": t.location_lat,
+                    "location_lng": t.location_lng,
+                    "notes": t.notes,
+                    "status": t.status,
+                    "completed_at": str(t.completed_at) if t.completed_at else None,
+                    "created_at": str(t.created_at) if t.created_at else None
+                }
+                for t in trips
+            ],
+            "contacts": [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "phone": c.phone,
+                    "email": c.email,
+                    "relationship": c.relationship,
+                    "created_at": str(c.created_at) if c.created_at else None
+                }
+                for c in contacts
+            ],
+            "total_trips": len(trips),
+            "total_contacts": len(contacts)
+        }
 
 
 @router.delete("/account")

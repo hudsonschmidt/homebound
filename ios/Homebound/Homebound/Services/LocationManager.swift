@@ -32,19 +32,19 @@ class LocationManager: NSObject, ObservableObject {
     /// Request location permission if not already determined
     func requestPermission() {
         guard authorizationStatus == .notDetermined else {
-            print("[LocationManager] Permission already determined: \(authorizationStatus.rawValue)")
+            debugLog("[LocationManager] Permission already determined: \(authorizationStatus.rawValue)")
             return
         }
 
         hasRequestedPermission = true
-        print("[LocationManager] Requesting location permission...")
+        debugLog("[LocationManager] Requesting location permission...")
         locationManager.requestWhenInUseAuthorization()
     }
 
     /// Start updating user location
     func startUpdatingLocation() {
         guard isAuthorized else {
-            print("[LocationManager] Not authorized to update location")
+            debugLog("[LocationManager] Not authorized to update location")
             locationError = "Location access not authorized"
 
             // Request permission if not yet determined
@@ -54,14 +54,14 @@ class LocationManager: NSObject, ObservableObject {
             return
         }
 
-        print("[LocationManager] Starting location updates...")
+        debugLog("[LocationManager] Starting location updates...")
         locationError = nil
         locationManager.startUpdatingLocation()
     }
 
     /// Stop updating user location
     func stopUpdatingLocation() {
-        print("[LocationManager] Stopping location updates...")
+        debugLog("[LocationManager] Stopping location updates...")
         locationManager.stopUpdatingLocation()
     }
 
@@ -107,23 +107,23 @@ class LocationManager: NSObject, ObservableObject {
         case .authorizedWhenInUse, .authorizedAlways:
             isAuthorized = true
             locationError = nil
-            print("[LocationManager] ✅ Location authorized")
+            debugLog("[LocationManager] ✅ Location authorized")
         case .denied:
             isAuthorized = false
             locationError = "Location access denied. Enable in Settings."
-            print("[LocationManager] ❌ Location denied")
+            debugLog("[LocationManager] ❌ Location denied")
         case .restricted:
             isAuthorized = false
             locationError = "Location access restricted"
-            print("[LocationManager] ❌ Location restricted")
+            debugLog("[LocationManager] ❌ Location restricted")
         case .notDetermined:
             isAuthorized = false
             locationError = nil
-            print("[LocationManager] ⚠️  Location not determined")
+            debugLog("[LocationManager] ⚠️  Location not determined")
         @unknown default:
             isAuthorized = false
             locationError = "Unknown location authorization status"
-            print("[LocationManager] ❓ Unknown status")
+            debugLog("[LocationManager] ❓ Unknown status")
         }
     }
 }
@@ -131,7 +131,7 @@ class LocationManager: NSObject, ObservableObject {
 // MARK: - CLLocationManagerDelegate
 extension LocationManager: CLLocationManagerDelegate {
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        print("[LocationManager] Authorization changed to: \(manager.authorizationStatus.rawValue)")
+        debugLog("[LocationManager] Authorization changed to: \(manager.authorizationStatus.rawValue)")
         updateAuthorizationState()
 
         // If just authorized, start updates
@@ -147,7 +147,7 @@ extension LocationManager: CLLocationManagerDelegate {
         DispatchQueue.main.async {
             self.currentLocation = location.coordinate
             self.locationError = nil
-            print("[LocationManager] 📍 Location updated: \(location.coordinate.latitude), \(location.coordinate.longitude)")
+            debugLog("[LocationManager] 📍 Location updated: \(location.coordinate.latitude), \(location.coordinate.longitude)")
         }
     }
 
@@ -167,7 +167,7 @@ extension LocationManager: CLLocationManagerDelegate {
                 self.locationError = "Location error: \(error.localizedDescription)"
             }
 
-            print("[LocationManager] ❌ Location error: \(error.localizedDescription)")
+            debugLog("[LocationManager] ❌ Location error: \(error.localizedDescription)")
         }
     }
 }

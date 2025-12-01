@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
-        print("APNs registration failed:", error)
+        debugLog("APNs registration failed: \(error)")
     }
 
     // MARK: - UNUserNotificationCenterDelegate

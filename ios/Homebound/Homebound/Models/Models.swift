@@ -90,15 +90,15 @@ struct Trip: Codable, Identifiable, Equatable {
 
         // Parse completed_at date string if present
         if let completedAtString = try container.decodeIfPresent(String.self, forKey: .completed_at) {
-            print("[Trip Decoder] ✅ completed_at string received: '\(completedAtString)' for trip id=\(id)")
+            debugLog("[Trip Decoder] ✅ completed_at string received: '\(completedAtString)' for trip id=\(id)")
             completed_at = Self.parseISO8601Date(completedAtString)
             if let parsedDate = completed_at {
-                print("[Trip Decoder] ✅ completed_at parsed successfully: \(parsedDate)")
+                debugLog("[Trip Decoder] ✅ completed_at parsed successfully: \(parsedDate)")
             } else {
-                print("[Trip Decoder] ❌ completed_at parsing FAILED for string: '\(completedAtString)'")
+                debugLog("[Trip Decoder] ❌ completed_at parsing FAILED for string: '\(completedAtString)'")
             }
         } else {
-            print("[Trip Decoder] ⚠️ completed_at is nil/missing from API for trip id=\(id), status=\(status)")
+            debugLog("[Trip Decoder] ⚠️ completed_at is nil/missing from API for trip id=\(id), status=\(status)")
             completed_at = nil
         }
 
