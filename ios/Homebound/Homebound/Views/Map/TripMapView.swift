@@ -16,6 +16,7 @@ struct TripMapView: View {
     @State private var selectedTrip: Trip? = nil
     @State private var showLocationDeniedAlert = false
     @State private var hasLoadedInitialView = false
+    @State private var hasSetInitialLocationZoom = false
 
     var tripsWithLocations: [Trip] {
         trips.filter { trip in
@@ -186,6 +187,23 @@ struct TripMapView: View {
                 locationManager.startUpdatingLocation()
 
                 hasLoadedInitialView = true
+            }
+            .onChange(of: locationManager.currentLocation) { oldValue, newValue in
+                // Only zoom on first location fix after permission granted
+                if !hasSetInitialLocationZoom, let location = newValue {
+                    hasSetInitialLocationZoom = true
+
+                    // Zoom to neighborhood level (~10km)
+                    let newRegion = MKCoordinateRegion(
+                        center: location,
+                        span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
+                    )
+
+                    withAnimation {
+                        mapPosition = .region(newRegion)
+                        region = newRegion
+                    }
+                }
             }
         }
     }

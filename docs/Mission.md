@@ -10,5 +10,4 @@ Grounded in 25 years of SAR data and beacon outcomes, our north star is to preve
   2. Actually Used: Gamification ensures people use it
   3. Privacy First: Share only what you want, when you want
   4. Works Everywhere: Offline capable, global emergency numbers
-  5. Beautiful: An app you're proud to show friends
   

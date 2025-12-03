@@ -373,10 +373,7 @@ struct Step1TripDetails: View {
                         showingLocationSearch = true
                     }) {
                         HStack {
-                            if location.isEmpty {
-                                Text("Search for a place...")
-                                    .foregroundStyle(.secondary)
-                            } else {
+                            if !location.isEmpty {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(location)
                                         .foregroundStyle(.primary)

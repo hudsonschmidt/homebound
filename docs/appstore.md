@@ -69,14 +69,3 @@ Download Homebound today and adventure with confidence.
 ## Keywords (100 characters max, comma-separated)
 safety,hiking,outdoor,adventure,emergency,contact,check-in,trip,solo,backcountry,climbing,tracking
 
-## Additional Keywords (for reference)
-- hiking safety
-- outdoor safety app
-- emergency contact alert
-- trip planner
-- solo hiking
-- backcountry safety
-- adventure check-in
-- overdue alert
-- safety check-in
-- wilderness safety
