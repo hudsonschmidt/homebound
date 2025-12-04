@@ -147,6 +147,7 @@ struct OnboardingView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .scrollIndicators(.hidden)
         }
         .onAppear {
             // Pre-fill name fields from Apple Sign In if available

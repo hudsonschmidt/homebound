@@ -79,6 +79,23 @@ class TripCreate(BaseModel):
     timezone: str | None = None  # User's timezone (e.g., "America/New_York")
 
 
+class TripUpdate(BaseModel):
+    """Model for updating an existing trip. All fields are optional."""
+    title: str | None = None
+    activity: str | None = None  # Activity name reference
+    start: datetime | None = None
+    eta: datetime | None = None
+    grace_min: int | None = None
+    location_text: str | None = None
+    gen_lat: float | None = None
+    gen_lon: float | None = None
+    notes: str | None = None
+    contact1: int | None = None  # Contact ID reference
+    contact2: int | None = None
+    contact3: int | None = None
+    timezone: str | None = None
+
+
 class TripResponse(BaseModel):
     id: int
     user_id: int
@@ -588,6 +605,179 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             contact3=trip["contact3"],
             checkin_token=trip["checkin_token"],
             checkout_token=trip["checkout_token"]
+        )
+
+
+@router.put("/{trip_id}", response_model=TripResponse)
+def update_trip(
+    trip_id: int,
+    body: TripUpdate,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Update a planned trip. Only trips with status 'planned' can be edited."""
+    log.info(f"[Trips] Updating trip {trip_id} for user_id={user_id}")
+
+    with db.engine.begin() as connection:
+        # Verify trip ownership and status
+        trip = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, status, activity
+                FROM trips
+                WHERE id = :trip_id AND user_id = :user_id
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if not trip:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trip not found"
+            )
+
+        if trip.status != "planned":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only planned trips can be edited"
+            )
+
+        # Build update fields dynamically based on what's provided
+        update_fields = []
+        params = {"trip_id": trip_id, "user_id": user_id}
+
+        # Handle activity update (need to look up activity ID)
+        if body.activity is not None:
+            activity = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id, name
+                    FROM activities
+                    WHERE LOWER(REPLACE(name, ' ', '_')) = LOWER(REPLACE(:activity, ' ', '_'))
+                    """
+                ),
+                {"activity": body.activity}
+            ).fetchone()
+
+            if not activity:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Activity '{body.activity}' not found"
+                )
+            update_fields.append("activity = :activity_id")
+            params["activity_id"] = activity.id
+
+        # Handle contact validation if any contacts are being updated
+        for contact_field in ["contact1", "contact2", "contact3"]:
+            contact_id = getattr(body, contact_field)
+            if contact_id is not None:
+                contact = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        SELECT id
+                        FROM contacts
+                        WHERE id = :contact_id AND user_id = :user_id
+                        """
+                    ),
+                    {"contact_id": contact_id, "user_id": user_id}
+                ).fetchone()
+
+                if not contact:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Contact {contact_id} not found"
+                    )
+                update_fields.append(f"{contact_field} = :{contact_field}")
+                params[contact_field] = contact_id
+
+        # Handle simple field updates
+        simple_fields = {
+            "title": body.title,
+            "grace_min": body.grace_min,
+            "location_text": body.location_text,
+            "gen_lat": body.gen_lat,
+            "gen_lon": body.gen_lon,
+            "notes": body.notes,
+            "timezone": body.timezone,
+        }
+
+        for field, value in simple_fields.items():
+            if value is not None:
+                update_fields.append(f"{field} = :{field}")
+                params[field] = value
+
+        # Handle datetime fields
+        if body.start is not None:
+            update_fields.append("start = :start")
+            params["start"] = body.start.isoformat()
+
+        if body.eta is not None:
+            update_fields.append("eta = :eta")
+            params["eta"] = body.eta.isoformat()
+
+        # Execute update if there are fields to update
+        if update_fields:
+            update_sql = f"""
+                UPDATE trips
+                SET {", ".join(update_fields)}
+                WHERE id = :trip_id
+            """
+            connection.execute(sqlalchemy.text(update_sql), params)
+            log.info(f"[Trips] Updated trip {trip_id}: {update_fields}")
+
+        # Fetch updated trip with full activity data
+        updated_trip = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
+                       t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
+                       t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
+                       t.checkin_token, t.checkout_token,
+                       a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
+                       a.default_grace_minutes, a.colors as activity_colors,
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.id = :trip_id
+                """
+            ),
+            {"trip_id": trip_id}
+        ).mappings().fetchone()
+        assert updated_trip is not None
+
+        # Construct Activity object
+        activity_obj = Activity(
+            id=updated_trip["activity_id"],
+            name=updated_trip["activity_name"],
+            icon=updated_trip["activity_icon"],
+            default_grace_minutes=updated_trip["default_grace_minutes"],
+            colors=parse_json_field(updated_trip["activity_colors"], dict),
+            messages=parse_json_field(updated_trip["activity_messages"], dict),
+            safety_tips=parse_json_field(updated_trip["safety_tips"], list),
+            order=updated_trip["activity_order"]
+        )
+
+        return TripResponse(
+            id=updated_trip["id"],
+            user_id=updated_trip["user_id"],
+            title=updated_trip["title"],
+            activity=activity_obj,
+            start=to_iso8601_required(updated_trip["start"]),
+            eta=to_iso8601_required(updated_trip["eta"]),
+            grace_min=updated_trip["grace_min"],
+            location_text=updated_trip["location_text"],
+            gen_lat=updated_trip["gen_lat"],
+            gen_lon=updated_trip["gen_lon"],
+            notes=updated_trip["notes"],
+            status=updated_trip["status"],
+            completed_at=to_iso8601(updated_trip["completed_at"]),
+            last_checkin=to_iso8601(updated_trip["last_checkin"]),
+            created_at=to_iso8601_required(updated_trip["created_at"]),
+            contact1=updated_trip["contact1"],
+            contact2=updated_trip["contact2"],
+            contact3=updated_trip["contact3"],
+            checkin_token=updated_trip["checkin_token"],
+            checkout_token=updated_trip["checkout_token"]
         )
 
 

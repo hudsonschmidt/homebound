@@ -101,17 +101,7 @@ struct LocationSearchView: View {
                             }
                             .disabled(isGettingCurrentLocation)
                         }
-
-                        // Hint to search
-                        Section {
-                            HStack {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundStyle(.secondary)
-                                Text("Search for an address above")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        
                     } else {
                         // Search Results
                         if searchCompleter.searchResults.isEmpty && !searchText.isEmpty {
@@ -149,6 +139,7 @@ struct LocationSearchView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .scrollIndicators(.hidden)
             }
             .navigationTitle("Select Location")
             .navigationBarTitleDisplayMode(.inline)

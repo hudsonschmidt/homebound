@@ -1,5 +1,13 @@
 import SwiftUI
 import MapKit
+import CoreLocation
+
+// MARK: - CLLocationCoordinate2D Equatable Conformance
+extension CLLocationCoordinate2D: @retroactive Equatable {
+    public static func == (lhs: CLLocationCoordinate2D, rhs: CLLocationCoordinate2D) -> Bool {
+        lhs.latitude == rhs.latitude && lhs.longitude == rhs.longitude
+    }
+}
 
 // MARK: - Trip Map View
 struct TripMapView: View {
@@ -55,93 +63,104 @@ struct TripMapView: View {
         }
     }
 
+    // MARK: - Filter Controls
+    @ViewBuilder
+    private var filterControls: some View {
+        VStack {
+            Spacer()
+
+            // Activity filter chips
+            if !activityFilters.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        // All button
+                        FilterChip(
+                            label: "All",
+                            icon: "📍",
+                            isSelected: selectedActivity == nil,
+                            count: tripsWithLocations.count
+                        ) {
+                            withAnimation {
+                                selectedActivity = nil
+                            }
+                        }
+
+                        // Activity filters
+                        ForEach(activityFilters, id: \.id) { activity in
+                            let count = tripsWithLocations.filter { $0.activity.id == activity.id }.count
+
+                            FilterChip(
+                                label: activity.name,
+                                icon: activity.icon,
+                                isSelected: selectedActivity == activity.name,
+                                count: count
+                            ) {
+                                withAnimation {
+                                    selectedActivity = selectedActivity == activity.name ? nil : activity.name
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial)
+            }
+
+            // Selected trip card
+            if let trip = selectedTrip {
+                TripDetailCard(trip: trip) {
+                    withAnimation {
+                        selectedTrip = nil
+                    }
+                }
+                .padding()
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+    }
+
+    // MARK: - Map Content
+    @MapContentBuilder
+    private var mapContent: some MapContent {
+        // User location
+        if locationManager.isAuthorized, let userLocation = locationManager.currentLocation {
+            Annotation("My Location", coordinate: userLocation) {
+                Circle()
+                    .fill(Color.blue)
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: 3)
+                    )
+                    .shadow(radius: 3)
+            }
+        }
+
+        // Trip annotations
+        ForEach(annotations) { annotation in
+            Annotation(annotation.trip.title, coordinate: annotation.coordinate) {
+                TripMapPin(annotation: annotation, isSelected: selectedTrip?.id == annotation.trip.id)
+                    .onTapGesture {
+                        withAnimation {
+                            selectedTrip = annotation.trip
+                        }
+                    }
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 // Map - Using modern iOS 17+ API
                 Map(position: $mapPosition) {
-                    // User location
-                    if locationManager.isAuthorized, let userLocation = locationManager.currentLocation {
-                        Annotation("My Location", coordinate: userLocation) {
-                            Circle()
-                                .fill(Color.blue)
-                                .frame(width: 20, height: 20)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.white, lineWidth: 3)
-                                )
-                                .shadow(radius: 3)
-                        }
-                    }
-
-                    // Trip annotations
-                    ForEach(annotations) { annotation in
-                        Annotation(annotation.trip.title, coordinate: annotation.coordinate) {
-                            TripMapPin(annotation: annotation, isSelected: selectedTrip?.id == annotation.trip.id)
-                                .onTapGesture {
-                                    withAnimation {
-                                        selectedTrip = annotation.trip
-                                    }
-                                }
-                        }
-                    }
+                    mapContent
                 }
                 .mapStyle(mapStyleFromPreferences)
                 .ignoresSafeArea(edges: .top)
 
-                // Filter Controls
-                VStack {
-                    Spacer()
-
-                    // Activity filter chips
-                    if !activityFilters.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                // All button
-                                FilterChip(
-                                    label: "All",
-                                    icon: "📍",
-                                    isSelected: selectedActivity == nil,
-                                    count: tripsWithLocations.count
-                                ) {
-                                    withAnimation {
-                                        selectedActivity = nil
-                                    }
-                                }
-
-                                // Activity filters
-                                ForEach(activityFilters, id: \.id) { activity in
-                                    let count = tripsWithLocations.filter { $0.activity.id == activity.id }.count
-
-                                    FilterChip(
-                                        label: activity.name,
-                                        icon: activity.icon,
-                                        isSelected: selectedActivity == activity.name,
-                                        count: count
-                                    ) {
-                                        withAnimation {
-                                            selectedActivity = selectedActivity == activity.name ? nil : activity.name
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                    }
-
-                    // Selected trip card
-                    if let trip = selectedTrip {
-                        TripDetailCard(trip: trip) {
-                            withAnimation {
-                                selectedTrip = nil
-                            }
-                        }
-                        .padding()
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
+                filterControls
 
                 // Loading indicator
                 if isLoading {

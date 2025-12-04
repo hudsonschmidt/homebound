@@ -72,8 +72,7 @@ final class Session: ObservableObject {
     // MARK: API & Base URL
 
     static let productionURL = URL(string: "https://api.homeboundapp.com")!
-    static let localURL = URL(string: "http://192.168.6.108:3001")!
-    // static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
+    static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
 
     @Published var useLocalServer: Bool = UserDefaults.standard.bool(forKey: "useLocalServer") {
         didSet {
@@ -172,6 +171,12 @@ final class Session: ObservableObject {
     // Activities
     @Published var activities: [Activity] = []
     @Published var isLoadingActivities: Bool = false
+
+    // Contacts
+    @Published var contacts: [Contact] = []
+
+    // Initial data loading state
+    @Published var isInitialDataLoaded: Bool = false
 
     init() {
         // Load saved tokens and user data on init
@@ -754,6 +759,43 @@ final class Session: ObservableObject {
         }
     }
 
+    func updateTrip(_ tripId: Int, updates: TripUpdateRequest) async -> Trip? {
+        do {
+            let response: Trip = try await withAuth { bearer in
+                try await self.api.put(
+                    self.url("/api/v1/trips/\(tripId)"),
+                    body: updates,
+                    bearer: bearer
+                )
+            }
+
+            debugLog("[Session] Trip \(tripId) updated successfully")
+            return response
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to update trip: \(error.localizedDescription)"
+            }
+            debugLog("[Session] Failed to update trip: \(error)")
+            return nil
+        }
+    }
+
+    /// Load all initial data needed before showing the main app
+    func loadInitialData() async {
+        // Load activities, active trip, profile, and contacts in parallel
+        async let activitiesTask: Void = loadActivities()
+        async let activePlanTask: Void = loadActivePlan()
+        async let profileTask: Void = loadUserProfile()
+        async let contactsTask: [Contact] = loadContacts()
+
+        // Wait for all to complete
+        _ = await (activitiesTask, activePlanTask, profileTask, contactsTask)
+
+        await MainActor.run {
+            isInitialDataLoaded = true
+        }
+    }
+
     func loadActivePlan() async {
         await MainActor.run {
             self.isLoadingTrip = true
@@ -1164,13 +1206,16 @@ final class Session: ObservableObject {
     // MARK: - Saved Contacts Management
     func loadContacts() async -> [Contact] {
         do {
-            let contacts: [Contact] = try await withAuth { bearer in
+            let loadedContacts: [Contact] = try await withAuth { bearer in
                 try await self.api.get(
                     self.url("/api/v1/contacts/"),
                     bearer: bearer
                 )
             }
-            return contacts
+            await MainActor.run {
+                self.contacts = loadedContacts
+            }
+            return loadedContacts
         } catch {
             debugLog("Failed to load saved contacts: \(error.localizedDescription)")
             return []
@@ -1314,6 +1359,8 @@ final class Session: ObservableObject {
         profileCompleted = false
         activeTrip = nil
         activities = []
+        contacts = []
+        isInitialDataLoaded = false
 
         debugLog("[Session] ✅ Sign out complete")
     }

@@ -11,6 +11,7 @@ from src.api.trips import (
     TimelineEvent,
     TripCreate,
     TripResponse,
+    TripUpdate,
     complete_trip,
     create_trip,
     delete_trip,
@@ -18,6 +19,7 @@ from src.api.trips import (
     get_trip,
     get_trip_timeline,
     get_trips,
+    update_trip,
 )
 
 
@@ -504,3 +506,305 @@ def test_get_timeline_nonexistent_trip():
         get_trip_timeline(999999, user_id=1)
 
     assert exc_info.value.status_code == 404
+
+
+# ============================================================================
+# UPDATE TRIP TESTS
+# ============================================================================
+
+def create_planned_trip(user_id: int, contact_id: int, title: str = "Planned Trip"):
+    """Helper to create a trip with 'planned' status (future start time)"""
+    future_start = datetime.now(UTC) + timedelta(hours=24)  # Start tomorrow
+    future_eta = future_start + timedelta(hours=2)
+
+    trip_data = TripCreate(
+        title=title,
+        activity="Hiking",
+        start=future_start,
+        eta=future_eta,
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        notes="Original notes",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "planned"  # Verify it's planned
+    return trip
+
+
+def test_update_trip_title():
+    """Test updating a planned trip's title"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    # Update just the title
+    update_data = TripUpdate(title="Updated Title")
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.title == "Updated Title"
+    assert updated.activity.name == "Hiking"  # Unchanged
+    assert updated.notes == "Original notes"  # Unchanged
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_all_fields():
+    """Test updating all fields of a planned trip"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create a second contact for testing contact updates
+    with db.engine.begin() as connection:
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "name": "Second Contact",
+                "email": "second@example.com"
+            }
+        )
+        contact2_id = result.fetchone()[0]
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    # Update all fields
+    new_start = datetime.now(UTC) + timedelta(hours=48)
+    new_eta = new_start + timedelta(hours=3)
+
+    update_data = TripUpdate(
+        title="Completely Updated",
+        activity="Biking",
+        start=new_start,
+        eta=new_eta,
+        grace_min=60,
+        location_text="New Location",
+        gen_lat=40.7128,
+        gen_lon=-74.0060,
+        notes="Updated notes",
+        contact1=contact2_id,
+        timezone="America/New_York"
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.title == "Completely Updated"
+    assert updated.activity.name == "Biking"
+    assert updated.grace_min == 60
+    assert updated.location_text == "New Location"
+    assert updated.gen_lat == 40.7128
+    assert updated.gen_lon == -74.0060
+    assert updated.notes == "Updated notes"
+    assert updated.contact1 == contact2_id
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_partial_fields():
+    """Test updating only some fields leaves others unchanged"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+    original_lat = trip.gen_lat
+    original_lon = trip.gen_lon
+
+    # Update only grace_min and notes
+    update_data = TripUpdate(
+        grace_min=90,
+        notes="Only notes updated"
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.grace_min == 90
+    assert updated.notes == "Only notes updated"
+    # These should be unchanged
+    assert updated.title == "Planned Trip"
+    assert updated.gen_lat == original_lat
+    assert updated.gen_lon == original_lon
+    assert updated.activity.name == "Hiking"
+
+    cleanup_test_data(user_id)
+
+
+def test_update_active_trip_fails():
+    """Test that updating an active trip fails"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create an active trip (start time in the past)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Active Trip",
+        activity="Hiking",
+        start=now,  # Starts now, so status will be 'active'
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "active"
+
+    # Try to update
+    update_data = TripUpdate(title="Should Fail")
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_trip(trip.id, update_data, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+    assert "planned" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_update_completed_trip_fails():
+    """Test that updating a completed trip fails"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create and complete a trip
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Completed Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    complete_trip(trip.id, user_id=user_id)
+
+    # Try to update
+    update_data = TripUpdate(title="Should Fail")
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_trip(trip.id, update_data, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+    assert "planned" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_update_nonexistent_trip():
+    """Test updating a trip that doesn't exist"""
+    user_id, _ = setup_test_user_and_contact()
+
+    update_data = TripUpdate(title="Should Fail")
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_trip(999999, update_data, user_id=user_id)
+
+    assert exc_info.value.status_code == 404
+    assert "not found" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_invalid_activity():
+    """Test updating trip with non-existent activity"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    update_data = TripUpdate(activity="NonExistentActivity")
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_trip(trip.id, update_data, user_id=user_id)
+
+    assert exc_info.value.status_code == 404
+    assert "activity" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_invalid_contact():
+    """Test updating trip with non-existent contact"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    update_data = TripUpdate(contact1=999999)  # Non-existent contact
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_trip(trip.id, update_data, user_id=user_id)
+
+    assert exc_info.value.status_code == 404
+    assert "contact" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_other_users_trip():
+    """Test that a user cannot update another user's trip"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    # Create another user
+    with db.engine.begin() as connection:
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": "other@example.com",
+                "first_name": "Other",
+                "last_name": "User",
+                "age": 25
+            }
+        )
+        other_user_id = result.fetchone()[0]
+
+    # Try to update as other user
+    update_data = TripUpdate(title="Hacked!")
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_trip(trip.id, update_data, user_id=other_user_id)
+
+    assert exc_info.value.status_code == 404  # Trip not found for this user
+
+    # Clean up other user
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": other_user_id}
+        )
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_empty_update():
+    """Test updating trip with no fields (should return unchanged trip)"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    # Update with empty data
+    update_data = TripUpdate()
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    # Trip should be unchanged
+    assert updated.title == trip.title
+    assert updated.activity.name == trip.activity.name
+    assert updated.grace_min == trip.grace_min
+    assert updated.notes == trip.notes
+
+    cleanup_test_data(user_id)

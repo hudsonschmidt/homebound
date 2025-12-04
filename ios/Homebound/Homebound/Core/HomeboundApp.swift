@@ -22,6 +22,13 @@ struct HomeboundApp: App {
                     AuthenticationView()
                         .environmentObject(session)
                         .environmentObject(preferences)
+                } else if !session.isInitialDataLoaded {
+                    // Authenticated but data not yet loaded - show loading screen
+                    LoadingScreen()
+                        .task {
+                            await session.loadInitialData()
+                        }
+                        .transition(.opacity)
                 } else if !session.profileCompleted {
                     // Authenticated but profile not complete - show onboarding
                     OnboardingView()
@@ -47,6 +54,7 @@ struct HomeboundApp: App {
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: session.accessToken)
+            .animation(.easeInOut(duration: 0.3), value: session.isInitialDataLoaded)
             .animation(.easeInOut(duration: 0.3), value: session.profileCompleted)
             .preferredColorScheme(preferences.colorScheme.colorScheme)
         }

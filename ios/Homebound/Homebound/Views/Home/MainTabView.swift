@@ -117,6 +117,7 @@ struct NewHomeView: View {
                     }
                     .padding(.bottom, 100)
                 }
+                .scrollIndicators(.hidden)
             }
             .navigationBarHidden(true)
             .sheet(isPresented: $showingCreatePlan) {
@@ -325,11 +326,11 @@ struct ActivePlanCardCompact: View {
     }
 
     var bannerOpacity: Double {
-        pulseAnimation ? 0.9 : 0.7
+        0.8
     }
 
     var borderOpacity: Double {
-        pulseAnimation ? 1.0 : 0.5
+        0.75
     }
 
     var body: some View {
@@ -706,6 +707,7 @@ struct UpcomingTripsSection: View {
     @State private var currentTime = Date()
     @State private var startingTripId: Int? = nil
     @State private var failedTripIds: Set<Int> = [] // Track trips that failed to start
+    @State private var tripToEdit: Trip? = nil
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -729,14 +731,19 @@ struct UpcomingTripsSection: View {
                 .cornerRadius(12)
             } else {
                 ForEach(upcomingPlans) { plan in
-                    UpcomingTripCard(
-                        plan: plan,
-                        currentTime: currentTime,
-                        isStarting: startingTripId == plan.id,
-                        onStartTrip: { tripId in
-                            startTrip(tripId)
-                        }
-                    )
+                    SwipeToEditContainer(onEdit: { tripToEdit = plan }) {
+                        UpcomingTripCard(
+                            plan: plan,
+                            currentTime: currentTime,
+                            isStarting: startingTripId == plan.id,
+                            onStartTrip: { tripId in
+                                startTrip(tripId)
+                            },
+                            onEdit: {
+                                tripToEdit = plan
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -761,6 +768,15 @@ struct UpcomingTripsSection: View {
             Task {
                 await loadUpcomingPlans()
             }
+        }
+        .sheet(item: $tripToEdit) { trip in
+            CreatePlanView(existingTrip: trip)
+                .environmentObject(session)
+                .onDisappear {
+                    Task {
+                        await loadUpcomingPlans()
+                    }
+                }
         }
     }
 
@@ -822,6 +838,7 @@ struct UpcomingTripCard: View {
     let currentTime: Date
     var isStarting: Bool = false
     var onStartTrip: ((Int) -> Void)? = nil
+    var onEdit: (() -> Void)? = nil
 
     var activity: ActivityTypeAdapter {
         ActivityTypeAdapter(activity: plan.activity)
@@ -917,6 +934,15 @@ struct UpcomingTripCard: View {
         .background(shouldStart ? Color.green.opacity(0.1) : Color(.tertiarySystemBackground))
         .cornerRadius(12)
         .animation(.easeInOut(duration: 0.3), value: shouldStart)
+        .contextMenu {
+            if let onEdit = onEdit {
+                Button {
+                    onEdit()
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+            }
+        }
     }
 
     private func formatCountdown(_ interval: TimeInterval) -> String {
@@ -933,6 +959,75 @@ struct UpcomingTripCard: View {
             return "\(minutes)m \(seconds)s"
         } else {
             return "\(seconds)s"
+        }
+    }
+}
+
+// MARK: - Swipe to Edit Container
+struct SwipeToEditContainer<Content: View>: View {
+    let onEdit: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    @State private var offset: CGFloat = 0
+    @State private var isRevealed = false
+    private let buttonWidth: CGFloat = 74
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            // Edit button - circular like native iOS swipe actions
+            Button(action: {
+                withAnimation(.spring(response: 0.3)) {
+                    offset = 0
+                    isRevealed = false
+                }
+                onEdit()
+            }) {
+                VStack(spacing: 4) {
+                    // Circular button with icon
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 52, height: 52)
+                        .overlay(
+                            Image(systemName: "pencil")
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(.white)
+                        )
+
+                    Text("Edit")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.blue)
+                }
+            }
+            .frame(width: buttonWidth)
+            .offset(x: 8)
+
+            // Main card content
+            content()
+                .offset(x: offset)
+                .gesture(
+                    DragGesture(minimumDistance: 15)
+                        .onChanged { value in
+                            let translation = value.translation.width
+                            if translation < 0 {
+                                // Swiping left - reveal edit button
+                                offset = max(translation, -buttonWidth - 10)
+                            } else if isRevealed {
+                                // Swiping right to close
+                                offset = min(0, -buttonWidth + translation)
+                            }
+                        }
+                        .onEnded { value in
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                if value.translation.width < -35 {
+                                    offset = -buttonWidth
+                                    isRevealed = true
+                                } else {
+                                    offset = 0
+                                    isRevealed = false
+                                }
+                            }
+                        }
+                )
         }
     }
 }

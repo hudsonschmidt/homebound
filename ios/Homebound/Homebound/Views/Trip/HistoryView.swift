@@ -8,6 +8,7 @@ struct HistoryView: View {
     @State private var searchText = ""
     @State private var errorMessage: String?
     @State private var loadTask: Task<Void, Never>?
+    @State private var tripToEdit: Trip?
 
     // Presentation mode - controls whether this is shown as a tab or modal
     var showAsTab: Bool = false
@@ -102,12 +103,22 @@ struct HistoryView: View {
                                         } label: {
                                             Label("Delete", systemImage: "trash")
                                         }
+
+                                        if plan.status == "planned" {
+                                            Button {
+                                                tripToEdit = plan
+                                            } label: {
+                                                Label("Edit", systemImage: "pencil")
+                                            }
+                                            .tint(.blue)
+                                        }
                                     }
                             }
                         }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    .scrollIndicators(.hidden)
                 }
             }
             .navigationTitle("Trip History")
@@ -132,6 +143,16 @@ struct HistoryView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .sheet(item: $tripToEdit) { trip in
+                CreatePlanView(existingTrip: trip)
+                    .environmentObject(session)
+                    .onDisappear {
+                        // Refresh the list after editing
+                        Task {
+                            await loadAllPlans()
+                        }
+                    }
             }
             .onDisappear {
                 loadTask?.cancel()
@@ -651,6 +672,7 @@ struct EditStatsView: View {
                     .foregroundStyle(.red)
                 }
             }
+            .scrollIndicators(.hidden)
             .navigationTitle("Edit Stats")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

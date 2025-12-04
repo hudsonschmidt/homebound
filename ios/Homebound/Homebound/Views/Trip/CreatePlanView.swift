@@ -5,6 +5,10 @@ struct CreatePlanView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
 
+    // Edit mode support
+    var existingTrip: Trip? = nil
+    var isEditMode: Bool { existingTrip != nil }
+
     // Current step tracking
     @State private var currentStep = 1
     let totalSteps = 4
@@ -87,6 +91,7 @@ struct CreatePlanView: View {
                             Step4AdditionalNotes(
                                 notes: $notes,
                                 isCreating: $isCreating,
+                                isEditMode: isEditMode,
                                 onSubmit: createPlan
                             )
                         default:
@@ -136,13 +141,39 @@ struct CreatePlanView: View {
                     .padding(.bottom, 30)
                 }
             }
-            .navigationTitle("New Adventure")
+            .navigationTitle(isEditMode ? "Edit Trip" : "New Adventure")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 // Apply default activity from preferences (only once)
                 if !hasAppliedDefaults {
                     hasAppliedDefaults = true
-                    if let defaultActivityId = AppPreferences.shared.defaultActivityId,
+
+                    if let trip = existingTrip {
+                        // Pre-populate fields from existing trip for edit mode
+                        planTitle = trip.title
+                        selectedActivity = trip.activity.name.lowercased().replacingOccurrences(of: " ", with: "_")
+                        location = trip.location_text ?? ""
+                        if let lat = trip.location_lat, let lng = trip.location_lng, lat != 0 || lng != 0 {
+                            locationCoordinates = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                        }
+                        startTime = trip.start_at
+                        etaTime = trip.eta_at
+                        isManualETA = true  // Treat existing ETA as manually set
+                        graceMinutes = Double(trip.grace_minutes)
+                        notes = trip.notes ?? ""
+
+                        // Pre-populate contacts from existing trip
+                        let contactIds = [trip.contact1, trip.contact2, trip.contact3].compactMap { $0 }
+                        for contactId in contactIds {
+                            if let savedContact = session.contacts.first(where: { $0.id == contactId }) {
+                                contacts.append(EmergencyContact(
+                                    name: savedContact.name,
+                                    email: savedContact.email ?? "",
+                                    savedContactId: savedContact.id
+                                ))
+                            }
+                        }
+                    } else if let defaultActivityId = AppPreferences.shared.defaultActivityId,
                        let activity = session.activities.first(where: { $0.id == defaultActivityId }) {
                         selectedActivity = activity.name.lowercased().replacingOccurrences(of: " ", with: "_")
                     }
@@ -254,37 +285,70 @@ struct CreatePlanView: View {
                 }
             }
 
-            // Step 2: Create plan with contact IDs
             // Get user's timezone identifier (e.g., "America/New_York")
             let userTimezone = TimeZone.current.identifier
 
-            let plan = TripCreateRequest(
-                title: planTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                activity: selectedActivity,
-                start: startTime,
-                eta: etaTime,
-                grace_min: Int(graceMinutes),
-                location_text: location.trimmingCharacters(in: .whitespacesAndNewlines),
-                gen_lat: locationCoordinates?.latitude,
-                gen_lon: locationCoordinates?.longitude,
-                notes: notes.isEmpty ? nil : notes,
-                contact1: contactIds.count > 0 ? contactIds[0] : nil,
-                contact2: contactIds.count > 1 ? contactIds[1] : nil,
-                contact3: contactIds.count > 2 ? contactIds[2] : nil,
-                timezone: userTimezone
-            )
+            if isEditMode, let tripId = existingTrip?.id {
+                // Update existing trip
+                let updates = TripUpdateRequest(
+                    title: planTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                    activity: selectedActivity,
+                    start: startTime,
+                    eta: etaTime,
+                    grace_min: Int(graceMinutes),
+                    location_text: location.trimmingCharacters(in: .whitespacesAndNewlines),
+                    gen_lat: locationCoordinates?.latitude,
+                    gen_lon: locationCoordinates?.longitude,
+                    notes: notes.isEmpty ? nil : notes,
+                    contact1: contactIds.count > 0 ? contactIds[0] : nil,
+                    contact2: contactIds.count > 1 ? contactIds[1] : nil,
+                    contact3: contactIds.count > 2 ? contactIds[2] : nil,
+                    timezone: userTimezone
+                )
 
-            let createdPlan = await session.createPlan(plan)
+                let updatedTrip = await session.updateTrip(tripId, updates: updates)
 
-            await MainActor.run {
-                isCreating = false
-                if createdPlan != nil {
-                    // Notify that a trip was created so UpcomingTripsSection can refresh
-                    NotificationCenter.default.post(name: .tripCreated, object: nil)
-                    dismiss()
-                } else {
-                    errorMessage = session.lastError.isEmpty ? "Failed to create plan" : session.lastError
-                    showError = true
+                await MainActor.run {
+                    isCreating = false
+                    if updatedTrip != nil {
+                        // Notify that a trip was updated so lists can refresh
+                        NotificationCenter.default.post(name: .tripCreated, object: nil)
+                        dismiss()
+                    } else {
+                        errorMessage = session.lastError.isEmpty ? "Failed to update trip" : session.lastError
+                        showError = true
+                    }
+                }
+            } else {
+                // Create new plan
+                let plan = TripCreateRequest(
+                    title: planTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                    activity: selectedActivity,
+                    start: startTime,
+                    eta: etaTime,
+                    grace_min: Int(graceMinutes),
+                    location_text: location.trimmingCharacters(in: .whitespacesAndNewlines),
+                    gen_lat: locationCoordinates?.latitude,
+                    gen_lon: locationCoordinates?.longitude,
+                    notes: notes.isEmpty ? nil : notes,
+                    contact1: contactIds.count > 0 ? contactIds[0] : nil,
+                    contact2: contactIds.count > 1 ? contactIds[1] : nil,
+                    contact3: contactIds.count > 2 ? contactIds[2] : nil,
+                    timezone: userTimezone
+                )
+
+                let createdPlan = await session.createPlan(plan)
+
+                await MainActor.run {
+                    isCreating = false
+                    if createdPlan != nil {
+                        // Notify that a trip was created so UpcomingTripsSection can refresh
+                        NotificationCenter.default.post(name: .tripCreated, object: nil)
+                        dismiss()
+                    } else {
+                        errorMessage = session.lastError.isEmpty ? "Failed to create plan" : session.lastError
+                        showError = true
+                    }
                 }
             }
         }
@@ -373,7 +437,10 @@ struct Step1TripDetails: View {
                         showingLocationSearch = true
                     }) {
                         HStack {
-                            if !location.isEmpty {
+                            if location.isEmpty {
+                                Text("Search for a place...")
+                                    .foregroundStyle(.secondary)
+                            } else {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(location)
                                         .foregroundStyle(.primary)
@@ -406,6 +473,7 @@ struct Step1TripDetails: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .scrollIndicators(.hidden)
         .sheet(isPresented: $showingLocationSearch) {
             LocationSearchView(
                 selectedLocation: $location,
@@ -859,6 +927,7 @@ struct Step2TimeSettings: View {
             }
             .padding(.horizontal)
         }
+        .scrollIndicators(.hidden)
         .onAppear {
             // Initialize with current date/time values
             selectedStartDate = startTime
@@ -1409,6 +1478,7 @@ struct Step3EmergencyContacts: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .scrollIndicators(.hidden)
         .task {
             await loadContacts()
         }
@@ -1435,6 +1505,7 @@ struct Step3EmergencyContacts: View {
 struct Step4AdditionalNotes: View {
     @Binding var notes: String
     @Binding var isCreating: Bool
+    var isEditMode: Bool = false
     let onSubmit: () -> Void
 
     var body: some View {
@@ -1471,14 +1542,14 @@ struct Step4AdditionalNotes: View {
 
                 // Ready to Go Section
                 VStack(spacing: 16) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: isEditMode ? "pencil.circle.fill" : "checkmark.circle.fill")
                         .font(.system(size: 48))
                         .foregroundStyle(Color.hbAccent)
 
-                    Text("Ready to start your adventure?")
+                    Text(isEditMode ? "Ready to save changes?" : "Ready to start your adventure?")
                         .font(.headline)
 
-                    Text("We'll keep track of your journey and notify your contacts if needed")
+                    Text(isEditMode ? "Your trip details will be updated" : "We'll keep track of your journey and notify your contacts if needed")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -1486,7 +1557,7 @@ struct Step4AdditionalNotes: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 30)
 
-                // Start Adventure Button
+                // Start Adventure / Save Changes Button
                 Button(action: onSubmit) {
                     HStack {
                         if isCreating {
@@ -1494,8 +1565,8 @@ struct Step4AdditionalNotes: View {
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                 .scaleEffect(0.9)
                         } else {
-                            Image(systemName: "flag.checkered")
-                            Text("Start Adventure")
+                            Image(systemName: isEditMode ? "checkmark" : "flag.checkered")
+                            Text(isEditMode ? "Save Changes" : "Start Adventure")
                                 .fontWeight(.semibold)
                         }
                     }
@@ -1515,6 +1586,7 @@ struct Step4AdditionalNotes: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .scrollIndicators(.hidden)
     }
 }
 
@@ -1701,6 +1773,7 @@ struct ContactsSelectionSheet: View {
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .scrollIndicators(.hidden)
                 }
             }
             .navigationTitle("Choose Contacts")

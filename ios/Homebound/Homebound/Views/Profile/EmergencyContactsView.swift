@@ -80,6 +80,7 @@ struct EmergencyContactsView: View {
                     }
                     .listRowBackground(Color(.secondarySystemBackground))
                 }
+                .scrollIndicators(.hidden)
             }
         }
         .navigationTitle("Emergency Contacts")

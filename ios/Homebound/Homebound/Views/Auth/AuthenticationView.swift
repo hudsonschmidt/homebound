@@ -24,16 +24,10 @@ struct AuthenticationView: View {
 
                     // Logo and Title
                     VStack(spacing: 20) {
-                        // App Icon/Logo
-                        ZStack {
-                            Circle()
-                                .fill(Color.hbBrand.opacity(0.1))
-                                .frame(width: 100, height: 100)
-
-                            Image(systemName: "location.north.circle.fill")
-                                .font(.system(size: 60))
-                                .foregroundStyle(Color.hbBrand)
-                        }
+                        Image("Logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 100, height: 100)
 
                         Text("Homebound")
                             .font(.system(size: 38, weight: .bold, design: .rounded))
@@ -239,6 +233,7 @@ struct AuthenticationView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .scrollIndicators(.hidden)
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) {

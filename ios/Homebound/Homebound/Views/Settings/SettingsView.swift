@@ -465,6 +465,7 @@ struct SettingsView: View {
                     .listRowBackground(Color.clear)
                 }
             }
+            .scrollIndicators(.hidden)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -679,6 +680,7 @@ struct AccountView: View {
                 .disabled(isDeleting)
             }
         }
+        .scrollIndicators(.hidden)
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -864,6 +866,7 @@ struct CustomizationView: View {
                 Text("Units & Formats")
             }
         }
+        .scrollIndicators(.hidden)
         .navigationTitle("Customization")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -949,6 +952,7 @@ struct NotificationSettingsView: View {
                 Text("Emergency notifications are high priority and will override Do Not Disturb.")
             }
         }
+        .scrollIndicators(.hidden)
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -1077,6 +1081,7 @@ struct PrivacyView: View {
                 Text("Data cached on your device for offline access. Clear this in Settings > Resources > Clear Cache.")
             }
         }
+        .scrollIndicators(.hidden)
         .navigationTitle("Privacy")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -1186,6 +1191,7 @@ struct AboutView: View {
                 }
             }
         }
+        .scrollIndicators(.hidden)
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
     }
