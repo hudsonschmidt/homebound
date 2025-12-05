@@ -16,6 +16,13 @@ struct LocationSearchView: View {
     @State private var isGettingCurrentLocation = false
     @State private var showLocationDeniedAlert = false
 
+    // Map picker state
+    @State private var showingMapPicker = false
+    @State private var mapPinCoordinate: CLLocationCoordinate2D?
+    @State private var mapSelectedAddress: String = ""
+    @State private var isReverseGeocoding = false
+    @State private var mapCameraPosition: MapCameraPosition = .automatic
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -101,7 +108,113 @@ struct LocationSearchView: View {
                             }
                             .disabled(isGettingCurrentLocation)
                         }
-                        
+
+                        // Map Picker Section
+                        Section {
+                            DisclosureGroup(isExpanded: $showingMapPicker) {
+                                VStack(spacing: 12) {
+                                    // Map view
+                                    MapReader { proxy in
+                                        Map(position: $mapCameraPosition) {
+                                            // User location
+                                            UserAnnotation()
+
+                                            // Selected pin
+                                            if let coordinate = mapPinCoordinate {
+                                                Annotation("", coordinate: coordinate) {
+                                                    Image(systemName: "mappin.circle.fill")
+                                                        .font(.title)
+                                                        .foregroundStyle(Color.hbBrand)
+                                                        .background(
+                                                            Circle()
+                                                                .fill(.white)
+                                                                .frame(width: 24, height: 24)
+                                                        )
+                                                }
+                                            }
+                                        }
+                                        .mapStyle(.standard)
+                                        .mapControls {
+                                            MapUserLocationButton()
+                                        }
+                                        .frame(height: 200)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .onTapGesture { position in
+                                            if let coordinate = proxy.convert(position, from: .local) {
+                                                mapPinCoordinate = coordinate
+                                                Task {
+                                                    await reverseGeocodeMapPin(coordinate)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Address preview
+                                    if isReverseGeocoding {
+                                        HStack {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                            Text("Getting address...")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    } else if !mapSelectedAddress.isEmpty {
+                                        Text(mapSelectedAddress)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                            .multilineTextAlignment(.center)
+                                    } else if mapPinCoordinate == nil {
+                                        Text("Tap on the map to select a location")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    // Use this location button
+                                    if mapPinCoordinate != nil && !mapSelectedAddress.isEmpty && !isReverseGeocoding {
+                                        Button(action: {
+                                            selectedLocation = mapSelectedAddress
+                                            selectedCoordinates = mapPinCoordinate
+                                            isPresented = false
+                                        }) {
+                                            Text("Use this location")
+                                                .font(.subheadline)
+                                                .fontWeight(.semibold)
+                                                .foregroundStyle(.white)
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 12)
+                                                .background(Color.hbBrand)
+                                                .cornerRadius(10)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                            } label: {
+                                HStack {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.hbBrand.opacity(0.2))
+                                            .frame(width: 40, height: 40)
+
+                                        Image(systemName: "map")
+                                            .foregroundStyle(Color.hbBrand)
+                                            .font(.system(size: 18))
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Select on Map")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.primary)
+
+                                        Text("Tap to choose a location visually")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .tint(.primary)
+                        }
+
                     } else {
                         // Search Results
                         if searchCompleter.searchResults.isEmpty && !searchText.isEmpty {
@@ -214,65 +327,15 @@ struct LocationSearchView: View {
             }
 
             if let location = await locationManager.getCurrentLocation() {
-                // Reverse geocode to get actual address using modern MapKit API
-                let request = MKLocalSearch.Request()
-                request.resultTypes = .address
-                request.region = MKCoordinateRegion(
-                    center: location,
-                    span: MKCoordinateSpan(latitudeDelta: 0.001, longitudeDelta: 0.001)
-                )
+                // Reverse geocode to get street-level address using CLGeocoder
+                let address = await reverseGeocodeCoordinate(location)
 
-                let search = MKLocalSearch(request: request)
-
-                do {
-                    let response = try await search.start()
-
-                    if let item = response.mapItems.first {
-                        // Use the map item name and address
-                        var addressComponents: [String] = []
-
-                        if let name = item.name, !name.isEmpty {
-                            addressComponents.append(name)
-                        }
-
-                        if let locality = item.placemark.locality {
-                            addressComponents.append(locality)
-                        }
-
-                        if let state = item.placemark.administrativeArea {
-                            addressComponents.append(state)
-                        }
-
-                        let address = addressComponents.joined(separator: ", ")
-
-                        // Use "Current Location" as fallback if address is empty (coordinates stored separately)
-                        let locationDescription = address.isEmpty ? "Current Location" : address
-
-                        await MainActor.run {
-                            selectedLocation = locationDescription
-                            selectedCoordinates = location
-                            isGettingCurrentLocation = false
-                            isPresented = false
-                            debugLog("[LocationSearch] ✅ Current location: \(locationDescription)")
-                        }
-                    } else {
-                        // Fallback if no items found - use "Current Location" (coordinates stored separately)
-                        await MainActor.run {
-                            selectedLocation = "Current Location"
-                            selectedCoordinates = location
-                            isGettingCurrentLocation = false
-                            isPresented = false
-                        }
-                    }
-                } catch {
-                    debugLog("[LocationSearch] Reverse geocoding failed: \(error)")
-                    // Fallback to "Current Location" if geocoding fails (coordinates stored separately)
-                    await MainActor.run {
-                        selectedLocation = "Current Location"
-                        selectedCoordinates = location
-                        isGettingCurrentLocation = false
-                        isPresented = false
-                    }
+                await MainActor.run {
+                    selectedLocation = address
+                    selectedCoordinates = location
+                    isGettingCurrentLocation = false
+                    isPresented = false
+                    debugLog("[LocationSearch] ✅ Current location: \(address)")
                 }
             } else {
                 await MainActor.run {
@@ -303,6 +366,75 @@ struct LocationSearchView: View {
                 selectedLocation = result.title
                 isPresented = false
             }
+        }
+    }
+
+    // MARK: - Reverse Geocoding Helpers
+
+    /// Reverse geocodes a coordinate to a street-level address using CLGeocoder
+    private func reverseGeocodeCoordinate(_ coordinate: CLLocationCoordinate2D) async -> String {
+        let geocoder = CLGeocoder()
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+
+        do {
+            let placemarks = try await geocoder.reverseGeocodeLocation(location)
+
+            if let placemark = placemarks.first {
+                return formatAddress(from: placemark)
+            }
+        } catch {
+            debugLog("[LocationSearch] Reverse geocoding failed: \(error)")
+        }
+
+        return "Current Location"
+    }
+
+    /// Formats a placemark into a readable address string
+    private func formatAddress(from placemark: CLPlacemark) -> String {
+        var components: [String] = []
+
+        // Street address (number + street name)
+        if let subThoroughfare = placemark.subThoroughfare,
+           let thoroughfare = placemark.thoroughfare {
+            components.append("\(subThoroughfare) \(thoroughfare)")
+        } else if let thoroughfare = placemark.thoroughfare {
+            components.append(thoroughfare)
+        }
+
+        // City
+        if let locality = placemark.locality {
+            components.append(locality)
+        }
+
+        // State
+        if let administrativeArea = placemark.administrativeArea {
+            components.append(administrativeArea)
+        }
+
+        // Return formatted address or fallback
+        if components.isEmpty {
+            // Try name as last resort (e.g., "Golden Gate Bridge")
+            if let name = placemark.name, !name.isEmpty {
+                return name
+            }
+            return "Current Location"
+        }
+
+        return components.joined(separator: ", ")
+    }
+
+    /// Reverse geocodes a map pin tap and updates the address preview
+    private func reverseGeocodeMapPin(_ coordinate: CLLocationCoordinate2D) async {
+        await MainActor.run {
+            isReverseGeocoding = true
+            mapSelectedAddress = ""
+        }
+
+        let address = await reverseGeocodeCoordinate(coordinate)
+
+        await MainActor.run {
+            mapSelectedAddress = address
+            isReverseGeocoding = false
         }
     }
 }
