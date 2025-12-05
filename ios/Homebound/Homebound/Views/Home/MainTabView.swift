@@ -33,6 +33,56 @@ struct MainTabView: View {
     }
 }
 
+// MARK: - Offline Status Banner
+struct OfflineStatusBanner: View {
+    @EnvironmentObject var session: Session
+    @StateObject private var networkMonitor = NetworkMonitor.shared
+
+    var isVisible: Bool {
+        !networkMonitor.isConnected || session.pendingActionsCount > 0
+    }
+
+    var body: some View {
+        if isVisible {
+            HStack(spacing: 10) {
+                if !networkMonitor.isConnected {
+                    Image(systemName: "wifi.slash")
+                        .font(.subheadline)
+                    Text("Offline Mode")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                } else if session.pendingActionsCount > 0 {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Syncing \(session.pendingActionsCount) action\(session.pendingActionsCount == 1 ? "" : "s")...")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+
+                Spacer()
+
+                if session.pendingActionsCount > 0 && !networkMonitor.isConnected {
+                    Text("\(session.pendingActionsCount)")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Circle().fill(Color.orange))
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(!networkMonitor.isConnected ? Color.orange : Color.blue)
+            )
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+}
+
 // MARK: - New Home View with Big Trip Card
 struct NewHomeView: View {
     @EnvironmentObject var session: Session
@@ -96,6 +146,11 @@ struct NewHomeView: View {
                         }
                         .padding(.horizontal)
                         .padding(.top, 8)
+
+                        // Offline status banner
+                        OfflineStatusBanner()
+                            .padding(.horizontal)
+                            .animation(.spring(response: 0.3), value: session.pendingActionsCount)
 
                         // Check for active plan first
                         if let activeTrip = session.activeTrip {

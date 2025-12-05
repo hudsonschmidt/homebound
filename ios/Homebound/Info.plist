@@ -75,5 +75,16 @@
 	<string>Homebound needs your location to track your safety during trips and notify contacts if needed.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.homeboundapp.Homebound.refresh</string>
+		<string>com.homeboundapp.Homebound.processing</string>
+	</array>
 </dict>
 </plist>

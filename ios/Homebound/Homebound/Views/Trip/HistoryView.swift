@@ -1,14 +1,48 @@
 import SwiftUI
 
+// MARK: - Offline Disclaimer Banner
+struct OfflineDisclaimerBanner: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "icloud.slash")
+                .font(.title3)
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Viewing Cached Data")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text("Showing last 25 trips. Connect to internet to see all trips.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.orange.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+}
+
 struct HistoryView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @State private var allPlans: [Trip] = []
     @State private var isLoading = true
     @State private var searchText = ""
     @State private var errorMessage: String?
     @State private var loadTask: Task<Void, Never>?
     @State private var tripToEdit: Trip?
+    @State private var isShowingCachedData = false
 
     // Presentation mode - controls whether this is shown as a tab or modal
     var showAsTab: Bool = false
@@ -56,6 +90,16 @@ struct HistoryView: View {
                     EmptyHistoryView(hasSearchText: !searchText.isEmpty)
                 } else {
                     List {
+                        // Offline Disclaimer Banner
+                        if isShowingCachedData || !networkMonitor.isConnected {
+                            Section {
+                                OfflineDisclaimerBanner()
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+
                         // Stats Section (optional - respects user preference)
                         if showStats && AppPreferences.shared.showStats && !allPlans.isEmpty {
                             Section {
@@ -172,6 +216,7 @@ struct HistoryView: View {
             await MainActor.run {
                 isLoading = true
                 errorMessage = nil
+                isShowingCachedData = false
             }
 
             do {
@@ -183,12 +228,16 @@ struct HistoryView: View {
 
                 debugLog("[HistoryView] 📥 Loaded \(plans.count) total trips from backend")
 
+                // Cache trips for offline access
+                LocalStorage.shared.cacheTrips(plans)
+
                 // Check if task was cancelled before updating UI
                 guard !Task.isCancelled else { return }
 
                 await MainActor.run {
                     self.allPlans = plans
                     self.isLoading = false
+                    self.isShowingCachedData = false
                 }
             } catch {
                 debugLog("[HistoryView] ❌ Failed to load history: \(error)")
@@ -198,15 +247,22 @@ struct HistoryView: View {
 
                 // Only show error if not cancelled
                 if !Task.isCancelled {
-                    let errorText = error.localizedDescription
-                    if !errorText.contains("cancelled") {
-                        await MainActor.run {
-                            self.isLoading = false
-                            errorMessage = "Failed to load history: \(errorText)"
-                        }
-                    } else {
-                        await MainActor.run {
-                            self.isLoading = false
+                    // Try to load from cache when offline
+                    let cachedTrips = LocalStorage.shared.getCachedTrips()
+
+                    await MainActor.run {
+                        self.isLoading = false
+
+                        if !cachedTrips.isEmpty {
+                            // Show cached data with disclaimer
+                            self.allPlans = cachedTrips
+                            self.isShowingCachedData = true
+                            debugLog("[HistoryView] 📦 Showing \(cachedTrips.count) cached trips")
+                        } else {
+                            let errorText = error.localizedDescription
+                            if !errorText.contains("cancelled") {
+                                errorMessage = "Failed to load history: \(errorText)"
+                            }
                         }
                     }
                 }

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UserNotifications
+import BackgroundTasks
 
 @main
 struct HomeboundApp: App {
@@ -82,13 +83,128 @@ struct HomeboundApp: App {
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    // Background task identifiers
+    private let backgroundRefreshTaskIdentifier = "com.homeboundapp.Homebound.refresh"
+    private let backgroundProcessingTaskIdentifier = "com.homeboundapp.Homebound.processing"
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         // Set ourselves as the notification center delegate
         UNUserNotificationCenter.current().delegate = self
+
+        // Register background tasks
+        registerBackgroundTasks()
+
         return true
+    }
+
+    // MARK: - Background Tasks
+
+    private func registerBackgroundTasks() {
+        // Register for app refresh (short tasks, ~30 seconds)
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: backgroundRefreshTaskIdentifier,
+            using: nil
+        ) { task in
+            self.handleAppRefresh(task: task as! BGAppRefreshTask)
+        }
+
+        // Register for processing tasks (longer tasks, when plugged in)
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: backgroundProcessingTaskIdentifier,
+            using: nil
+        ) { task in
+            self.handleProcessingTask(task: task as! BGProcessingTask)
+        }
+
+        debugLog("[AppDelegate] ✅ Background tasks registered")
+    }
+
+    private func handleAppRefresh(task: BGAppRefreshTask) {
+        debugLog("[AppDelegate] 🔄 Handling background app refresh")
+
+        // Schedule the next refresh
+        scheduleAppRefresh()
+
+        // Create a task to sync pending actions
+        let syncTask = Task {
+            // Post notification to trigger sync in Session
+            NotificationCenter.default.post(name: .backgroundSyncRequested, object: nil)
+
+            // Wait a bit for the sync to complete (max 25 seconds to stay within limit)
+            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+        }
+
+        // Handle task expiration
+        task.expirationHandler = {
+            syncTask.cancel()
+            debugLog("[AppDelegate] ⚠️ Background refresh task expired")
+        }
+
+        // Complete the task
+        Task {
+            await syncTask.value
+            task.setTaskCompleted(success: true)
+            debugLog("[AppDelegate] ✅ Background refresh task completed")
+        }
+    }
+
+    private func handleProcessingTask(task: BGProcessingTask) {
+        debugLog("[AppDelegate] 🔄 Handling background processing task")
+
+        // Schedule the next processing task
+        scheduleProcessingTask()
+
+        // Create a task to sync pending actions
+        let syncTask = Task {
+            // Post notification to trigger sync in Session
+            NotificationCenter.default.post(name: .backgroundSyncRequested, object: nil)
+
+            // Processing tasks have more time, wait longer
+            try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+        }
+
+        // Handle task expiration
+        task.expirationHandler = {
+            syncTask.cancel()
+            debugLog("[AppDelegate] ⚠️ Background processing task expired")
+        }
+
+        // Complete the task
+        Task {
+            await syncTask.value
+            task.setTaskCompleted(success: true)
+            debugLog("[AppDelegate] ✅ Background processing task completed")
+        }
+    }
+
+    func scheduleAppRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: backgroundRefreshTaskIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            debugLog("[AppDelegate] ✅ Scheduled background refresh for ~15 minutes")
+        } catch {
+            debugLog("[AppDelegate] ❌ Failed to schedule background refresh: \(error)")
+        }
+    }
+
+    func scheduleProcessingTask() {
+        let request = BGProcessingTaskRequest(identifier: backgroundProcessingTaskIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 60 * 60) // 1 hour
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            debugLog("[AppDelegate] ✅ Scheduled background processing for ~1 hour")
+        } catch {
+            debugLog("[AppDelegate] ❌ Failed to schedule background processing: \(error)")
+        }
     }
 
     func application(
@@ -104,6 +220,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         debugLog("APNs registration failed: \(error)")
+    }
+
+    // MARK: - Silent Push Notifications (Background Sync)
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        debugLog("[AppDelegate] 📬 Received remote notification")
+
+        // Check if this is a sync notification
+        if let sync = userInfo["sync"] as? String, sync == "pending_actions" {
+            debugLog("[AppDelegate] 🔄 Silent push: syncing pending actions")
+
+            // Post notification to trigger sync in Session
+            NotificationCenter.default.post(name: .backgroundSyncRequested, object: nil)
+
+            // Give some time for sync to complete
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                completionHandler(.newData)
+            }
+        } else {
+            completionHandler(.noData)
+        }
     }
 
     // MARK: - UNUserNotificationCenterDelegate

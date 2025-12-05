@@ -6,7 +6,7 @@ final class LocalStorage {
     static let shared = LocalStorage()
 
     private var dbQueue: DatabaseQueue?
-    private let maxCachedTrips = 5
+    private let maxCachedTrips = 25
 
     // Schema versioning
     private let currentSchemaVersion = 2
@@ -265,6 +265,16 @@ final class LocalStorage {
                     messages TEXT NOT NULL,
                     safety_tips TEXT NOT NULL,
                     "order" INTEGER NOT NULL,
+                    cached_at TEXT NOT NULL
+                )
+            """)
+
+            // Create cached_contacts table
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS cached_contacts (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    email TEXT NOT NULL,
                     cached_at TEXT NOT NULL
                 )
             """)
@@ -616,6 +626,73 @@ final class LocalStorage {
         }
     }
 
+    /// Remove a specific cached trip
+    func removeCachedTrip(tripId: Int) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM cached_trips WHERE id = ?", arguments: [tripId])
+            }
+            debugLog("[LocalStorage] ✅ Removed cached trip #\(tripId)")
+        } catch {
+            debugLog("[LocalStorage] Failed to remove cached trip: \(error)")
+        }
+    }
+
+    /// Update specific fields of a cached trip (for offline state updates)
+    func updateCachedTripFields(tripId: Int, updates: [String: Any]) {
+        guard let dbQueue = dbQueue else { return }
+
+        // Map Swift field names to SQLite column names
+        let columnMapping: [String: String] = [
+            "status": "status",
+            "eta": "eta",
+            "completed_at": "completed_at",
+            "last_checkin": "last_checkin"
+        ]
+
+        do {
+            try dbQueue.write { db in
+                var setClauses: [String] = []
+                var arguments: [DatabaseValue] = []
+
+                for (key, value) in updates {
+                    guard let column = columnMapping[key] else {
+                        debugLog("[LocalStorage] ⚠️ Unknown field: \(key)")
+                        continue
+                    }
+
+                    setClauses.append("\(column) = ?")
+
+                    if let stringValue = value as? String {
+                        arguments.append(stringValue.databaseValue)
+                    } else if let dateValue = value as? Date {
+                        arguments.append(ISO8601DateFormatter().string(from: dateValue).databaseValue)
+                    } else if value is NSNull {
+                        arguments.append(.null)
+                    } else {
+                        debugLog("[LocalStorage] ⚠️ Unsupported value type for \(key)")
+                        continue
+                    }
+                }
+
+                guard !setClauses.isEmpty else {
+                    debugLog("[LocalStorage] ⚠️ No valid fields to update")
+                    return
+                }
+
+                arguments.append(tripId.databaseValue)
+
+                let sql = "UPDATE cached_trips SET \(setClauses.joined(separator: ", ")) WHERE id = ?"
+                try db.execute(sql: sql, arguments: StatementArguments(arguments))
+                debugLog("[LocalStorage] ✅ Updated trip #\(tripId): \(updates.keys.joined(separator: ", "))")
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to update cached trip fields: \(error)")
+        }
+    }
+
     // MARK: - Pending Actions (Offline Sync)
 
     /// Queue an action to be synced when online
@@ -834,6 +911,119 @@ final class LocalStorage {
         }
     }
 
+    // MARK: - Contact Caching
+
+    /// Cache a single contact
+    func cacheContact(_ contact: Contact) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO cached_contacts (id, name, email, cached_at)
+                    VALUES (?, ?, ?, ?)
+                """, arguments: [
+                    contact.id,
+                    contact.name,
+                    contact.email,
+                    ISO8601DateFormatter().string(from: Date())
+                ])
+            }
+            debugLog("[LocalStorage] Cached contact: \(contact.name)")
+        } catch {
+            debugLog("[LocalStorage] Failed to cache contact: \(error)")
+        }
+    }
+
+    /// Cache multiple contacts from the server
+    func cacheContacts(_ contacts: [Contact]) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                // Clear existing cache
+                try db.execute(sql: "DELETE FROM cached_contacts")
+
+                // Insert contacts
+                for contact in contacts {
+                    try db.execute(sql: """
+                        INSERT INTO cached_contacts (id, name, email, cached_at)
+                        VALUES (?, ?, ?, ?)
+                    """, arguments: [
+                        contact.id,
+                        contact.name,
+                        contact.email,
+                        ISO8601DateFormatter().string(from: Date())
+                    ])
+                }
+            }
+            debugLog("[LocalStorage] Cached \(contacts.count) contacts")
+        } catch {
+            debugLog("[LocalStorage] Failed to cache contacts: \(error)")
+        }
+    }
+
+    /// Get cached contacts for offline access
+    func getCachedContacts() -> [Contact] {
+        guard let dbQueue = dbQueue else { return [] }
+
+        do {
+            return try dbQueue.read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT * FROM cached_contacts ORDER BY name ASC
+                """)
+
+                return rows.compactMap { row -> Contact? in
+                    guard let id = row["id"] as? Int,
+                          let name = row["name"] as? String,
+                          let email = row["email"] as? String
+                    else { return nil }
+
+                    return Contact(id: id, name: name, email: email)
+                }
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get cached contacts: \(error)")
+            return []
+        }
+    }
+
+    /// Update a cached contact
+    func updateCachedContact(contactId: Int, name: String, email: String) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: """
+                    UPDATE cached_contacts SET name = ?, email = ?, cached_at = ?
+                    WHERE id = ?
+                """, arguments: [
+                    name,
+                    email,
+                    ISO8601DateFormatter().string(from: Date()),
+                    contactId
+                ])
+            }
+            debugLog("[LocalStorage] ✅ Updated cached contact #\(contactId)")
+        } catch {
+            debugLog("[LocalStorage] Failed to update cached contact: \(error)")
+        }
+    }
+
+    /// Remove a cached contact
+    func removeCachedContact(contactId: Int) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM cached_contacts WHERE id = ?", arguments: [contactId])
+            }
+            debugLog("[LocalStorage] ✅ Removed cached contact #\(contactId)")
+        } catch {
+            debugLog("[LocalStorage] Failed to remove cached contact: \(error)")
+        }
+    }
+
     // MARK: - Clear All Data
 
     /// Clear all local storage (for logout)
@@ -846,6 +1036,7 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM pending_actions")
                 try db.execute(sql: "DELETE FROM auth_tokens")
                 try db.execute(sql: "DELETE FROM cached_activities")
+                try db.execute(sql: "DELETE FROM cached_contacts")
             }
             debugLog("[LocalStorage] Cleared all data")
         } catch {
