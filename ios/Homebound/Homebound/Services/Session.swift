@@ -1,6 +1,21 @@
 import Foundation
 import Combine
 
+// MARK: - Server Environment
+enum ServerEnvironment: String, CaseIterable {
+    case production = "production"
+    case devRender = "devRender"
+    case local = "local"
+
+    var displayName: String {
+        switch self {
+        case .production: return "Production"
+        case .devRender: return "Dev Render"
+        case .local: return "Local"
+        }
+    }
+}
+
 // MARK: Routes
 private enum Routes {
     static let sendCode  = "/api/v1/auth/request-magic-link"
@@ -70,21 +85,29 @@ final class Session: ObservableObject {
     // MARK: API & Base URL
 
     static let productionURL = URL(string: "https://api.homeboundapp.com")!
+    static let devRenderURL = URL(string: "https://homebound-21l1.onrender.com")!
     static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
 
-    @Published var useLocalServer: Bool = UserDefaults.standard.bool(forKey: "useLocalServer") {
+    @Published var serverEnvironment: ServerEnvironment = {
+        let savedValue = UserDefaults.standard.string(forKey: "serverEnvironment") ?? "production"
+        return ServerEnvironment(rawValue: savedValue) ?? .production
+    }() {
         didSet {
             // When switching databases, sign out and clear all cached data
-            // This prevents data mismatch between local and production databases
-            if oldValue != useLocalServer {
+            // This prevents data mismatch between different databases
+            if oldValue != serverEnvironment {
                 signOut()
             }
-            UserDefaults.standard.set(useLocalServer, forKey: "useLocalServer")
+            UserDefaults.standard.set(serverEnvironment.rawValue, forKey: "serverEnvironment")
         }
     }
 
     var baseURL: URL {
-        useLocalServer ? Self.localURL : Self.productionURL
+        switch serverEnvironment {
+        case .production: return Self.productionURL
+        case .devRender: return Self.devRenderURL
+        case .local: return Self.localURL
+        }
     }
 
     /// Use real API client from `API.swift`

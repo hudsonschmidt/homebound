@@ -315,24 +315,22 @@ struct SettingsView: View {
                 // Developer Section (only visible to developer)
                 if session.userEmail == "hudsonschmidt08@gmail.com" {
                     Section("Developer") {
-                        Toggle(isOn: Binding(
-                            get: { session.useLocalServer },
-                            set: { newValue in
-                                session.useLocalServer = newValue
-                            }
-                        )) {
+                        VStack(alignment: .leading, spacing: 8) {
                             Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Use Local Server")
-                                    Text(session.useLocalServer ? "Local Mac" : "Render")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text("Server Environment")
                             } icon: {
                                 Image(systemName: "server.rack")
-                                    .foregroundStyle(session.useLocalServer ? .green : .purple)
+                                    .foregroundStyle(session.serverEnvironment == .production ? .purple : session.serverEnvironment == .devRender ? .orange : .green)
                             }
+
+                            Picker("Server", selection: $session.serverEnvironment) {
+                                ForEach(ServerEnvironment.allCases, id: \.self) { env in
+                                    Text(env.displayName).tag(env)
+                                }
+                            }
+                            .pickerStyle(.segmented)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
 

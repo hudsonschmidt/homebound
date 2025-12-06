@@ -241,6 +241,8 @@ struct LocationSearchView: View {
                             ForEach(searchCompleter.searchResults, id: \.self) { result in
                                 SearchResultRow(
                                     result: result,
+                                    distance: searchCompleter.distances[searchCompleter.resultKey(result)],
+                                    locationEnabled: locationManager.isAuthorized,
                                     onSelect: {
                                         Task {
                                             await selectSearchResult(result)
@@ -275,6 +277,12 @@ struct LocationSearchView: View {
         .task {
             // Start location services when view appears
             locationManager.startUpdatingLocation()
+            // Set initial user location for distance calculations
+            searchCompleter.userLocation = locationManager.currentLocation
+        }
+        .onChange(of: locationManager.currentLocation?.latitude) { _, _ in
+            // Update search completer with user location for distance calculations
+            searchCompleter.userLocation = locationManager.currentLocation
         }
     }
 
@@ -442,6 +450,8 @@ struct LocationSearchView: View {
 // MARK: - Search Result Row
 struct SearchResultRow: View {
     let result: MKLocalSearchCompletion
+    let distance: String?
+    let locationEnabled: Bool
     let onSelect: () -> Void
 
     var body: some View {
@@ -472,6 +482,17 @@ struct SearchResultRow: View {
                 }
 
                 Spacer()
+
+                // Distance or location prompt
+                if let distance = distance {
+                    Text(distance)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if !locationEnabled {
+                    Image(systemName: "location.slash")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
         }
     }
@@ -480,11 +501,15 @@ struct SearchResultRow: View {
 // MARK: - Location Search Completer
 class LocationSearchCompleter: NSObject, ObservableObject {
     @Published var searchResults: [MKLocalSearchCompletion] = []
+    @Published var distances: [String: String] = [:] // Key: result title+subtitle, Value: formatted distance
+
+    var userLocation: CLLocationCoordinate2D?
 
     var searchQuery = "" {
         didSet {
             if searchQuery.isEmpty {
                 searchResults = []
+                distances = [:]
             } else {
                 searchCompleter.queryFragment = searchQuery
             }
@@ -496,7 +521,60 @@ class LocationSearchCompleter: NSObject, ObservableObject {
     override init() {
         super.init()
         searchCompleter.delegate = self
-        searchCompleter.resultTypes = .address
+        searchCompleter.resultTypes = [.address, .pointOfInterest]
+    }
+
+    /// Get a unique key for a search result
+    func resultKey(_ result: MKLocalSearchCompletion) -> String {
+        return "\(result.title)|\(result.subtitle)"
+    }
+
+    /// Fetch distances for all current results
+    func fetchDistances() {
+        guard let userLocation = userLocation else { return }
+
+        for result in searchResults {
+            let key = resultKey(result)
+            // Skip if we already have this distance
+            if distances[key] != nil { continue }
+
+            Task {
+                await fetchDistance(for: result, from: userLocation)
+            }
+        }
+    }
+
+    /// Fetch distance for a single result
+    private func fetchDistance(for result: MKLocalSearchCompletion, from userLocation: CLLocationCoordinate2D) async {
+        let request = MKLocalSearch.Request(completion: result)
+        let search = MKLocalSearch(request: request)
+
+        do {
+            let response = try await search.start()
+            if let resultCoord = response.mapItems.first?.placemark.coordinate {
+                let userCL = CLLocation(latitude: userLocation.latitude, longitude: userLocation.longitude)
+                let resultCL = CLLocation(latitude: resultCoord.latitude, longitude: resultCoord.longitude)
+                let meters = userCL.distance(from: resultCL)
+                let formatted = formatDistance(meters)
+
+                await MainActor.run {
+                    self.distances[self.resultKey(result)] = formatted
+                }
+            }
+        } catch {
+            // Silently ignore distance fetch failures
+        }
+    }
+
+    /// Format distance in miles/feet
+    private func formatDistance(_ meters: CLLocationDistance) -> String {
+        if meters < 1609.34 {  // Less than 1 mile
+            let feet = meters * 3.28084
+            return "\(Int(feet)) ft"
+        } else {
+            let miles = meters / 1609.34
+            return String(format: "%.1f mi", miles)
+        }
     }
 }
 
@@ -505,6 +583,7 @@ extension LocationSearchCompleter: MKLocalSearchCompleterDelegate {
     func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
         DispatchQueue.main.async {
             self.searchResults = completer.results
+            self.fetchDistances()
         }
     }
 
