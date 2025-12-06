@@ -11,6 +11,7 @@ from src import database as db
 from src.services.notifications import (
     send_checkin_update_emails,
     send_overdue_resolved_emails,
+    send_push_to_user,
     send_trip_completed_emails,
 )
 
@@ -70,16 +71,19 @@ def checkin_with_token(
         assert row is not None
         event_id = row[0]
 
-        # Update last check-in reference and reset status to active
+        # Update last check-in reference, reset status to active, and clear warning timestamps
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
-                SET last_checkin = :event_id, status = 'active'
+                SET last_checkin = :event_id,
+                    status = 'active',
+                    last_grace_warning = NULL,
+                    last_checkin_reminder = :now
                 WHERE id = :trip_id
                 """
             ),
-            {"event_id": event_id, "trip_id": trip.id}
+            {"event_id": event_id, "trip_id": trip.id, "now": now.isoformat()}
         )
 
         # Fetch user name for email notification
@@ -116,8 +120,15 @@ def checkin_with_token(
             coordinates_str = f"{lat:.6f}, {lon:.6f}"
             log.info(f"[Checkin] Received coordinates: {coordinates_str}")
 
-        # Schedule background task to send checkin update emails to contacts
-        def send_emails_sync():
+        # Schedule background task to send checkin update emails to contacts and push to user
+        def send_notifications_sync():
+            # Send push notification to user confirming check-in
+            asyncio.run(send_push_to_user(
+                trip.user_id,
+                "Checked In",
+                f"You've checked in to '{trip.title}'. Stay safe!"
+            ))
+            # Send emails to contacts
             asyncio.run(send_checkin_update_emails(
                 trip=trip_data,
                 contacts=contacts_for_email,
@@ -127,7 +138,7 @@ def checkin_with_token(
                 coordinates=coordinates_str
             ))
 
-        background_tasks.add_task(send_emails_sync)
+        background_tasks.add_task(send_notifications_sync)
         num_contacts = len(contacts_for_email)
         log.info(f"[Checkin] Scheduled checkin update emails for {num_contacts} contacts")
 
@@ -221,7 +232,8 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
 
         # Schedule background task to send emails to contacts
         # If trip was overdue, send "all clear" email from alerts@
-        def send_emails_sync():
+        def send_notifications_sync():
+            # Send emails to contacts
             if was_overdue:
                 # Send urgent "all clear" email since contacts were already alerted
                 asyncio.run(send_overdue_resolved_emails(
@@ -241,7 +253,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                     user_timezone=user_timezone
                 ))
 
-        background_tasks.add_task(send_emails_sync)
+        background_tasks.add_task(send_notifications_sync)
         email_type = "overdue resolved" if was_overdue else "completion"
         log.info(f"[Checkout] Scheduled {email_type} emails for {len(contacts_for_email)} contacts")
 

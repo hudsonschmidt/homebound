@@ -211,7 +211,7 @@ async def check_push_notifications():
                 await send_push_to_user(
                     trip.user_id,
                     "Trip Starting Soon",
-                    f"Your trip '{trip.title}' starts in about 15 minutes!"
+                    f"Your trip '{trip.title}' is starting soon!"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_starting_soon = true WHERE id = :id"),
@@ -258,7 +258,7 @@ async def check_push_notifications():
                 await send_push_to_user(
                     trip.user_id,
                     "Almost Time",
-                    f"You're expected back from '{trip.title}' in about 15 minutes."
+                    f"You're expected back from '{trip.title}' in a couple minutes! Plan to check out soon, or extend your trip if you need more time!"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_approaching_eta = true WHERE id = :id"),
@@ -313,7 +313,7 @@ async def check_push_notifications():
                     await send_push_to_user(
                         trip.user_id,
                         "Check-in Reminder",
-                        f"Don't forget to check in on your trip '{trip.title}'!"
+                        f"Hope your trip is going well! Don't forget to check in!"
                     )
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET last_checkin_reminder = :now WHERE id = :id"),
@@ -322,11 +322,13 @@ async def check_push_notifications():
                     log.info(f"[Push] Sent check-in reminder for trip {trip.id}")
 
             # 6. Grace Period Warnings - every 5 min during grace period
+            # Only send warnings for trips that are overdue (not yet notified)
+            # Once contacts are notified (overdue_notified), stop sending warnings to user
             in_grace_period = conn.execute(
                 sqlalchemy.text("""
                     SELECT id, user_id, title, eta, grace_min, last_grace_warning
                     FROM trips
-                    WHERE status IN ('overdue', 'overdue_notified')
+                    WHERE status = 'overdue'
                     AND (last_grace_warning IS NULL OR last_grace_warning <= :cutoff)
                 """),
                 {"cutoff": now - timedelta(minutes=GRACE_WARNING_INTERVAL)}

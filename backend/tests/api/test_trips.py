@@ -494,7 +494,7 @@ def test_get_trip_timeline():
 
     assert len(timeline) >= 1
     assert all(isinstance(e, TimelineEvent) for e in timeline)
-    event_types = [e.what for e in timeline]
+    event_types = [e.kind for e in timeline]
     assert "started" in event_types
 
     cleanup_test_data(user_id)

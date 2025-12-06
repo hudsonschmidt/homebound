@@ -6,12 +6,58 @@ from datetime import datetime
 from typing import Any
 
 import pytz
+import sqlalchemy
 
+from .. import database as db
 from ..config import get_settings
 from ..messaging.resend_backend import html_to_text
 
 settings = get_settings()
 log = logging.getLogger(__name__)
+
+
+def log_notification(
+    user_id: int,
+    notification_type: str,
+    title: str,
+    body: str | None,
+    status: str,
+    device_token: str | None = None,
+    error_message: str | None = None
+):
+    """Log a notification attempt to the database for delivery tracking.
+
+    Args:
+        user_id: The user ID the notification is for
+        notification_type: 'push' or 'email'
+        title: Notification title or email subject
+        body: Notification body
+        status: 'sent', 'failed', or 'pending'
+        device_token: Device token for push notifications (optional)
+        error_message: Error details if status is 'failed' (optional)
+    """
+    try:
+        with db.engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("""
+                    INSERT INTO notification_logs
+                    (user_id, notification_type, title, body, status, device_token, error_message, created_at)
+                    VALUES (:user_id, :notification_type, :title, :body, :status, :device_token, :error_message, :created_at)
+                """),
+                {
+                    "user_id": user_id,
+                    "notification_type": notification_type,
+                    "title": title,
+                    "body": body,
+                    "status": status,
+                    "device_token": device_token,
+                    "error_message": error_message,
+                    "created_at": datetime.utcnow()
+                }
+            )
+    except Exception as e:
+        # Don't let logging failures break the notification flow
+        log.error(f"Failed to log notification: {e}")
 
 def parse_datetime(dt_value: Any) -> datetime | None:
     """Parse datetime from string or return as-is."""
@@ -123,14 +169,16 @@ async def send_email(
 
 
 async def send_push_to_user(user_id: int, title: str, body: str, data: dict | None = None):
-    """Send push notification to all user's devices."""
-    import sqlalchemy
-
-    from .. import database as db
+    """Send push notification to all user's devices with retry logic."""
+    import asyncio
     from ..messaging.apns import get_push_sender
+
+    MAX_RETRIES = 3
+    RETRY_DELAYS = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
 
     if settings.PUSH_BACKEND == "dummy":
         log.info(f"[DUMMY PUSH] User: {user_id} - {title}: {body}")
+        log_notification(user_id, "push", title, body, "sent", error_message="dummy backend")
         return
 
     if settings.PUSH_BACKEND != "apns":
@@ -150,23 +198,48 @@ async def send_push_to_user(user_id: int, title: str, body: str, data: dict | No
         log.debug(f"No iOS devices registered for user {user_id}")
         return
 
-    # Send to each device
+    # Send to each device with retry logic
     sender = get_push_sender()
     tokens_to_remove: list[str] = []
 
     for device in devices:
-        try:
-            result = await sender.send(device.token, title, body, data)
-            if result.ok:
-                log.info(f"[APNS] Sent to user {user_id}: {title}")
-            elif result.status == 410:
-                # 410 Gone = device unregistered, mark for removal
-                log.info(f"[APNS] Device unregistered for user {user_id}, will remove token")
-                tokens_to_remove.append(device.token)
-            else:
-                log.warning(f"[APNS] Failed for user {user_id}: status={result.status} detail={result.detail}")
-        except Exception as e:
-            log.error(f"[APNS] Error sending to user {user_id}: {e}")
+        success = False
+        last_error = None
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                result = await sender.send(device.token, title, body, data)
+                if result.ok:
+                    log.info(f"[APNS] Sent to user {user_id}: {title}")
+                    log_notification(user_id, "push", title, body, "sent", device_token=device.token)
+                    success = True
+                    break
+                elif result.status == 410:
+                    # 410 Gone = device unregistered, mark for removal (don't retry)
+                    log.info(f"[APNS] Device unregistered for user {user_id}, will remove token")
+                    tokens_to_remove.append(device.token)
+                    log_notification(user_id, "push", title, body, "failed", device_token=device.token,
+                                   error_message="Device unregistered (410)")
+                    success = True  # Not a retry-able error
+                    break
+                else:
+                    last_error = f"status={result.status} detail={result.detail}"
+                    log.warning(f"[APNS] Failed for user {user_id} (attempt {attempt + 1}/{MAX_RETRIES}): {last_error}")
+
+            except Exception as e:
+                last_error = str(e)
+                log.error(f"[APNS] Error sending to user {user_id} (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+
+            # Retry with exponential backoff if not the last attempt
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[attempt]
+                log.info(f"[APNS] Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+
+        # Log failure if all retries exhausted
+        if not success and last_error:
+            log_notification(user_id, "push", title, body, "failed", device_token=device.token,
+                           error_message=f"All retries failed: {last_error}")
 
     # Remove unregistered device tokens
     if tokens_to_remove:
@@ -512,20 +585,3 @@ async def send_overdue_resolved_emails(
 
             log.info(f"Sent overdue resolved notification to {contact_email} for trip '{trip_title}'")
 
-async def send_plan_created_notification(plan: Any):
-    """Send push notification when a plan is created (to the user)."""
-    # Extract plan data
-    plan_title = get_attr(plan, 'title')
-    plan_user_id = get_attr(plan, 'user_id')
-
-    message = f"New trip plan created: {plan_title}"
-
-    plan_start = parse_datetime(get_attr(plan, 'start'))
-    plan_eta = parse_datetime(get_attr(plan, 'eta'))
-
-    if plan_start and plan_eta:
-        start_formatted = plan_start.strftime('%I:%M %p')
-        eta_formatted = plan_eta.strftime('%I:%M %p')
-        message += f" from {start_formatted} to {eta_formatted}"
-
-    await send_push_to_user(plan_user_id, "Plan Created", message)

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CoreLocation
 
 // MARK: - Server Environment
 enum ServerEnvironment: String, CaseIterable {
@@ -128,6 +129,8 @@ final class Session: ObservableObject {
     @Published var notice: String = ""
     @Published var lastError: String = ""
     @Published var apnsToken: String? = nil
+    private var deviceRegistrationRetryCount: Int = 0
+    private let maxDeviceRegistrationRetries: Int = 3
     @Published var accessToken: String? = nil {
         didSet {
             // Save to both keychain and local storage for redundancy
@@ -333,23 +336,52 @@ final class Session: ObservableObject {
     }
 
     // MARK: Auth flows
+
+    /// Validate APNs token format (should be 64 hex characters)
+    private func isValidAPNsToken(_ token: String) -> Bool {
+        // APNs tokens are typically 64 hex characters (32 bytes)
+        // But can vary, so we check for reasonable length and hex format
+        guard token.count >= 32 && token.count <= 128 else {
+            return false
+        }
+        // Check if all characters are valid hex
+        let hexCharacterSet = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+        return token.unicodeScalars.allSatisfy { hexCharacterSet.contains($0) }
+    }
+
     @MainActor
     func handleAPNsToken(_ token: String) {
+        // Validate token format before storing
+        guard isValidAPNsToken(token) else {
+            debugLog("[APNs] ⚠️ Invalid token format: \(token.prefix(20))... (length: \(token.count))")
+            return
+        }
+
         self.apnsToken = token
-        debugLog("[APNs] Received token: \(token.prefix(20))...")
+        debugLog("[APNs] Received valid token: \(token.prefix(20))... (length: \(token.count))")
 
         // Register device token with backend once signed-in.
         guard let bearer = self.accessToken else {
             debugLog("[APNs] Not signed in, will register later")
             return
         }
-        debugLog("[APNs] Registering device with backend...")
+
+        // Reset retry counter when we get a new token or fresh registration
+        deviceRegistrationRetryCount = 0
+        registerDeviceWithRetry(token: token, bearer: bearer)
+    }
+
+    /// Register device with backend, with exponential backoff retry
+    private func registerDeviceWithRetry(token: String, bearer: String) {
+        debugLog("[APNs] Registering device with backend (attempt \(deviceRegistrationRetryCount + 1)/\(maxDeviceRegistrationRetries))...")
+
         struct DeviceRegister: Encodable {
             let platform: String
             let token: String
             let bundle_id: String
             let env: String
         }
+
         Task {
             do {
                 let bundleId = Bundle.main.bundleIdentifier ?? "com.homeboundapp.Homebound"
@@ -370,12 +402,44 @@ final class Session: ObservableObject {
                     bearer: bearer
                 )
                 debugLog("[APNs] ✅ Device registered successfully")
+                await MainActor.run {
+                    self.deviceRegistrationRetryCount = 0
+                }
             } catch {
-                // Non-fatal; just surface a notice in your dev UI.
                 debugLog("[APNs] ❌ Registration failed: \(error.localizedDescription)")
-                await MainActor.run { self.notice = "APNs register failed: \(error.localizedDescription)" }
+
+                await MainActor.run {
+                    self.deviceRegistrationRetryCount += 1
+
+                    if self.deviceRegistrationRetryCount < self.maxDeviceRegistrationRetries {
+                        // Exponential backoff: 1s, 2s, 4s
+                        let delay = pow(2.0, Double(self.deviceRegistrationRetryCount - 1))
+                        debugLog("[APNs] Retrying in \(delay) seconds...")
+
+                        Task {
+                            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                            await MainActor.run {
+                                if let currentBearer = self.accessToken {
+                                    self.registerDeviceWithRetry(token: token, bearer: currentBearer)
+                                }
+                            }
+                        }
+                    } else {
+                        // All retries exhausted
+                        debugLog("[APNs] ❌ All registration attempts failed")
+                        self.notice = "Could not register for push notifications. Please try again later."
+                    }
+                }
             }
         }
+    }
+
+    /// Handle APNs registration failure from the system
+    @MainActor
+    func handleAPNsRegistrationFailed(_ errorMessage: String) {
+        debugLog("[APNs] ❌ System registration failed: \(errorMessage)")
+        // Set notice to inform user - they may need to check notification settings
+        self.notice = "Push notifications unavailable. Check your notification settings."
     }
 
     /// Step 1: ask backend to send a code / magic link
@@ -806,8 +870,20 @@ final class Session: ObservableObject {
         struct TokenResponse: Decodable { let ok: Bool }
 
         do {
+            var urlComponents = URLComponents(url: url("/t/\(token)/\(action)"), resolvingAgainstBaseURL: false)!
+
+            // For checkin, include current location coordinates
+            if action == "checkin" {
+                if let location = await LocationManager.shared.getCurrentLocation() {
+                    urlComponents.queryItems = [
+                        URLQueryItem(name: "lat", value: String(location.latitude)),
+                        URLQueryItem(name: "lon", value: String(location.longitude))
+                    ]
+                }
+            }
+
             let _: TokenResponse = try await api.get(
-                url("/t/\(token)/\(action)"),
+                urlComponents.url!,
                 bearer: nil
             )
             await MainActor.run {
@@ -1030,6 +1106,11 @@ final class Session: ObservableObject {
             debugLog("[Session] 📦 Offline - returning \(cachedTrips.count) cached trips")
             await MainActor.run {
                 self.allTrips = cachedTrips
+                // Also update activeTrip from cached data for consistency
+                let activeStatuses = ["active", "overdue", "overdue_notified"]
+                if let active = cachedTrips.first(where: { activeStatuses.contains($0.status) }) {
+                    self.activeTrip = active
+                }
             }
             return cachedTrips
         }
@@ -1045,9 +1126,15 @@ final class Session: ObservableObject {
             // Cache trips for offline access
             LocalStorage.shared.cacheTrips(trips)
 
-            // Update published property
+            // Update published properties
             await MainActor.run {
                 self.allTrips = trips
+                // Also update activeTrip from this data to prevent race condition
+                // where trip disappears from "Upcoming" but hasn't appeared in "Active" yet
+                let activeStatuses = ["active", "overdue", "overdue_notified"]
+                if let active = trips.first(where: { activeStatuses.contains($0.status) }) {
+                    self.activeTrip = active
+                }
             }
 
             return trips
@@ -1056,6 +1143,11 @@ final class Session: ObservableObject {
             let cachedTrips = LocalStorage.shared.getCachedTrips()
             await MainActor.run {
                 self.allTrips = cachedTrips
+                // Also update activeTrip from cached data for consistency
+                let activeStatuses = ["active", "overdue", "overdue_notified"]
+                if let active = cachedTrips.first(where: { activeStatuses.contains($0.status) }) {
+                    self.activeTrip = active
+                }
                 if !cachedTrips.isEmpty {
                     self.notice = "Showing cached trips (offline mode)"
                 }
@@ -1084,8 +1176,19 @@ final class Session: ObservableObject {
                 case "checkin":
                     // Use token-based checkin endpoint (no auth required)
                     if let token = action.payload["token"] as? String {
+                        var urlComponents = URLComponents(url: url("/t/\(token)/checkin"), resolvingAgainstBaseURL: false)!
+
+                        // Include coordinates if they were captured when queued
+                        if let lat = action.payload["lat"] as? Double,
+                           let lon = action.payload["lon"] as? Double {
+                            urlComponents.queryItems = [
+                                URLQueryItem(name: "lat", value: String(lat)),
+                                URLQueryItem(name: "lon", value: String(lon))
+                            ]
+                        }
+
                         let _: GenericResponse = try await api.get(
-                            url("/t/\(token)/checkin"),
+                            urlComponents.url!,
                             bearer: nil
                         )
                         debugLog("[Session] ✅ Synced checkin action")
@@ -1352,15 +1455,27 @@ final class Session: ObservableObject {
         guard let plan = activeTrip,
               let token = plan.checkin_token else { return false }
 
+        // Get current location for check-in email (non-blocking, 5s timeout)
+        let location = await LocationManager.shared.getCurrentLocation()
+
         // Check if offline FIRST - queue immediately without waiting for network timeout
         if !NetworkMonitor.shared.isConnected {
-            return await queueOfflineCheckIn(plan: plan, token: token)
+            return await queueOfflineCheckIn(plan: plan, token: token, location: location)
         }
 
         do {
+            // Build URL with coordinates if available
+            var urlComponents = URLComponents(url: url("/t/\(token)/checkin"), resolvingAgainstBaseURL: false)!
+            if let loc = location {
+                urlComponents.queryItems = [
+                    URLQueryItem(name: "lat", value: String(loc.latitude)),
+                    URLQueryItem(name: "lon", value: String(loc.longitude))
+                ]
+            }
+
             // Use token-based checkin endpoint (no auth required)
             let _: GenericResponse = try await api.get(
-                url("/t/\(token)/checkin"),
+                urlComponents.url!,
                 bearer: nil
             )
 
@@ -1370,16 +1485,21 @@ final class Session: ObservableObject {
             return true
         } catch {
             // Network failed - queue for later sync
-            return await queueOfflineCheckIn(plan: plan, token: token)
+            return await queueOfflineCheckIn(plan: plan, token: token, location: location)
         }
     }
 
-    private func queueOfflineCheckIn(plan: Trip, token: String) async -> Bool {
+    private func queueOfflineCheckIn(plan: Trip, token: String, location: CLLocationCoordinate2D?) async -> Bool {
         let timestamp = ISO8601DateFormatter().string(from: Date())
+        var payload: [String: Any] = ["token": token, "timestamp": timestamp]
+        if let loc = location {
+            payload["lat"] = loc.latitude
+            payload["lon"] = loc.longitude
+        }
         LocalStorage.shared.queuePendingAction(
             type: "checkin",
             tripId: plan.id,
-            payload: ["token": token, "timestamp": timestamp]
+            payload: payload
         )
 
         // Update local cache with check-in timestamp

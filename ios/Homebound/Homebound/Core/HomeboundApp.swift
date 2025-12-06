@@ -47,6 +47,11 @@ struct HomeboundApp: App {
                                 session.handleAPNsToken(token)
                             }
                         }
+                        .onReceive(NotificationCenter.default.publisher(for: .hbAPNsRegistrationFailed)) { notification in
+                            if let errorMessage = notification.object as? String {
+                                session.handleAPNsRegistrationFailed(errorMessage)
+                            }
+                        }
                         .onOpenURL { url in
                             // Handle universal links for check-in/out
                             handleUniversalLink(url)
@@ -219,7 +224,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
-        debugLog("APNs registration failed: \(error)")
+        debugLog("[APNs] ❌ Registration failed: \(error.localizedDescription)")
+        // Post notification so Session can handle the error and notify user
+        NotificationCenter.default.post(
+            name: .hbAPNsRegistrationFailed,
+            object: error.localizedDescription
+        )
     }
 
     // MARK: - Silent Push Notifications (Background Sync)
@@ -282,6 +292,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
 extension Notification.Name {
     static let hbGotAPNsToken = Notification.Name("hbGotAPNsToken")
+    static let hbAPNsRegistrationFailed = Notification.Name("hbAPNsRegistrationFailed")
     static let hbNavigateToTrip = Notification.Name("hbNavigateToTrip")
     static let backgroundSyncRequested = Notification.Name("backgroundSyncRequested")
 }
