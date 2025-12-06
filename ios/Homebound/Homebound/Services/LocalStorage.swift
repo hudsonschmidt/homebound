@@ -861,13 +861,14 @@ final class LocalStorage {
     }
 
     /// Queue an action to be synced when online
-    /// For idempotent actions (checkin, extend), duplicates are skipped
+    /// For idempotent actions, duplicates are skipped
     func queuePendingAction(type: String, tripId: Int?, payload: [String: Any]) {
         guard let dbQueue = dbQueue else { return }
 
-        // Skip duplicate idempotent actions (checkin, extend for the same trip)
+        // Skip duplicate idempotent actions for the same trip
         // These actions are idempotent - queueing multiple has no benefit
-        if ["checkin", "extend"].contains(type) && hasPendingAction(type: type, tripId: tripId) {
+        let idempotentActions = ["checkin", "extend", "complete", "start_trip", "delete_trip"]
+        if idempotentActions.contains(type) && hasPendingAction(type: type, tripId: tripId) {
             debugLog("[LocalStorage] ⚠️ Skipping duplicate \(type) action for trip #\(tripId ?? -1)")
             return
         }
@@ -904,14 +905,19 @@ final class LocalStorage {
                 """)
 
                 return rows.compactMap { row -> (id: Int, type: String, tripId: Int?, payload: [String: Any])? in
-                    guard let id = row["id"] as? Int,
-                          let type = row["action_type"] as? String,
-                          let payloadString = row["payload"] as? String,
+                    // GRDB Row subscript returns DatabaseValue - use explicit type coercion
+                    guard let id: Int = row["id"],
+                          let type: String = row["action_type"],
+                          let payloadString: String = row["payload"],
                           let payloadData = payloadString.data(using: .utf8),
                           let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any]
-                    else { return nil }
+                    else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse pending action row: \(row)")
+                        return nil
+                    }
 
-                    return (id: id, type: type, tripId: row["trip_id"] as? Int, payload: payload)
+                    let tripId: Int? = row["trip_id"]
+                    return (id: id, type: type, tripId: tripId, payload: payload)
                 }
             }
         } catch {
@@ -1010,13 +1016,18 @@ final class LocalStorage {
                 """)
 
                 return rows.compactMap { row -> (id: Int, type: String, tripId: Int?, error: String, failedAt: String)? in
-                    guard let id = row["id"] as? Int,
-                          let type = row["action_type"] as? String,
-                          let error = row["error"] as? String,
-                          let failedAt = row["failed_at"] as? String
-                    else { return nil }
+                    // GRDB Row subscript returns DatabaseValue - use explicit type coercion
+                    guard let id: Int = row["id"],
+                          let type: String = row["action_type"],
+                          let error: String = row["error"],
+                          let failedAt: String = row["failed_at"]
+                    else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse failed action row: \(row)")
+                        return nil
+                    }
 
-                    return (id: id, type: type, tripId: row["trip_id"] as? Int, error: error, failedAt: failedAt)
+                    let tripId: Int? = row["trip_id"]
+                    return (id: id, type: type, tripId: tripId, error: error, failedAt: failedAt)
                 }
             }
         } catch {
@@ -1070,7 +1081,10 @@ final class LocalStorage {
                 guard let row = try Row.fetchOne(db, sql: "SELECT * FROM auth_tokens WHERE id = 1") else {
                     return (nil, nil)
                 }
-                return (row["access_token"] as? String, row["refresh_token"] as? String)
+                // GRDB Row subscript returns DatabaseValue - use explicit type coercion
+                let accessToken: String? = row["access_token"]
+                let refreshToken: String? = row["refresh_token"]
+                return (accessToken, refreshToken)
             }
         } catch {
             debugLog("[LocalStorage] Failed to get auth tokens: \(error)")

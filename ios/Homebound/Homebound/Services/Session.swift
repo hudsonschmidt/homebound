@@ -1055,6 +1055,7 @@ final class Session: ObservableObject {
         var needsDataRefresh = false  // Track if we need to refresh data after sync
 
         for action in pendingActions {
+            debugLog("[Session] Processing action #\(action.id): \(action.type)")
             do {
                 switch action.type {
                 case "checkin":
@@ -1065,6 +1066,8 @@ final class Session: ObservableObject {
                             bearer: nil
                         )
                         debugLog("[Session] ✅ Synced checkin action")
+                    } else {
+                        debugLog("[Session] ⚠️ checkin action missing token - removing invalid action")
                     }
                 case "extend":
                     if let tripId = action.tripId,
@@ -1081,6 +1084,8 @@ final class Session: ObservableObject {
                             )
                         }
                         debugLog("[Session] ✅ Synced extend action for trip #\(tripId)")
+                    } else {
+                        debugLog("[Session] ⚠️ extend action missing tripId or minutes - removing invalid action")
                     }
                 case "complete":
                     if let tripId = action.tripId {
@@ -1092,6 +1097,8 @@ final class Session: ObservableObject {
                             )
                         }
                         debugLog("[Session] ✅ Synced complete action for trip #\(tripId)")
+                    } else {
+                        debugLog("[Session] ⚠️ complete action missing tripId - removing invalid action")
                     }
 
                 case "update_trip":
@@ -1122,11 +1129,13 @@ final class Session: ObservableObject {
                             )
                         }
                         debugLog("[Session] ✅ Synced update_trip action for trip #\(tripId)")
+                    } else {
+                        debugLog("[Session] ⚠️ update_trip action missing tripId - removing invalid action")
                     }
 
                 case "start_trip":
                     if let tripId = action.tripId {
-                        let _: Trip = try await withAuth { bearer in
+                        let _: GenericResponse = try await withAuth { bearer in
                             try await self.api.post(
                                 self.url("/api/v1/trips/\(tripId)/start"),
                                 body: API.Empty(),
@@ -1134,6 +1143,8 @@ final class Session: ObservableObject {
                             )
                         }
                         debugLog("[Session] ✅ Synced start_trip action for trip #\(tripId)")
+                    } else {
+                        debugLog("[Session] ⚠️ start_trip action missing tripId - removing invalid action")
                     }
 
                 case "delete_trip":
@@ -1145,6 +1156,8 @@ final class Session: ObservableObject {
                             )
                         }
                         debugLog("[Session] ✅ Synced delete_trip action for trip #\(tripId)")
+                    } else {
+                        debugLog("[Session] ⚠️ delete_trip action missing tripId - removing invalid action")
                     }
 
                 case "add_contact":
@@ -1169,6 +1182,8 @@ final class Session: ObservableObject {
                             LocalStorage.shared.cacheContact(newContact)
                         }
                         debugLog("[Session] ✅ Synced add_contact action")
+                    } else {
+                        debugLog("[Session] ⚠️ add_contact action missing name or email - removing invalid action")
                     }
 
                 case "update_contact":
@@ -1184,6 +1199,8 @@ final class Session: ObservableObject {
                             )
                         }
                         debugLog("[Session] ✅ Synced update_contact action for contact #\(contactId)")
+                    } else {
+                        debugLog("[Session] ⚠️ update_contact action missing contactId, name, or email - removing invalid action")
                     }
 
                 case "delete_contact":
@@ -1195,6 +1212,8 @@ final class Session: ObservableObject {
                             )
                         }
                         debugLog("[Session] ✅ Synced delete_contact action for contact #\(contactId)")
+                    } else {
+                        debugLog("[Session] ⚠️ delete_contact action missing contactId - removing invalid action")
                     }
 
                 case "update_profile":
@@ -1225,8 +1244,17 @@ final class Session: ObservableObject {
                 LocalStorage.shared.removePendingAction(id: action.id)
                 debugLog("[Session] ✅ Removed synced action id=\(action.id)")
             } catch let error as API.APIError {
-                // Handle API errors - remove action on permanent failures (4xx errors)
+                // Handle API errors - remove action on permanent failures
                 switch error {
+                case .unauthorized:
+                    // Token refresh failed - permanent failure, user needs to re-authenticate
+                    debugLog("[Session] ⚠️ Removing action \(action.type) due to auth failure")
+                    LocalStorage.shared.removePendingAction(id: action.id)
+                    LocalStorage.shared.logFailedAction(
+                        type: action.type,
+                        tripId: action.tripId,
+                        error: "Authentication expired. Please log in again."
+                    )
                 case .httpError(let statusCode, let message) where statusCode >= 400 && statusCode < 500:
                     // Client errors (400-499) are permanent - don't retry
                     debugLog("[Session] ⚠️ Removing action \(action.type) due to permanent error: \(statusCode)")
