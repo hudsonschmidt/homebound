@@ -457,7 +457,7 @@ struct SettingsView: View {
                         Text("Version")
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("0.2.0")
+                        Text("0.2.1")
                             .foregroundStyle(.secondary)
                     }
                     .listRowBackground(Color.clear)
