@@ -849,6 +849,10 @@ struct Step2TimeSettings: View {
                                         .foregroundStyle(.red)
                                 }
                             }
+
+                            Text("If your trip is taking place out of service, plan your return time to be when you know you will be back in coverage, that way the grace period can be used effectively.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                         }
                         .padding()
                         .background(isReturnTimeValid ? Color(.secondarySystemFill) : Color.red.opacity(0.1))
