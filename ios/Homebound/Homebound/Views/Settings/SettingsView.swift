@@ -982,10 +982,9 @@ struct PrivacyView: View {
     @State private var showShareSheet = false
     @State private var exportData: Data?
 
-    // Local storage counts
+    // Local storage counts (cached trips/activities loaded on appear, pending uses session's reactive property)
     @State private var cachedTripsCount = 0
     @State private var cachedActivitiesCount = 0
-    @State private var pendingActionsCount = 0
 
     var body: some View {
         List {
@@ -1072,8 +1071,15 @@ struct PrivacyView: View {
                 HStack {
                     Text("Pending Offline Actions")
                     Spacer()
-                    Text("\(pendingActionsCount)")
+                    Text("\(session.pendingActionsCount)")
                         .foregroundStyle(.secondary)
+                    if session.pendingActionsCount > 0 {
+                        Button("Clear") {
+                            session.clearPendingActions()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    }
                 }
             } header: {
                 Text("Local Storage")
@@ -1138,7 +1144,6 @@ struct PrivacyView: View {
     private func loadStorageCounts() {
         cachedTripsCount = LocalStorage.shared.getCachedTripsCount()
         cachedActivitiesCount = LocalStorage.shared.getCachedActivitiesCount()
-        pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
     }
 
     private func exportUserData() async {

@@ -273,9 +273,35 @@ final class LocalStorage {
             try db.execute(sql: """
                 CREATE TABLE IF NOT EXISTS cached_contacts (
                     id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     email TEXT NOT NULL,
                     cached_at TEXT NOT NULL
+                )
+            """)
+
+            // Create cached_timeline table for offline check-in display
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS cached_timeline (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trip_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    at TEXT NOT NULL,
+                    lat REAL,
+                    lon REAL,
+                    extended_by INTEGER,
+                    cached_at TEXT NOT NULL
+                )
+            """)
+
+            // Create failed_actions table for tracking permanently failed sync actions
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS failed_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action_type TEXT NOT NULL,
+                    trip_id INTEGER,
+                    error TEXT NOT NULL,
+                    failed_at TEXT NOT NULL
                 )
             """)
         }
@@ -361,51 +387,56 @@ final class LocalStorage {
     }
 
     /// Cache multiple trips (replaces all cached trips)
+    /// Uses savepoint for atomic operation - if any insert fails, entire operation rolls back
     func cacheTrips(_ trips: [Trip]) {
         guard let dbQueue = dbQueue else { return }
 
         do {
             try dbQueue.write { db in
-                // Clear existing cache
-                try db.execute(sql: "DELETE FROM cached_trips")
+                // Use savepoint for rollback capability - if any insert fails, nothing is deleted
+                try db.inSavepoint {
+                    // Clear existing cache
+                    try db.execute(sql: "DELETE FROM cached_trips")
 
-                // Insert new trips (up to maxCachedTrips)
-                let tripsToCache = Array(trips.prefix(maxCachedTrips))
-                for trip in tripsToCache {
-                    // Cache the activity first
-                    try cacheActivity(trip.activity, in: db)
+                    // Insert new trips (up to maxCachedTrips)
+                    let tripsToCache = Array(trips.prefix(maxCachedTrips))
+                    for trip in tripsToCache {
+                        // Cache the activity first
+                        try cacheActivity(trip.activity, in: db)
 
-                    try db.execute(sql: """
-                        INSERT INTO cached_trips (
-                            id, user_id, title, activity_id, start, eta, grace_min,
-                            location_text, gen_lat, gen_lon, notes, status,
-                            completed_at, last_checkin, created_at,
-                            contact1, contact2, contact3,
-                            checkin_token, checkout_token, cached_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?,
-                            ?, ?, ?,
-                            ?, ?, ?,
-                            ?, ?, ?
-                        )
-                    """, arguments: [
-                        trip.id, trip.user_id, trip.title, trip.activity.id,
-                        ISO8601DateFormatter().string(from: trip.start_at),
-                        ISO8601DateFormatter().string(from: trip.eta_at),
-                        trip.grace_minutes,
-                        trip.location_text, trip.location_lat, trip.location_lng,
-                        trip.notes, trip.status,
-                        trip.completed_at.map { ISO8601DateFormatter().string(from: $0) }, trip.last_checkin, trip.created_at,
-                        trip.contact1, trip.contact2, trip.contact3,
-                        trip.checkin_token, trip.checkout_token,
-                        ISO8601DateFormatter().string(from: Date())
-                    ])
+                        try db.execute(sql: """
+                            INSERT INTO cached_trips (
+                                id, user_id, title, activity_id, start, eta, grace_min,
+                                location_text, gen_lat, gen_lon, notes, status,
+                                completed_at, last_checkin, created_at,
+                                contact1, contact2, contact3,
+                                checkin_token, checkout_token, cached_at
+                            ) VALUES (
+                                ?, ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?,
+                                ?, ?, ?,
+                                ?, ?, ?,
+                                ?, ?, ?
+                            )
+                        """, arguments: [
+                            trip.id, trip.user_id, trip.title, trip.activity.id,
+                            ISO8601DateFormatter().string(from: trip.start_at),
+                            ISO8601DateFormatter().string(from: trip.eta_at),
+                            trip.grace_minutes,
+                            trip.location_text, trip.location_lat, trip.location_lng,
+                            trip.notes, trip.status,
+                            trip.completed_at.map { ISO8601DateFormatter().string(from: $0) }, trip.last_checkin, trip.created_at,
+                            trip.contact1, trip.contact2, trip.contact3,
+                            trip.checkin_token, trip.checkout_token,
+                            ISO8601DateFormatter().string(from: Date())
+                        ])
+                    }
+                    return .commit  // Only commits if all inserts succeed
                 }
             }
             debugLog("[LocalStorage] Cached \(min(trips.count, maxCachedTrips)) trips")
         } catch {
-            debugLog("[LocalStorage] Failed to cache trips: \(error)")
+            debugLog("[LocalStorage] ❌ Failed to cache trips (rolled back): \(error)")
         }
     }
 
@@ -415,50 +446,72 @@ final class LocalStorage {
 
         do {
             return try dbQueue.read { db in
+                // Use LEFT JOIN so trips are returned even if activity is missing
                 let rows = try Row.fetchAll(db, sql: """
                     SELECT ct.*, ca.id as act_id, ca.name as act_name, ca.icon as act_icon,
                            ca.default_grace_minutes as act_grace, ca.colors as act_colors,
                            ca.messages as act_messages, ca.safety_tips as act_tips,
                            ca."order" as act_order
                     FROM cached_trips ct
-                    JOIN cached_activities ca ON ct.activity_id = ca.id
+                    LEFT JOIN cached_activities ca ON ct.activity_id = ca.id
                     ORDER BY ct.cached_at DESC
                 """)
 
                 return rows.compactMap { row -> Trip? in
-                    // Check for orphaned trip (missing activity)
-                    guard let activityId = row["act_id"] as? Int else {
-                        let tripId = row["id"] as? Int ?? -1
-                        let tripTitle = row["title"] as? String ?? "Unknown"
-                        debugLog("[LocalStorage] ⚠️ Skipping orphaned trip #\(tripId) '\(tripTitle)' - missing activity")
+                    // Handle Int64 -> Int conversion (SQLite uses 64-bit integers)
+                    guard let id = (row["id"] as? Int64).map({ Int($0) }) ?? (row["id"] as? Int) else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse trip id")
+                        return nil
+                    }
+                    guard let userId = (row["user_id"] as? Int64).map({ Int($0) }) ?? (row["user_id"] as? Int) else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse user_id for trip #\(id)")
+                        return nil
+                    }
+                    guard let title = row["title"] as? String else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse title for trip #\(id)")
+                        return nil
+                    }
+                    guard let startStr = row["start"] as? String else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse start for trip #\(id)")
+                        return nil
+                    }
+                    guard let etaStr = row["eta"] as? String else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse eta for trip #\(id)")
+                        return nil
+                    }
+                    guard let graceMin = (row["grace_min"] as? Int64).map({ Int($0) }) ?? (row["grace_min"] as? Int) else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse grace_min for trip #\(id)")
+                        return nil
+                    }
+                    guard let status = row["status"] as? String else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse status for trip #\(id)")
+                        return nil
+                    }
+                    guard let createdAt = row["created_at"] as? String else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse created_at for trip #\(id)")
                         return nil
                     }
 
-                    guard let id = row["id"] as? Int,
-                          let userId = row["user_id"] as? Int,
-                          let title = row["title"] as? String,
-                          let activityName = row["act_name"] as? String,
-                          let activityIcon = row["act_icon"] as? String,
-                          let activityGrace = row["act_grace"] as? Int,
-                          let colorsStr = row["act_colors"] as? String,
-                          let messagesStr = row["act_messages"] as? String,
-                          let tipsStr = row["act_tips"] as? String,
-                          let activityOrder = row["act_order"] as? Int,
-                          let startStr = row["start"] as? String,
-                          let etaStr = row["eta"] as? String,
-                          let graceMin = row["grace_min"] as? Int,
-                          let status = row["status"] as? String,
-                          let createdAt = row["created_at"] as? String,
-                          let startDate = ISO8601DateFormatter().date(from: startStr),
-                          let etaDate = ISO8601DateFormatter().date(from: etaStr),
-                          let colorsData = colorsStr.data(using: .utf8),
-                          let messagesData = messagesStr.data(using: .utf8),
-                          let tipsData = tipsStr.data(using: .utf8),
-                          let colors = try? JSONDecoder().decode(Activity.ActivityColors.self, from: colorsData),
-                          let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
-                          let tips = try? JSONDecoder().decode([String].self, from: tipsData)
-                    else {
-                        debugLog("[LocalStorage] ⚠️ Failed to parse cached trip data")
+                    // Parse dates - try with and without fractional seconds
+                    let dateFormatter = ISO8601DateFormatter()
+                    var startDate = dateFormatter.date(from: startStr)
+                    if startDate == nil {
+                        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        startDate = dateFormatter.date(from: startStr)
+                    }
+                    guard let startDate = startDate else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse start date '\(startStr)' for trip #\(id)")
+                        return nil
+                    }
+
+                    dateFormatter.formatOptions = [.withInternetDateTime]
+                    var etaDate = dateFormatter.date(from: etaStr)
+                    if etaDate == nil {
+                        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        etaDate = dateFormatter.date(from: etaStr)
+                    }
+                    guard let etaDate = etaDate else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse eta date '\(etaStr)' for trip #\(id)")
                         return nil
                     }
 
@@ -470,16 +523,54 @@ final class LocalStorage {
                         return nil
                     }()
 
-                    let activity = Activity(
-                        id: activityId,
-                        name: activityName,
-                        icon: activityIcon,
-                        default_grace_minutes: activityGrace,
-                        colors: colors,
-                        messages: messages,
-                        safety_tips: tips,
-                        order: activityOrder
-                    )
+                    // Build activity - use placeholder if activity data is missing
+                    // Handle Int64 -> Int conversion for activity fields
+                    let activity: Activity
+                    if let activityId = (row["act_id"] as? Int64).map({ Int($0) }) ?? (row["act_id"] as? Int),
+                       let activityName = row["act_name"] as? String,
+                       let activityIcon = row["act_icon"] as? String,
+                       let activityGrace = (row["act_grace"] as? Int64).map({ Int($0) }) ?? (row["act_grace"] as? Int),
+                       let colorsStr = row["act_colors"] as? String,
+                       let messagesStr = row["act_messages"] as? String,
+                       let tipsStr = row["act_tips"] as? String,
+                       let activityOrder = (row["act_order"] as? Int64).map({ Int($0) }) ?? (row["act_order"] as? Int),
+                       let colorsData = colorsStr.data(using: .utf8),
+                       let messagesData = messagesStr.data(using: .utf8),
+                       let tipsData = tipsStr.data(using: .utf8),
+                       let colors = try? JSONDecoder().decode(Activity.ActivityColors.self, from: colorsData),
+                       let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
+                       let tips = try? JSONDecoder().decode([String].self, from: tipsData) {
+                        activity = Activity(
+                            id: activityId,
+                            name: activityName,
+                            icon: activityIcon,
+                            default_grace_minutes: activityGrace,
+                            colors: colors,
+                            messages: messages,
+                            safety_tips: tips,
+                            order: activityOrder
+                        )
+                    } else {
+                        // Placeholder activity for trips with missing activity data
+                        let activityId = (row["activity_id"] as? Int64).map({ Int($0) }) ?? (row["activity_id"] as? Int) ?? 0
+                        debugLog("[LocalStorage] ⚠️ Using placeholder activity for trip #\(id) '\(title)'")
+                        activity = Activity(
+                            id: activityId,
+                            name: "Activity",
+                            icon: "figure.walk",
+                            default_grace_minutes: 15,
+                            colors: Activity.ActivityColors(primary: "#666666", secondary: "#999999", accent: "#CCCCCC"),
+                            messages: Activity.ActivityMessages(
+                                start: "Start your trip",
+                                checkin: "Check in",
+                                checkout: "I'm safe",
+                                overdue: "Overdue",
+                                encouragement: ["Stay safe!"]
+                            ),
+                            safety_tips: [],
+                            order: 999
+                        )
+                    }
 
                     return Trip(
                         id: id,
@@ -497,9 +588,9 @@ final class LocalStorage {
                         completed_at: completedAtDate,
                         last_checkin: row["last_checkin"] as? String,
                         created_at: createdAt,
-                        contact1: row["contact1"] as? Int,
-                        contact2: row["contact2"] as? Int,
-                        contact3: row["contact3"] as? Int,
+                        contact1: (row["contact1"] as? Int64).map({ Int($0) }) ?? (row["contact1"] as? Int),
+                        contact2: (row["contact2"] as? Int64).map({ Int($0) }) ?? (row["contact2"] as? Int),
+                        contact3: (row["contact3"] as? Int64).map({ Int($0) }) ?? (row["contact3"] as? Int),
                         checkin_token: row["checkin_token"] as? String,
                         checkout_token: row["checkout_token"] as? String
                     )
@@ -512,56 +603,60 @@ final class LocalStorage {
     }
 
     /// Get a specific cached trip
+    /// Uses LEFT JOIN with placeholder activity for consistency with getCachedTrips()
     func getCachedTrip(id: Int) -> Trip? {
         guard let dbQueue = dbQueue else { return nil }
 
         do {
             return try dbQueue.read { db -> Trip? in
+                // Use LEFT JOIN so trips are returned even if activity is missing (consistent with getCachedTrips)
                 guard let row = try Row.fetchOne(db, sql: """
                     SELECT ct.*, ca.id as act_id, ca.name as act_name, ca.icon as act_icon,
                            ca.default_grace_minutes as act_grace, ca.colors as act_colors,
                            ca.messages as act_messages, ca.safety_tips as act_tips,
                            ca."order" as act_order
                     FROM cached_trips ct
-                    JOIN cached_activities ca ON ct.activity_id = ca.id
+                    LEFT JOIN cached_activities ca ON ct.activity_id = ca.id
                     WHERE ct.id = ?
                 """, arguments: [id]) else {
                     debugLog("[LocalStorage] ⚠️ Trip #\(id) not found in cache")
                     return nil
                 }
 
-                // Check for orphaned trip (missing activity)
-                guard let activityId = row["act_id"] as? Int else {
-                    let tripTitle = row["title"] as? String ?? "Unknown"
-                    debugLog("[LocalStorage] ⚠️ Trip #\(id) '\(tripTitle)' has missing activity - cannot load")
+                // Handle Int64 -> Int conversion (SQLite uses 64-bit integers)
+                guard let tripId = (row["id"] as? Int64).map({ Int($0) }) ?? (row["id"] as? Int),
+                      let userId = (row["user_id"] as? Int64).map({ Int($0) }) ?? (row["user_id"] as? Int),
+                      let title = row["title"] as? String,
+                      let startStr = row["start"] as? String,
+                      let etaStr = row["eta"] as? String,
+                      let graceMin = (row["grace_min"] as? Int64).map({ Int($0) }) ?? (row["grace_min"] as? Int),
+                      let status = row["status"] as? String,
+                      let createdAt = row["created_at"] as? String
+                else {
+                    debugLog("[LocalStorage] ⚠️ Failed to parse cached trip #\(id)")
                     return nil
                 }
 
-                guard let tripId = row["id"] as? Int,
-                      let userId = row["user_id"] as? Int,
-                      let title = row["title"] as? String,
-                      let activityName = row["act_name"] as? String,
-                      let activityIcon = row["act_icon"] as? String,
-                      let activityGrace = row["act_grace"] as? Int,
-                      let colorsStr = row["act_colors"] as? String,
-                      let messagesStr = row["act_messages"] as? String,
-                      let tipsStr = row["act_tips"] as? String,
-                      let activityOrder = row["act_order"] as? Int,
-                      let startStr = row["start"] as? String,
-                      let etaStr = row["eta"] as? String,
-                      let graceMin = row["grace_min"] as? Int,
-                      let status = row["status"] as? String,
-                      let createdAt = row["created_at"] as? String,
-                      let startDate = ISO8601DateFormatter().date(from: startStr),
-                      let etaDate = ISO8601DateFormatter().date(from: etaStr),
-                      let colorsData = colorsStr.data(using: .utf8),
-                      let messagesData = messagesStr.data(using: .utf8),
-                      let tipsData = tipsStr.data(using: .utf8),
-                      let colors = try? JSONDecoder().decode(Activity.ActivityColors.self, from: colorsData),
-                      let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
-                      let tips = try? JSONDecoder().decode([String].self, from: tipsData)
-                else {
-                    debugLog("[LocalStorage] ⚠️ Failed to parse cached trip #\(id)")
+                // Parse dates - try with and without fractional seconds
+                let dateFormatter = ISO8601DateFormatter()
+                var startDate = dateFormatter.date(from: startStr)
+                if startDate == nil {
+                    dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    startDate = dateFormatter.date(from: startStr)
+                }
+                guard let startDate = startDate else {
+                    debugLog("[LocalStorage] ⚠️ Failed to parse start date for trip #\(id)")
+                    return nil
+                }
+
+                dateFormatter.formatOptions = [.withInternetDateTime]
+                var etaDate = dateFormatter.date(from: etaStr)
+                if etaDate == nil {
+                    dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    etaDate = dateFormatter.date(from: etaStr)
+                }
+                guard let etaDate = etaDate else {
+                    debugLog("[LocalStorage] ⚠️ Failed to parse eta date for trip #\(id)")
                     return nil
                 }
 
@@ -573,16 +668,54 @@ final class LocalStorage {
                     return nil
                 }()
 
-                let activity = Activity(
-                    id: activityId,
-                    name: activityName,
-                    icon: activityIcon,
-                    default_grace_minutes: activityGrace,
-                    colors: colors,
-                    messages: messages,
-                    safety_tips: tips,
-                    order: activityOrder
-                )
+                // Build activity - use placeholder if activity data is missing (consistent with getCachedTrips)
+                // Handle Int64 -> Int conversion for activity fields
+                let activity: Activity
+                if let activityId = (row["act_id"] as? Int64).map({ Int($0) }) ?? (row["act_id"] as? Int),
+                   let activityName = row["act_name"] as? String,
+                   let activityIcon = row["act_icon"] as? String,
+                   let activityGrace = (row["act_grace"] as? Int64).map({ Int($0) }) ?? (row["act_grace"] as? Int),
+                   let colorsStr = row["act_colors"] as? String,
+                   let messagesStr = row["act_messages"] as? String,
+                   let tipsStr = row["act_tips"] as? String,
+                   let activityOrder = (row["act_order"] as? Int64).map({ Int($0) }) ?? (row["act_order"] as? Int),
+                   let colorsData = colorsStr.data(using: .utf8),
+                   let messagesData = messagesStr.data(using: .utf8),
+                   let tipsData = tipsStr.data(using: .utf8),
+                   let colors = try? JSONDecoder().decode(Activity.ActivityColors.self, from: colorsData),
+                   let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
+                   let tips = try? JSONDecoder().decode([String].self, from: tipsData) {
+                    activity = Activity(
+                        id: activityId,
+                        name: activityName,
+                        icon: activityIcon,
+                        default_grace_minutes: activityGrace,
+                        colors: colors,
+                        messages: messages,
+                        safety_tips: tips,
+                        order: activityOrder
+                    )
+                } else {
+                    // Placeholder activity for trips with missing activity data
+                    let activityId = (row["activity_id"] as? Int64).map({ Int($0) }) ?? (row["activity_id"] as? Int) ?? 0
+                    debugLog("[LocalStorage] ⚠️ Using placeholder activity for trip #\(tripId) '\(title)'")
+                    activity = Activity(
+                        id: activityId,
+                        name: "Activity",
+                        icon: "figure.walk",
+                        default_grace_minutes: 15,
+                        colors: Activity.ActivityColors(primary: "#666666", secondary: "#999999", accent: "#CCCCCC"),
+                        messages: Activity.ActivityMessages(
+                            start: "Start your trip",
+                            checkin: "Check in",
+                            checkout: "I'm safe",
+                            overdue: "Overdue",
+                            encouragement: ["Stay safe!"]
+                        ),
+                        safety_tips: [],
+                        order: 999
+                    )
+                }
 
                 return Trip(
                     id: tripId,
@@ -600,9 +733,9 @@ final class LocalStorage {
                     completed_at: completedAtDate,
                     last_checkin: row["last_checkin"] as? String,
                     created_at: createdAt,
-                    contact1: row["contact1"] as? Int,
-                    contact2: row["contact2"] as? Int,
-                    contact3: row["contact3"] as? Int,
+                    contact1: (row["contact1"] as? Int64).map({ Int($0) }) ?? (row["contact1"] as? Int),
+                    contact2: (row["contact2"] as? Int64).map({ Int($0) }) ?? (row["contact2"] as? Int),
+                    contact3: (row["contact3"] as? Int64).map({ Int($0) }) ?? (row["contact3"] as? Int),
                     checkin_token: row["checkin_token"] as? String,
                     checkout_token: row["checkout_token"] as? String
                 )
@@ -649,7 +782,17 @@ final class LocalStorage {
             "status": "status",
             "eta": "eta",
             "completed_at": "completed_at",
-            "last_checkin": "last_checkin"
+            "last_checkin": "last_checkin",
+            "title": "title",
+            "activity_id": "activity_id",
+            "grace_min": "grace_min",
+            "location_text": "location_text",
+            "gen_lat": "gen_lat",
+            "gen_lon": "gen_lon",
+            "notes": "notes",
+            "contact1": "contact1",
+            "contact2": "contact2",
+            "contact3": "contact3"
         ]
 
         do {
@@ -669,6 +812,10 @@ final class LocalStorage {
                         arguments.append(stringValue.databaseValue)
                     } else if let dateValue = value as? Date {
                         arguments.append(ISO8601DateFormatter().string(from: dateValue).databaseValue)
+                    } else if let intValue = value as? Int {
+                        arguments.append(intValue.databaseValue)
+                    } else if let doubleValue = value as? Double {
+                        arguments.append(doubleValue.databaseValue)
                     } else if value is NSNull {
                         arguments.append(.null)
                     } else {
@@ -695,9 +842,35 @@ final class LocalStorage {
 
     // MARK: - Pending Actions (Offline Sync)
 
+    /// Check if a similar action is already pending (for duplicate detection)
+    func hasPendingAction(type: String, tripId: Int?) -> Bool {
+        guard let dbQueue = dbQueue else { return false }
+
+        do {
+            return try dbQueue.read { db in
+                let count = try Int.fetchOne(db, sql: """
+                    SELECT COUNT(*) FROM pending_actions
+                    WHERE action_type = ? AND (trip_id = ? OR (trip_id IS NULL AND ? IS NULL))
+                """, arguments: [type, tripId, tripId]) ?? 0
+                return count > 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to check pending action: \(error)")
+            return false
+        }
+    }
+
     /// Queue an action to be synced when online
+    /// For idempotent actions (checkin, extend), duplicates are skipped
     func queuePendingAction(type: String, tripId: Int?, payload: [String: Any]) {
         guard let dbQueue = dbQueue else { return }
+
+        // Skip duplicate idempotent actions (checkin, extend for the same trip)
+        // These actions are idempotent - queueing multiple has no benefit
+        if ["checkin", "extend"].contains(type) && hasPendingAction(type: type, tripId: tripId) {
+            debugLog("[LocalStorage] ⚠️ Skipping duplicate \(type) action for trip #\(tripId ?? -1)")
+            return
+        }
 
         do {
             let payloadData = try JSONSerialization.data(withJSONObject: payload)
@@ -774,6 +947,98 @@ final class LocalStorage {
         }
     }
 
+    /// Clear all pending actions (useful for stuck actions)
+    func clearPendingActions() {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM pending_actions")
+            }
+            debugLog("[LocalStorage] ✅ Cleared all pending actions")
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to clear pending actions: \(error)")
+        }
+    }
+
+    // MARK: - Failed Actions (for user awareness of permanently failed syncs)
+
+    /// Log a permanently failed action for user awareness
+    func logFailedAction(type: String, tripId: Int?, error: String) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: """
+                    INSERT INTO failed_actions (action_type, trip_id, error, failed_at)
+                    VALUES (?, ?, ?, ?)
+                """, arguments: [
+                    type,
+                    tripId,
+                    error,
+                    ISO8601DateFormatter().string(from: Date())
+                ])
+            }
+            debugLog("[LocalStorage] ⚠️ Logged failed action: \(type) - \(error)")
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to log failed action: \(error)")
+        }
+    }
+
+    /// Get count of failed actions
+    func getFailedActionsCount() -> Int {
+        guard let dbQueue = dbQueue else { return 0 }
+
+        do {
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM failed_actions") ?? 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get failed actions count: \(error)")
+            return 0
+        }
+    }
+
+    /// Get all failed actions for display
+    func getFailedActions() -> [(id: Int, type: String, tripId: Int?, error: String, failedAt: String)] {
+        guard let dbQueue = dbQueue else { return [] }
+
+        do {
+            return try dbQueue.read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT * FROM failed_actions ORDER BY failed_at DESC
+                """)
+
+                return rows.compactMap { row -> (id: Int, type: String, tripId: Int?, error: String, failedAt: String)? in
+                    guard let id = row["id"] as? Int,
+                          let type = row["action_type"] as? String,
+                          let error = row["error"] as? String,
+                          let failedAt = row["failed_at"] as? String
+                    else { return nil }
+
+                    return (id: id, type: type, tripId: row["trip_id"] as? Int, error: error, failedAt: failedAt)
+                }
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get failed actions: \(error)")
+            return []
+        }
+    }
+
+    /// Clear all failed actions (after user acknowledges)
+    func clearFailedActions() {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM failed_actions")
+            }
+            debugLog("[LocalStorage] ✅ Cleared all failed actions")
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to clear failed actions: \(error)")
+        }
+    }
+
     // MARK: - Auth Tokens (Backup)
 
     /// Save auth tokens as backup to Keychain
@@ -829,40 +1094,45 @@ final class LocalStorage {
     // MARK: - Activity Caching
 
     /// Cache activities from the server
+    /// Uses savepoint for atomic operation - if any insert fails, entire operation rolls back
     func cacheActivities(_ activities: [Activity]) {
         guard let dbQueue = dbQueue else { return }
 
         do {
             try dbQueue.write { db in
-                // Clear existing cache
-                try db.execute(sql: "DELETE FROM cached_activities")
+                // Use savepoint for rollback capability
+                try db.inSavepoint {
+                    // Clear existing cache
+                    try db.execute(sql: "DELETE FROM cached_activities")
 
-                // Insert activities
-                for activity in activities {
-                    let colorsJSON = try JSONEncoder().encode(activity.colors)
-                    let messagesJSON = try JSONEncoder().encode(activity.messages)
-                    let tipsJSON = try JSONEncoder().encode(activity.safety_tips)
+                    // Insert activities
+                    for activity in activities {
+                        let colorsJSON = try JSONEncoder().encode(activity.colors)
+                        let messagesJSON = try JSONEncoder().encode(activity.messages)
+                        let tipsJSON = try JSONEncoder().encode(activity.safety_tips)
 
-                    try db.execute(sql: """
-                        INSERT INTO cached_activities
-                        (id, name, icon, default_grace_minutes, colors, messages, safety_tips, "order", cached_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, arguments: [
-                        activity.id,
-                        activity.name,
-                        activity.icon,
-                        activity.default_grace_minutes,
-                        String(data: colorsJSON, encoding: .utf8),
-                        String(data: messagesJSON, encoding: .utf8),
-                        String(data: tipsJSON, encoding: .utf8),
-                        activity.order,
-                        ISO8601DateFormatter().string(from: Date())
-                    ])
+                        try db.execute(sql: """
+                            INSERT INTO cached_activities
+                            (id, name, icon, default_grace_minutes, colors, messages, safety_tips, "order", cached_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, arguments: [
+                            activity.id,
+                            activity.name,
+                            activity.icon,
+                            activity.default_grace_minutes,
+                            String(data: colorsJSON, encoding: .utf8),
+                            String(data: messagesJSON, encoding: .utf8),
+                            String(data: tipsJSON, encoding: .utf8),
+                            activity.order,
+                            ISO8601DateFormatter().string(from: Date())
+                        ])
+                    }
+                    return .commit
                 }
             }
             debugLog("[LocalStorage] Cached \(activities.count) activities")
         } catch {
-            debugLog("[LocalStorage] Failed to cache activities: \(error)")
+            debugLog("[LocalStorage] ❌ Failed to cache activities (rolled back): \(error)")
         }
     }
 
@@ -877,21 +1147,25 @@ final class LocalStorage {
                 """)
 
                 return rows.compactMap { row -> Activity? in
-                    guard let id = row["id"] as? Int,
+                    // Handle Int64 -> Int conversion (SQLite uses 64-bit integers)
+                    guard let id = (row["id"] as? Int64).map({ Int($0) }) ?? (row["id"] as? Int),
                           let name = row["name"] as? String,
                           let icon = row["icon"] as? String,
-                          let graceMin = row["default_grace_minutes"] as? Int,
+                          let graceMin = (row["default_grace_minutes"] as? Int64).map({ Int($0) }) ?? (row["default_grace_minutes"] as? Int),
                           let colorsStr = row["colors"] as? String,
                           let messagesStr = row["messages"] as? String,
                           let tipsStr = row["safety_tips"] as? String,
-                          let order = row["order"] as? Int,
+                          let order = (row["order"] as? Int64).map({ Int($0) }) ?? (row["order"] as? Int),
                           let colorsData = colorsStr.data(using: .utf8),
                           let messagesData = messagesStr.data(using: .utf8),
                           let tipsData = tipsStr.data(using: .utf8),
                           let colors = try? JSONDecoder().decode(Activity.ActivityColors.self, from: colorsData),
                           let messages = try? JSONDecoder().decode(Activity.ActivityMessages.self, from: messagesData),
                           let tips = try? JSONDecoder().decode([String].self, from: tipsData)
-                    else { return nil }
+                    else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse cached activity data")
+                        return nil
+                    }
 
                     return Activity(
                         id: id,
@@ -920,10 +1194,11 @@ final class LocalStorage {
         do {
             try dbQueue.write { db in
                 try db.execute(sql: """
-                    INSERT OR REPLACE INTO cached_contacts (id, name, email, cached_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT OR REPLACE INTO cached_contacts (id, user_id, name, email, cached_at)
+                    VALUES (?, ?, ?, ?, ?)
                 """, arguments: [
                     contact.id,
+                    contact.user_id,
                     contact.name,
                     contact.email,
                     ISO8601DateFormatter().string(from: Date())
@@ -936,30 +1211,36 @@ final class LocalStorage {
     }
 
     /// Cache multiple contacts from the server
+    /// Uses savepoint for atomic operation - if any insert fails, entire operation rolls back
     func cacheContacts(_ contacts: [Contact]) {
         guard let dbQueue = dbQueue else { return }
 
         do {
             try dbQueue.write { db in
-                // Clear existing cache
-                try db.execute(sql: "DELETE FROM cached_contacts")
+                // Use savepoint for rollback capability
+                try db.inSavepoint {
+                    // Clear existing cache
+                    try db.execute(sql: "DELETE FROM cached_contacts")
 
-                // Insert contacts
-                for contact in contacts {
-                    try db.execute(sql: """
-                        INSERT INTO cached_contacts (id, name, email, cached_at)
-                        VALUES (?, ?, ?, ?)
-                    """, arguments: [
-                        contact.id,
-                        contact.name,
-                        contact.email,
-                        ISO8601DateFormatter().string(from: Date())
-                    ])
+                    // Insert contacts
+                    for contact in contacts {
+                        try db.execute(sql: """
+                            INSERT INTO cached_contacts (id, user_id, name, email, cached_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, arguments: [
+                            contact.id,
+                            contact.user_id,
+                            contact.name,
+                            contact.email,
+                            ISO8601DateFormatter().string(from: Date())
+                        ])
+                    }
+                    return .commit
                 }
             }
             debugLog("[LocalStorage] Cached \(contacts.count) contacts")
         } catch {
-            debugLog("[LocalStorage] Failed to cache contacts: \(error)")
+            debugLog("[LocalStorage] ❌ Failed to cache contacts (rolled back): \(error)")
         }
     }
 
@@ -974,12 +1255,17 @@ final class LocalStorage {
                 """)
 
                 return rows.compactMap { row -> Contact? in
-                    guard let id = row["id"] as? Int,
+                    // Handle Int64 -> Int conversion (SQLite uses 64-bit integers)
+                    guard let id = (row["id"] as? Int64).map({ Int($0) }) ?? (row["id"] as? Int),
+                          let userId = (row["user_id"] as? Int64).map({ Int($0) }) ?? (row["user_id"] as? Int),
                           let name = row["name"] as? String,
                           let email = row["email"] as? String
-                    else { return nil }
+                    else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse cached contact data")
+                        return nil
+                    }
 
-                    return Contact(id: id, name: name, email: email)
+                    return Contact(id: id, user_id: userId, name: name, email: email)
                 }
             }
         } catch {
@@ -1024,6 +1310,127 @@ final class LocalStorage {
         }
     }
 
+    // MARK: - Timeline Caching
+
+    /// Cache timeline events for a trip
+    func cacheTimeline(tripId: Int, events: [TimelineEvent]) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                // Clear existing timeline for this trip
+                try db.execute(sql: "DELETE FROM cached_timeline WHERE trip_id = ?", arguments: [tripId])
+
+                // Insert new events
+                for event in events {
+                    try db.execute(sql: """
+                        INSERT INTO cached_timeline (trip_id, kind, at, lat, lon, extended_by, cached_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, arguments: [
+                        tripId,
+                        event.kind,
+                        event.at,
+                        event.lat,
+                        event.lon,
+                        event.extended_by,
+                        ISO8601DateFormatter().string(from: Date())
+                    ])
+                }
+            }
+            debugLog("[LocalStorage] Cached \(events.count) timeline events for trip #\(tripId)")
+        } catch {
+            debugLog("[LocalStorage] Failed to cache timeline: \(error)")
+        }
+    }
+
+    /// Get cached timeline events for a trip
+    func getCachedTimeline(tripId: Int) -> [TimelineEvent] {
+        guard let dbQueue = dbQueue else { return [] }
+
+        do {
+            return try dbQueue.read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT kind, at, lat, lon, extended_by FROM cached_timeline
+                    WHERE trip_id = ?
+                    ORDER BY at ASC
+                """, arguments: [tripId])
+
+                return rows.compactMap { row -> TimelineEvent? in
+                    guard let kind = row["kind"] as? String,
+                          let at = row["at"] as? String
+                    else { return nil }
+
+                    return TimelineEvent(
+                        kind: kind,
+                        at: at,
+                        lat: row["lat"] as? Double,
+                        lon: row["lon"] as? Double,
+                        extended_by: row["extended_by"] as? Int
+                    )
+                }
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get cached timeline: \(error)")
+            return []
+        }
+    }
+
+    /// Clear cached timeline for a trip
+    func clearCachedTimeline(tripId: Int) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM cached_timeline WHERE trip_id = ?", arguments: [tripId])
+            }
+            debugLog("[LocalStorage] ✅ Cleared cached timeline for trip #\(tripId)")
+        } catch {
+            debugLog("[LocalStorage] Failed to clear cached timeline: \(error)")
+        }
+    }
+
+    /// Get the age of cached timeline data for a trip (for freshness indicator)
+    /// Returns nil if no cached data exists
+    func getTimelineCacheAge(tripId: Int) -> TimeInterval? {
+        guard let dbQueue = dbQueue else { return nil }
+
+        do {
+            return try dbQueue.read { db in
+                guard let cachedAtStr = try String.fetchOne(db, sql: """
+                    SELECT cached_at FROM cached_timeline WHERE trip_id = ? LIMIT 1
+                """, arguments: [tripId]),
+                      let cachedAt = ISO8601DateFormatter().date(from: cachedAtStr) else {
+                    return nil
+                }
+                return Date().timeIntervalSince(cachedAt)
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get timeline cache age: \(error)")
+            return nil
+        }
+    }
+
+    /// Get the age of cached trip data (for freshness indicator)
+    /// Returns nil if trip not cached
+    func getTripCacheAge(tripId: Int) -> TimeInterval? {
+        guard let dbQueue = dbQueue else { return nil }
+
+        do {
+            return try dbQueue.read { db in
+                guard let cachedAtStr = try String.fetchOne(db, sql: """
+                    SELECT cached_at FROM cached_trips WHERE id = ? LIMIT 1
+                """, arguments: [tripId]),
+                      let cachedAt = ISO8601DateFormatter().date(from: cachedAtStr) else {
+                    return nil
+                }
+                return Date().timeIntervalSince(cachedAt)
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get trip cache age: \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Clear All Data
 
     /// Clear all local storage (for logout)
@@ -1037,10 +1444,50 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM auth_tokens")
                 try db.execute(sql: "DELETE FROM cached_activities")
                 try db.execute(sql: "DELETE FROM cached_contacts")
+                try db.execute(sql: "DELETE FROM cached_timeline")
+                try db.execute(sql: "DELETE FROM failed_actions")
             }
             debugLog("[LocalStorage] Cleared all data")
         } catch {
             debugLog("[LocalStorage] Failed to clear all data: \(error)")
+        }
+    }
+
+    // MARK: - Cache TTL/Expiration
+
+    /// Clean up old cached data (called periodically to prevent stale data buildup)
+    /// Removes cached trips and timeline entries older than specified days
+    func cleanupOldCache(olderThanDays: Int = 30) {
+        guard let dbQueue = dbQueue else { return }
+
+        let cutoffDate = Calendar.current.date(byAdding: .day, value: -olderThanDays, to: Date()) ?? Date()
+        let cutoffString = ISO8601DateFormatter().string(from: cutoffDate)
+
+        do {
+            try dbQueue.write { db in
+                // Get IDs of old trips before deleting
+                let oldTripIds = try Int.fetchAll(db, sql: """
+                    SELECT id FROM cached_trips WHERE cached_at < ?
+                """, arguments: [cutoffString])
+
+                if !oldTripIds.isEmpty {
+                    // Delete old trips
+                    try db.execute(sql: """
+                        DELETE FROM cached_trips WHERE cached_at < ?
+                    """, arguments: [cutoffString])
+
+                    // Delete associated timeline entries
+                    let placeholders = oldTripIds.map { _ in "?" }.joined(separator: ", ")
+                    try db.execute(
+                        sql: "DELETE FROM cached_timeline WHERE trip_id IN (\(placeholders))",
+                        arguments: StatementArguments(oldTripIds)
+                    )
+
+                    debugLog("[LocalStorage] 🧹 Cleaned up \(oldTripIds.count) cached trips older than \(olderThanDays) days")
+                }
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to cleanup old cache: \(error)")
         }
     }
 
@@ -1070,6 +1517,20 @@ final class LocalStorage {
             }
         } catch {
             debugLog("[LocalStorage] Failed to get cached activities count: \(error)")
+            return 0
+        }
+    }
+
+    /// Get count of cached contacts
+    func getCachedContactsCount() -> Int {
+        guard let dbQueue = dbQueue else { return 0 }
+
+        do {
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cached_contacts") ?? 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get cached contacts count: \(error)")
             return 0
         }
     }

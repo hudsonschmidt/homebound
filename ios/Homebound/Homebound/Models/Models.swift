@@ -1,13 +1,64 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Date Parsing Utility
+
+/// Parse ISO8601 date string with fallback for different formats
+/// Handles Python's isoformat() output (no timezone) and various other formats
+func parseISO8601Date(_ dateString: String) -> Date? {
+    // Normalize: replace space with 'T' if needed (Python str() uses space)
+    let normalizedString = dateString.replacingOccurrences(of: " ", with: "T")
+
+    // Try with fractional seconds first (ISO8601 with timezone)
+    let formatterWithFractional = ISO8601DateFormatter()
+    formatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatterWithFractional.date(from: normalizedString) { return date }
+
+    // Try without fractional seconds (ISO8601 with timezone)
+    let formatterWithoutFractional = ISO8601DateFormatter()
+    formatterWithoutFractional.formatOptions = [.withInternetDateTime]
+    if let date = formatterWithoutFractional.date(from: normalizedString) { return date }
+
+    // Try with explicit timezone option
+    let formatterWithTimezone = ISO8601DateFormatter()
+    formatterWithTimezone.formatOptions = [.withInternetDateTime, .withTimeZone]
+    if let date = formatterWithTimezone.date(from: normalizedString) { return date }
+
+    // Try custom formats for Python output without timezone
+    let customFormatter = DateFormatter()
+    customFormatter.timeZone = TimeZone(identifier: "UTC")
+
+    // Python isoformat with microseconds: "2025-12-05T10:30:00.123456"
+    customFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+    if let date = customFormatter.date(from: normalizedString) { return date }
+
+    // Python isoformat with milliseconds: "2025-12-05T10:30:00.123"
+    customFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+    if let date = customFormatter.date(from: normalizedString) { return date }
+
+    // Python isoformat without fractional: "2025-12-05T10:30:00"
+    customFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+    if let date = customFormatter.date(from: normalizedString) { return date }
+
+    // Python str() with microseconds: "2025-12-05 10:30:00.123456"
+    customFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
+    if let date = customFormatter.date(from: dateString) { return date }
+
+    // Python str() without fractional: "2025-12-05 10:30:00"
+    customFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    if let date = customFormatter.date(from: dateString) { return date }
+
+    // Last resort: basic ISO8601
+    let formatterBasic = ISO8601DateFormatter()
+    return formatterBasic.date(from: normalizedString)
+}
+
 // MARK: - Contact Model (for user's saved contacts)
 struct Contact: Identifiable, Codable, Hashable {
     let id: Int
     let user_id: Int
     let name: String
-    let phone: String?  // Deprecated - no longer used
-    let email: String?
+    let email: String
 }
 
 struct ContactCreateRequest: Codable {
@@ -94,8 +145,22 @@ struct Trip: Codable, Identifiable, Equatable {
         let startString = try container.decode(String.self, forKey: .start)
         let etaString = try container.decode(String.self, forKey: .eta)
 
-        start_at = Self.parseISO8601Date(startString) ?? Date()
-        eta_at = Self.parseISO8601Date(etaString) ?? Date()
+        guard let parsedStart = parseISO8601Date(startString) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .start,
+                in: container,
+                debugDescription: "Failed to parse start date: '\(startString)'"
+            )
+        }
+        guard let parsedEta = parseISO8601Date(etaString) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .eta,
+                in: container,
+                debugDescription: "Failed to parse eta date: '\(etaString)'"
+            )
+        }
+        start_at = parsedStart
+        eta_at = parsedEta
 
         grace_minutes = try container.decode(Int.self, forKey: .grace_min)
         location_text = try container.decodeIfPresent(String.self, forKey: .location_text)
@@ -107,7 +172,7 @@ struct Trip: Codable, Identifiable, Equatable {
         // Parse completed_at date string if present
         if let completedAtString = try container.decodeIfPresent(String.self, forKey: .completed_at) {
             debugLog("[Trip Decoder] ✅ completed_at string received: '\(completedAtString)' for trip id=\(id)")
-            completed_at = Self.parseISO8601Date(completedAtString)
+            completed_at = parseISO8601Date(completedAtString)
             if let parsedDate = completed_at {
                 debugLog("[Trip Decoder] ✅ completed_at parsed successfully: \(parsedDate)")
             } else {
@@ -152,63 +217,6 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(contact3, forKey: .contact3)
         try container.encodeIfPresent(checkin_token, forKey: .checkin_token)
         try container.encodeIfPresent(checkout_token, forKey: .checkout_token)
-    }
-
-    /// Parse ISO8601 date string with fallback for different formats
-    private static func parseISO8601Date(_ dateString: String) -> Date? {
-        // First, normalize the string - replace space with 'T' if needed (backend uses str() which produces space)
-        let normalizedString = dateString.replacingOccurrences(of: " ", with: "T")
-
-        // Try with fractional seconds first
-        let formatterWithFractional = ISO8601DateFormatter()
-        formatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatterWithFractional.date(from: normalizedString) {
-            return date
-        }
-
-        // Try without fractional seconds
-        let formatterWithoutFractional = ISO8601DateFormatter()
-        formatterWithoutFractional.formatOptions = [.withInternetDateTime]
-        if let date = formatterWithoutFractional.date(from: normalizedString) {
-            return date
-        }
-
-        // Try with timezone
-        let formatterWithTimezone = ISO8601DateFormatter()
-        formatterWithTimezone.formatOptions = [.withInternetDateTime, .withTimeZone]
-        if let date = formatterWithTimezone.date(from: normalizedString) {
-            return date
-        }
-
-        // Try custom DateFormatter for format: "yyyy-MM-dd HH:mm:ss" (Python str() format)
-        let customFormatter = DateFormatter()
-        customFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        customFormatter.timeZone = TimeZone(identifier: "UTC")
-        if let date = customFormatter.date(from: dateString) {
-            return date
-        }
-
-        // Try with milliseconds: "yyyy-MM-dd HH:mm:ss.SSSSSS"
-        customFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
-        if let date = customFormatter.date(from: dateString) {
-            return date
-        }
-
-        // Try with T separator and microseconds (no timezone): "2025-11-24T07:26:43.111442"
-        customFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        if let date = customFormatter.date(from: normalizedString) {
-            return date
-        }
-
-        // Try with T separator and milliseconds (no timezone): "2025-11-24T07:26:43.111"
-        customFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
-        if let date = customFormatter.date(from: normalizedString) {
-            return date
-        }
-
-        // Last resort: try basic ISO8601 format
-        let formatterBasic = ISO8601DateFormatter()
-        return formatterBasic.date(from: normalizedString)
     }
 
     /// Memberwise initializer for local storage
@@ -263,10 +271,26 @@ struct TimelineResponse: Codable {
 }
 
 struct TimelineEvent: Codable, Identifiable {
-    var id: String { "\(kind)-\(at.timeIntervalSince1970)" }
+    var id: String { "\(kind)-\(atDate?.timeIntervalSince1970 ?? 0)" }
     var kind: String
-    var at: Date
-    var meta: String?
+    var at: String  // ISO8601 string from backend
+    var lat: Double?
+    var lon: Double?
+    var extended_by: Int?
+
+    // Computed property to get Date - uses global parseISO8601Date for robust parsing
+    var atDate: Date? {
+        parseISO8601Date(at)
+    }
+
+    // Memberwise initializer for LocalStorage
+    init(kind: String, at: String, lat: Double?, lon: Double?, extended_by: Int?) {
+        self.kind = kind
+        self.at = at
+        self.lat = lat
+        self.lon = lon
+        self.extended_by = extended_by
+    }
 }
 
 // MARK: - Activity Models (from database)

@@ -168,7 +168,7 @@ struct CreatePlanView: View {
                             if let savedContact = session.contacts.first(where: { $0.id == contactId }) {
                                 contacts.append(EmergencyContact(
                                     name: savedContact.name,
-                                    email: savedContact.email ?? "",
+                                    email: savedContact.email,
                                     savedContactId: savedContact.id
                                 ))
                             }
@@ -1792,16 +1792,16 @@ struct ContactsSelectionSheet: View {
                             .filter { tempSelection.contains($0.id) }
                             .compactMap { saved -> EmergencyContact? in
                                 // Only include contacts with an email
-                                guard let email = saved.email, !email.isEmpty else {
+                                guard !saved.email.isEmpty else {
                                     return nil
                                 }
                                 // Don't add duplicates
-                                guard !selectedContacts.contains(where: { $0.email == email }) else {
+                                guard !selectedContacts.contains(where: { $0.email == saved.email }) else {
                                     return nil
                                 }
                                 return EmergencyContact(
                                     name: saved.name,
-                                    email: email,
+                                    email: saved.email,
                                     savedContactId: saved.id  // Pass the saved contact ID to prevent duplication
                                 )
                             }
@@ -1860,8 +1860,8 @@ struct ContactSelectionRow: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.primary)
 
-                    if let email = contact.email, !email.isEmpty {
-                        Text(email)
+                    if !contact.email.isEmpty {
+                        Text(contact.email)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

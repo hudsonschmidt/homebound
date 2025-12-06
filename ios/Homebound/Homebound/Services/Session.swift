@@ -36,7 +36,6 @@ private struct VerifyResponse: Decodable {
         let last_name: String?
         let name: String?  // Fallback for compatibility
         let age: Int?
-        let phone: String?
         let profile_completed: Bool?
     }
 }
@@ -63,7 +62,6 @@ private struct RefreshResponse: Decodable {
         let last_name: String?
         let name: String?  // Fallback for compatibility
         let age: Int?
-        let phone: String?
         let profile_completed: Bool?
     }
 }
@@ -145,11 +143,6 @@ final class Session: ObservableObject {
             saveUserDataToKeychain()
         }
     }
-    @Published var userPhone: String? = nil {
-        didSet {
-            saveUserDataToKeychain()
-        }
-    }
     @Published var profileCompleted: Bool = false {
         didSet {
             saveUserDataToKeychain()
@@ -166,11 +159,13 @@ final class Session: ObservableObject {
 
     // Active plan
     @Published var activeTrip: Trip? = nil
+    @Published var allTrips: [Trip] = []
     @Published var isLoadingTrip: Bool = false
 
     // Offline state
     @Published var isOffline: Bool = false
     @Published var pendingActionsCount: Int = 0
+    @Published var failedActionsCount: Int = 0
 
     // Activities
     @Published var activities: [Activity] = []
@@ -189,19 +184,33 @@ final class Session: ObservableObject {
         // Load saved tokens and user data on init
         loadFromKeychain()
 
+        // Log cache statistics for debugging
+        let tripCount = LocalStorage.shared.getCachedTripsCount()
+        let activityCount = LocalStorage.shared.getCachedActivitiesCount()
+        let contactCount = LocalStorage.shared.getCachedContactsCount()
+        debugLog("[Session] 📊 Cache stats: \(tripCount) trips, \(activityCount) activities, \(contactCount) contacts")
+
+        // Load cached data immediately for instant offline support
+        if accessToken != nil {
+            let cachedTrips = LocalStorage.shared.getCachedTrips()
+            self.allTrips = cachedTrips
+            // Include active, overdue, and overdue_notified statuses (all "in progress" trips)
+            let activeStatuses = ["active", "overdue", "overdue_notified"]
+            self.activeTrip = cachedTrips.first { activeStatuses.contains($0.status) }
+            self.contacts = LocalStorage.shared.getCachedContacts()
+            self.activities = LocalStorage.shared.getCachedActivities()
+            debugLog("[Session] ℹ️ Loaded cached data: \(cachedTrips.count) trips, \(contacts.count) contacts, \(activities.count) activities")
+        }
+
         // Initialize pending actions count
         pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+        failedActionsCount = LocalStorage.shared.getFailedActionsCount()
 
         // Set up network monitoring
         setupNetworkMonitoring()
 
-        // Set up background sync observer
-        setupBackgroundSyncObserver()
-
-        // Load activities on app launch
-        Task {
-            await loadActivities()
-        }
+        // Activities are already loaded from cache above
+        // loadInitialData() will refresh from network when appropriate
     }
 
     private func setupNetworkMonitoring() {
@@ -219,12 +228,7 @@ final class Session: ObservableObject {
             }
         }
 
-        // Set initial offline state
-        isOffline = !NetworkMonitor.shared.isConnected
-    }
-
-    private func setupBackgroundSyncObserver() {
-        // Observe background sync requests
+        // Observe background sync requests (from background tasks and silent push)
         backgroundSyncObserver = NotificationCenter.default.addObserver(
             forName: .backgroundSyncRequested,
             object: nil,
@@ -236,6 +240,9 @@ final class Session: ObservableObject {
                 await self.syncPendingActions()
             }
         }
+
+        // Set initial offline state
+        isOffline = !NetworkMonitor.shared.isConnected
     }
 
     deinit {
@@ -855,9 +862,19 @@ final class Session: ObservableObject {
                 payload: payload
             )
 
-            // Update local cache with changes
+            // Update local cache with ALL changes (not just eta)
             var cacheUpdates: [String: Any] = [:]
+            if let title = updates.title { cacheUpdates["title"] = title }
+            if let activity = updates.activity { cacheUpdates["activity_id"] = activity }
             if let eta = updates.eta { cacheUpdates["eta"] = eta }
+            if let graceMin = updates.grace_min { cacheUpdates["grace_min"] = graceMin }
+            if let locationText = updates.location_text { cacheUpdates["location_text"] = locationText }
+            if let lat = updates.gen_lat { cacheUpdates["gen_lat"] = lat }
+            if let lon = updates.gen_lon { cacheUpdates["gen_lon"] = lon }
+            if let notes = updates.notes { cacheUpdates["notes"] = notes }
+            if let contact1 = updates.contact1 { cacheUpdates["contact1"] = contact1 }
+            if let contact2 = updates.contact2 { cacheUpdates["contact2"] = contact2 }
+            if let contact3 = updates.contact3 { cacheUpdates["contact3"] = contact3 }
             if !cacheUpdates.isEmpty {
                 LocalStorage.shared.updateCachedTripFields(tripId: tripId, updates: cacheUpdates)
             }
@@ -876,17 +893,50 @@ final class Session: ObservableObject {
 
     /// Load all initial data needed before showing the main app
     func loadInitialData() async {
-        // Load activities, active trip, profile, and contacts in parallel
-        async let activitiesTask: Void = loadActivities()
-        async let activePlanTask: Void = loadActivePlan()
-        async let profileTask: Void = loadUserProfile()
-        async let contactsTask: [Contact] = loadContacts()
+        // Clean up old cached data (older than 30 days) to prevent storage buildup
+        LocalStorage.shared.cleanupOldCache()
 
-        // Wait for all to complete
-        _ = await (activitiesTask, activePlanTask, profileTask, contactsTask)
+        // ALWAYS load from cache first - don't check, just load whatever exists
+        let cachedActivities = LocalStorage.shared.getCachedActivities()
+        let cachedTrips = LocalStorage.shared.getCachedTrips()
+        let cachedContacts = LocalStorage.shared.getCachedContacts()
+
+        debugLog("[Session] 📦 Loading from cache: \(cachedActivities.count) activities, \(cachedTrips.count) trips, \(cachedContacts.count) contacts")
 
         await MainActor.run {
+            // Populate from cache immediately - always set these to ensure UI gets updated
+            self.allTrips = cachedTrips
+            self.activities = cachedActivities.sorted { $0.order < $1.order }
+            self.contacts = cachedContacts
+            // Include active, overdue, and overdue_notified statuses (all "in progress" trips)
+            let activeStatuses = ["active", "overdue", "overdue_notified"]
+            if let activeTrip = cachedTrips.first(where: { activeStatuses.contains($0.status) }) {
+                self.activeTrip = activeTrip
+            }
+            // Mark as loaded IMMEDIATELY so UI can render
             isInitialDataLoaded = true
+
+            debugLog("[Session] ✅ Cache loaded - allTrips: \(self.allTrips.count), activities: \(self.activities.count), contacts: \(self.contacts.count), activeTrip: \(self.activeTrip?.title ?? "none")")
+        }
+
+        // If offline, we're done - cache is loaded
+        if !NetworkMonitor.shared.isConnected {
+            debugLog("[Session] 📦 Offline - using cached data only")
+            return
+        }
+
+        // If online, refresh in background (don't block UI)
+        debugLog("[Session] 🌐 Online - refreshing from network in background")
+        Task {
+            async let activitiesTask: Void = loadActivities()
+            async let activePlanTask: Void = loadActivePlan()
+            async let profileTask: Void = loadUserProfile()
+            async let contactsTask: [Contact] = loadContacts()
+            async let tripsTask: [Trip] = loadAllTrips()  // Cache all trips for offline access
+            _ = await (activitiesTask, activePlanTask, profileTask, contactsTask, tripsTask)
+
+            // Sync pending actions after data loads
+            await syncPendingActions()
         }
     }
 
@@ -895,6 +945,29 @@ final class Session: ObservableObject {
             self.isLoadingTrip = true
         }
 
+        // Show cached data immediately if we don't have an active trip yet
+        // Include active, overdue, and overdue_notified statuses (all "in progress" trips)
+        let cachedTrips = LocalStorage.shared.getCachedTrips()
+        let activeStatuses = ["active", "overdue", "overdue_notified"]
+        let cachedActive = cachedTrips.first { activeStatuses.contains($0.status) }
+
+        if self.activeTrip == nil, let cached = cachedActive {
+            await MainActor.run {
+                self.activeTrip = cached
+            }
+        }
+
+        // If offline, use cache and return immediately - don't wait for network timeout
+        if !NetworkMonitor.shared.isConnected {
+            await MainActor.run {
+                self.activeTrip = cachedActive
+                self.isLoadingTrip = false
+                debugLog("[Session] 📦 Loaded active trip from cache (offline)")
+            }
+            return
+        }
+
+        // Then try network for fresh data
         do {
             let response: Trip? = try await withAuth { bearer in
                 try await self.api.get(
@@ -913,23 +986,31 @@ final class Session: ObservableObject {
                 }
             }
         } catch {
-            // If active plan endpoint fails, try to load from cache
-            // Don't auto-signout - tokens last 30 days and user should stay signed in
+            // Network failed - already showing cached data, just stop loading
             await MainActor.run {
-                // Try to load active plan from cache
-                let cachedTrips = LocalStorage.shared.getCachedTrips()
-                self.activeTrip = cachedTrips.first { $0.status == "active" }
-                self.isLoadingTrip = false
-
-                if self.activeTrip != nil {
-                    self.notice = "Loaded from cache (offline mode)"
+                // If we don't have anything yet, try cache one more time
+                if self.activeTrip == nil {
+                    self.activeTrip = cachedActive
                 }
+                self.isLoadingTrip = false
             }
         }
     }
 
     /// Load all trips with caching for offline access
     func loadAllTrips() async -> [Trip] {
+        // Get cached trips first for immediate display
+        let cachedTrips = LocalStorage.shared.getCachedTrips()
+
+        // If offline, return cached data immediately
+        if !NetworkMonitor.shared.isConnected {
+            debugLog("[Session] 📦 Offline - returning \(cachedTrips.count) cached trips")
+            await MainActor.run {
+                self.allTrips = cachedTrips
+            }
+            return cachedTrips
+        }
+
         do {
             let trips: [Trip] = try await withAuth { bearer in
                 try await self.api.get(
@@ -938,18 +1019,21 @@ final class Session: ObservableObject {
                 )
             }
 
-            // Cache trips for offline access (keeps last 5)
+            // Cache trips for offline access
             LocalStorage.shared.cacheTrips(trips)
 
-            // Sync any pending offline actions
-            await syncPendingActions()
+            // Update published property
+            await MainActor.run {
+                self.allTrips = trips
+            }
 
             return trips
         } catch {
             // Return cached trips when offline
             let cachedTrips = LocalStorage.shared.getCachedTrips()
-            if !cachedTrips.isEmpty {
-                await MainActor.run {
+            await MainActor.run {
+                self.allTrips = cachedTrips
+                if !cachedTrips.isEmpty {
                     self.notice = "Showing cached trips (offline mode)"
                 }
             }
@@ -967,6 +1051,8 @@ final class Session: ObservableObject {
         }
 
         debugLog("[Session] 🔄 Syncing \(pendingActions.count) pending action(s)...")
+
+        var needsDataRefresh = false  // Track if we need to refresh data after sync
 
         for action in pendingActions {
             do {
@@ -1065,12 +1151,22 @@ final class Session: ObservableObject {
                     if let name = action.payload["name"] as? String,
                        let email = action.payload["email"] as? String {
                         struct ContactCreate: Codable { let name: String; let email: String }
-                        let _: Contact = try await withAuth { bearer in
+                        let newContact: Contact = try await withAuth { bearer in
                             try await self.api.post(
                                 self.url("/api/v1/contacts/"),
                                 body: ContactCreate(name: name, email: email),
                                 bearer: bearer
                             )
+                        }
+
+                        // Replace temporary contact with real one from server
+                        if let tempId = action.payload["temp_id"] as? Int {
+                            LocalStorage.shared.removeCachedContact(contactId: tempId)
+                            LocalStorage.shared.cacheContact(newContact)
+                            debugLog("[Session] ✅ Replaced temp contact #\(tempId) with real contact #\(newContact.id)")
+                        } else {
+                            // No temp_id (legacy action), just cache the new contact
+                            LocalStorage.shared.cacheContact(newContact)
                         }
                         debugLog("[Session] ✅ Synced add_contact action")
                     }
@@ -1101,30 +1197,114 @@ final class Session: ObservableObject {
                         debugLog("[Session] ✅ Synced delete_contact action for contact #\(contactId)")
                     }
 
+                case "update_profile":
+                    struct UpdateProfileRequest: Encodable {
+                        let first_name: String?
+                        let last_name: String?
+                        let age: Int?
+                    }
+
+                    let firstName = action.payload["first_name"] as? String
+                    let lastName = action.payload["last_name"] as? String
+                    let age = action.payload["age"] as? Int
+
+                    let _: GenericResponse = try await withAuth { bearer in
+                        try await self.api.patch(
+                            self.url("/api/v1/profile"),
+                            body: UpdateProfileRequest(first_name: firstName, last_name: lastName, age: age),
+                            bearer: bearer
+                        )
+                    }
+                    debugLog("[Session] ✅ Synced update_profile action")
+
                 default:
                     debugLog("[Session] ⚠️ Unknown action type: \(action.type)")
                 }
 
                 // Remove successfully synced action
                 LocalStorage.shared.removePendingAction(id: action.id)
+                debugLog("[Session] ✅ Removed synced action id=\(action.id)")
+            } catch let error as API.APIError {
+                // Handle API errors - remove action on permanent failures (4xx errors)
+                switch error {
+                case .httpError(let statusCode, let message) where statusCode >= 400 && statusCode < 500:
+                    // Client errors (400-499) are permanent - don't retry
+                    debugLog("[Session] ⚠️ Removing action \(action.type) due to permanent error: \(statusCode)")
+                    LocalStorage.shared.removePendingAction(id: action.id)
+
+                    // Log failed action for user awareness
+                    LocalStorage.shared.logFailedAction(
+                        type: action.type,
+                        tripId: action.tripId,
+                        error: "Server rejected: \(message)"
+                    )
+                default:
+                    // Server errors (5xx) - keep for retry
+                    debugLog("[Session] ❌ Failed to sync action \(action.type): \(error)")
+                }
+            } catch is DecodingError {
+                // Decode errors mean we got a response but couldn't parse it - action was likely processed
+                // Remove action but flag for data refresh to get correct state from server
+                debugLog("[Session] ⚠️ Decode error for \(action.type) - removing action and flagging for refresh")
+                LocalStorage.shared.removePendingAction(id: action.id)
+                needsDataRefresh = true
+            } catch let error as URLError {
+                // Network errors - keep for retry only if it's a connectivity issue
+                if error.code == .notConnectedToInternet || error.code == .networkConnectionLost {
+                    debugLog("[Session] ❌ Network error, will retry: \(error.localizedDescription)")
+                } else {
+                    // Other URL errors (timeout, etc.) - remove to prevent stuck actions
+                    debugLog("[Session] ⚠️ URL error for \(action.type) - removing: \(error.localizedDescription)")
+                    LocalStorage.shared.removePendingAction(id: action.id)
+                }
             } catch {
-                // Keep action in queue for next sync attempt
-                debugLog("[Session] ❌ Failed to sync action \(action.type): \(error)")
+                // Unknown errors - remove to prevent stuck actions
+                debugLog("[Session] ⚠️ Unknown error for \(action.type) - removing: \(error)")
+                LocalStorage.shared.removePendingAction(id: action.id)
             }
         }
 
-        // Update pending count after sync
+        // Update pending count and failed count after sync
         await MainActor.run {
             self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+            self.failedActionsCount = LocalStorage.shared.getFailedActionsCount()
+            debugLog("[Session] 📊 After sync: \(self.pendingActionsCount) pending, \(self.failedActionsCount) failed")
         }
 
-        // Refresh active plan data after sync
+        // Refresh data after sync
+        if needsDataRefresh {
+            // Decode error occurred - do full refresh to get correct state from server
+            debugLog("[Session] 🔄 Doing full data refresh after decode error")
+            _ = await loadAllTrips()
+            _ = await loadContacts()
+        }
         await loadActivePlan()
+    }
+
+    /// Clear all pending actions (for stuck/stale actions)
+    @MainActor
+    func clearPendingActions() {
+        LocalStorage.shared.clearPendingActions()
+        pendingActionsCount = 0
+        debugLog("[Session] ✅ Cleared all pending actions")
+    }
+
+    /// Clear all failed actions (after user acknowledges)
+    @MainActor
+    func clearFailedActions() {
+        LocalStorage.shared.clearFailedActions()
+        failedActionsCount = 0
+        debugLog("[Session] ✅ Cleared all failed actions")
     }
 
     func checkIn() async -> Bool {
         guard let plan = activeTrip,
               let token = plan.checkin_token else { return false }
+
+        // Check if offline FIRST - queue immediately without waiting for network timeout
+        if !NetworkMonitor.shared.isConnected {
+            return await queueOfflineCheckIn(plan: plan, token: token)
+        }
 
         do {
             // Use token-based checkin endpoint (no auth required)
@@ -1138,32 +1318,41 @@ final class Session: ObservableObject {
             }
             return true
         } catch {
-            // Queue for later sync when offline
-            let timestamp = ISO8601DateFormatter().string(from: Date())
-            LocalStorage.shared.queuePendingAction(
-                type: "checkin",
-                tripId: plan.id,
-                payload: ["token": token, "timestamp": timestamp]
-            )
-
-            // Update local cache with check-in timestamp
-            LocalStorage.shared.updateCachedTripFields(
-                tripId: plan.id,
-                updates: ["last_checkin": timestamp]
-            )
-
-            await MainActor.run {
-                self.notice = "Check-in saved (will sync when online)"
-                self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
-            }
-
-            debugLog("[Session] ℹ️ Check-in queued for offline sync")
-            return true // Return true since action is queued, not failed
+            // Network failed - queue for later sync
+            return await queueOfflineCheckIn(plan: plan, token: token)
         }
+    }
+
+    private func queueOfflineCheckIn(plan: Trip, token: String) async -> Bool {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        LocalStorage.shared.queuePendingAction(
+            type: "checkin",
+            tripId: plan.id,
+            payload: ["token": token, "timestamp": timestamp]
+        )
+
+        // Update local cache with check-in timestamp
+        LocalStorage.shared.updateCachedTripFields(
+            tripId: plan.id,
+            updates: ["last_checkin": timestamp]
+        )
+
+        await MainActor.run {
+            self.notice = "Check-in saved (will sync when online)"
+            self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+        }
+
+        debugLog("[Session] ℹ️ Check-in queued for offline sync")
+        return true
     }
 
     func completePlan() async -> Bool {
         guard let plan = activeTrip else { return false }
+
+        // Check if offline FIRST - queue immediately without waiting for network timeout
+        if !NetworkMonitor.shared.isConnected {
+            return await queueOfflineCompletePlan(plan: plan)
+        }
 
         do {
             let _: GenericResponse = try await withAuth { bearer in
@@ -1173,6 +1362,9 @@ final class Session: ObservableObject {
                     bearer: bearer
                 )
             }
+
+            // Clear cached timeline for this trip
+            LocalStorage.shared.clearCachedTimeline(tripId: plan.id)
 
             await MainActor.run {
                 self.activeTrip = nil
@@ -1184,32 +1376,39 @@ final class Session: ObservableObject {
 
             return true
         } catch {
-            // Queue for later sync when offline
-            let completedAt = ISO8601DateFormatter().string(from: Date())
-            LocalStorage.shared.queuePendingAction(
-                type: "complete",
-                tripId: plan.id,
-                payload: ["completed_at": completedAt]
-            )
-
-            // Update local cache with completed status
-            LocalStorage.shared.updateCachedTripFields(
-                tripId: plan.id,
-                updates: [
-                    "status": "completed",
-                    "completed_at": completedAt
-                ]
-            )
-
-            await MainActor.run {
-                self.activeTrip = nil
-                self.notice = "Trip completed (will sync when online)"
-                self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
-            }
-
-            debugLog("[Session] ℹ️ Complete trip queued for offline sync")
-            return true // Return true since action is queued, not failed
+            // Network failed - queue for later sync
+            return await queueOfflineCompletePlan(plan: plan)
         }
+    }
+
+    private func queueOfflineCompletePlan(plan: Trip) async -> Bool {
+        let completedAt = ISO8601DateFormatter().string(from: Date())
+        LocalStorage.shared.queuePendingAction(
+            type: "complete",
+            tripId: plan.id,
+            payload: ["completed_at": completedAt]
+        )
+
+        // Update local cache with completed status
+        LocalStorage.shared.updateCachedTripFields(
+            tripId: plan.id,
+            updates: [
+                "status": "completed",
+                "completed_at": completedAt
+            ]
+        )
+
+        // Clear cached timeline for this trip
+        LocalStorage.shared.clearCachedTimeline(tripId: plan.id)
+
+        await MainActor.run {
+            self.activeTrip = nil
+            self.notice = "Trip completed (will sync when online)"
+            self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+        }
+
+        debugLog("[Session] ℹ️ Complete trip queued for offline sync")
+        return true
     }
 
     func extendPlan(minutes: Int = 30) async -> Bool {
@@ -1223,6 +1422,11 @@ final class Session: ObservableObject {
         // Calculate new ETA locally for offline update
         let newETA = plan.eta_at.addingTimeInterval(Double(minutes) * 60)
         let newETAString = ISO8601DateFormatter().string(from: newETA)
+
+        // Check if offline FIRST - queue immediately without waiting for network timeout
+        if !NetworkMonitor.shared.isConnected {
+            return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString)
+        }
 
         do {
             struct ExtendResponse: Decodable {
@@ -1251,57 +1455,66 @@ final class Session: ObservableObject {
             }
             return true
         } catch {
-            // Queue for later sync when offline
-            LocalStorage.shared.queuePendingAction(
-                type: "extend",
-                tripId: plan.id,
-                payload: ["minutes": minutes, "new_eta": newETAString]
-            )
-
-            // Update local cache with new ETA
-            LocalStorage.shared.updateCachedTripFields(
-                tripId: plan.id,
-                updates: ["eta": newETAString]
-            )
-
-            // Update in-memory active trip
-            await MainActor.run {
-                if var updatedTrip = self.activeTrip {
-                    updatedTrip = Trip(
-                        id: updatedTrip.id,
-                        user_id: updatedTrip.user_id,
-                        title: updatedTrip.title,
-                        activity: updatedTrip.activity,
-                        start_at: updatedTrip.start_at,
-                        eta_at: newETA,
-                        grace_minutes: updatedTrip.grace_minutes,
-                        location_text: updatedTrip.location_text,
-                        location_lat: updatedTrip.location_lat,
-                        location_lng: updatedTrip.location_lng,
-                        notes: updatedTrip.notes,
-                        status: updatedTrip.status,
-                        completed_at: updatedTrip.completed_at,
-                        last_checkin: updatedTrip.last_checkin,
-                        created_at: updatedTrip.created_at,
-                        contact1: updatedTrip.contact1,
-                        contact2: updatedTrip.contact2,
-                        contact3: updatedTrip.contact3,
-                        checkin_token: updatedTrip.checkin_token,
-                        checkout_token: updatedTrip.checkout_token
-                    )
-                    self.activeTrip = updatedTrip
-                }
-                self.notice = "Trip extended (will sync when online)"
-                self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
-            }
-
-            debugLog("[Session] ℹ️ Extend trip queued for offline sync")
-            return true // Return true since action is queued, not failed
+            // Network failed - queue for later sync
+            return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString)
         }
+    }
+
+    private func queueOfflineExtendPlan(plan: Trip, minutes: Int, newETA: Date, newETAString: String) async -> Bool {
+        LocalStorage.shared.queuePendingAction(
+            type: "extend",
+            tripId: plan.id,
+            payload: ["minutes": minutes, "new_eta": newETAString]
+        )
+
+        // Update local cache with new ETA
+        LocalStorage.shared.updateCachedTripFields(
+            tripId: plan.id,
+            updates: ["eta": newETAString]
+        )
+
+        // Update in-memory active trip
+        await MainActor.run {
+            if var updatedTrip = self.activeTrip {
+                updatedTrip = Trip(
+                    id: updatedTrip.id,
+                    user_id: updatedTrip.user_id,
+                    title: updatedTrip.title,
+                    activity: updatedTrip.activity,
+                    start_at: updatedTrip.start_at,
+                    eta_at: newETA,
+                    grace_minutes: updatedTrip.grace_minutes,
+                    location_text: updatedTrip.location_text,
+                    location_lat: updatedTrip.location_lat,
+                    location_lng: updatedTrip.location_lng,
+                    notes: updatedTrip.notes,
+                    status: updatedTrip.status,
+                    completed_at: updatedTrip.completed_at,
+                    last_checkin: updatedTrip.last_checkin,
+                    created_at: updatedTrip.created_at,
+                    contact1: updatedTrip.contact1,
+                    contact2: updatedTrip.contact2,
+                    contact3: updatedTrip.contact3,
+                    checkin_token: updatedTrip.checkin_token,
+                    checkout_token: updatedTrip.checkout_token
+                )
+                self.activeTrip = updatedTrip
+            }
+            self.notice = "Trip extended (will sync when online)"
+            self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+        }
+
+        debugLog("[Session] ℹ️ Extend trip queued for offline sync")
+        return true
     }
 
     /// Start a planned trip (change status from 'planned' to 'active')
     func startTrip(_ tripId: Int) async -> Bool {
+        // Check if offline FIRST - queue immediately without waiting for network timeout
+        if !NetworkMonitor.shared.isConnected {
+            return await queueOfflineStartTrip(tripId: tripId)
+        }
+
         do {
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.post(
@@ -1319,92 +1532,139 @@ final class Session: ObservableObject {
             }
             return true
         } catch {
-            // Queue for later sync when offline
-            LocalStorage.shared.queuePendingAction(
-                type: "start_trip",
-                tripId: tripId,
-                payload: ["started_at": ISO8601DateFormatter().string(from: Date())]
-            )
-
-            // Update local cache with active status
-            LocalStorage.shared.updateCachedTripFields(
-                tripId: tripId,
-                updates: ["status": "active"]
-            )
-
-            // Try to set this trip as the active trip from cache
-            let cachedTrips = LocalStorage.shared.getCachedTrips()
-            if let trip = cachedTrips.first(where: { $0.id == tripId }) {
-                await MainActor.run {
-                    // Create an updated version with active status
-                    self.activeTrip = Trip(
-                        id: trip.id,
-                        user_id: trip.user_id,
-                        title: trip.title,
-                        activity: trip.activity,
-                        start_at: trip.start_at,
-                        eta_at: trip.eta_at,
-                        grace_minutes: trip.grace_minutes,
-                        location_text: trip.location_text,
-                        location_lat: trip.location_lat,
-                        location_lng: trip.location_lng,
-                        notes: trip.notes,
-                        status: "active",
-                        completed_at: trip.completed_at,
-                        last_checkin: trip.last_checkin,
-                        created_at: trip.created_at,
-                        contact1: trip.contact1,
-                        contact2: trip.contact2,
-                        contact3: trip.contact3,
-                        checkin_token: trip.checkin_token,
-                        checkout_token: trip.checkout_token
-                    )
-                    self.notice = "Trip started (will sync when online)"
-                    self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
-                }
-            } else {
-                await MainActor.run {
-                    self.notice = "Trip started (will sync when online)"
-                    self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
-                }
-            }
-
-            debugLog("[Session] ℹ️ Start trip queued for offline sync")
-            return true
+            // Network failed - queue for later sync
+            return await queueOfflineStartTrip(tripId: tripId)
         }
     }
 
+    private func queueOfflineStartTrip(tripId: Int) async -> Bool {
+        LocalStorage.shared.queuePendingAction(
+            type: "start_trip",
+            tripId: tripId,
+            payload: ["started_at": ISO8601DateFormatter().string(from: Date())]
+        )
+
+        // Update local cache with active status
+        LocalStorage.shared.updateCachedTripFields(
+            tripId: tripId,
+            updates: ["status": "active"]
+        )
+
+        // Try to set this trip as the active trip from cache
+        let cachedTrips = LocalStorage.shared.getCachedTrips()
+        if let trip = cachedTrips.first(where: { $0.id == tripId }) {
+            await MainActor.run {
+                // Create an updated version with active status
+                self.activeTrip = Trip(
+                    id: trip.id,
+                    user_id: trip.user_id,
+                    title: trip.title,
+                    activity: trip.activity,
+                    start_at: trip.start_at,
+                    eta_at: trip.eta_at,
+                    grace_minutes: trip.grace_minutes,
+                    location_text: trip.location_text,
+                    location_lat: trip.location_lat,
+                    location_lng: trip.location_lng,
+                    notes: trip.notes,
+                    status: "active",
+                    completed_at: trip.completed_at,
+                    last_checkin: trip.last_checkin,
+                    created_at: trip.created_at,
+                    contact1: trip.contact1,
+                    contact2: trip.contact2,
+                    contact3: trip.contact3,
+                    checkin_token: trip.checkin_token,
+                    checkout_token: trip.checkout_token
+                )
+                self.notice = "Trip started (will sync when online)"
+                self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+            }
+        } else {
+            await MainActor.run {
+                self.notice = "Trip started (will sync when online)"
+                self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+            }
+        }
+
+        debugLog("[Session] ℹ️ Start trip queued for offline sync")
+        return true
+    }
+
     func loadTimeline(planId: Int) async -> [TimelineEvent] {
+        // Get cached events first for fallback
+        let cachedEvents = LocalStorage.shared.getCachedTimeline(tripId: planId)
+
         do {
-            let response: TimelineResponse = try await withAuth { bearer in
+            // Backend returns array of TimelineEvent directly (not wrapped in TimelineResponse)
+            let events: [TimelineEvent] = try await withAuth { bearer in
                 try await self.api.get(
                     self.url("/api/v1/trips/\(planId)/timeline"),
                     bearer: bearer
                 )
             }
-            return response.events
+
+            debugLog("[Session] ✅ Loaded \(events.count) timeline events for trip \(planId)")
+
+            // Cache for offline access
+            LocalStorage.shared.cacheTimeline(tripId: planId, events: events)
+
+            return events
         } catch {
-            await MainActor.run {
-                self.lastError = "Failed to load timeline: \(error.localizedDescription)"
+            debugLog("[Session] ❌ Failed to load timeline: \(error.localizedDescription)")
+
+            // Return cached data as fallback
+            if !cachedEvents.isEmpty {
+                debugLog("[Session] Using \(cachedEvents.count) cached timeline events")
+                return cachedEvents
             }
+
             return []
         }
     }
 
     // MARK: - Profile Management
-    func updateProfile(firstName: String? = nil, lastName: String? = nil, age: Int? = nil, phone: String? = nil) async -> Bool {
+    func updateProfile(firstName: String? = nil, lastName: String? = nil, age: Int? = nil) async -> Bool {
         struct UpdateProfileRequest: Encodable {
             let first_name: String?
             let last_name: String?
             let age: Int?
-            let phone: String?
+        }
+
+        // Check offline first - queue for later sync
+        if !NetworkMonitor.shared.isConnected {
+            var payload: [String: Any] = [:]
+            if let firstName = firstName { payload["first_name"] = firstName }
+            if let lastName = lastName { payload["last_name"] = lastName }
+            if let age = age { payload["age"] = age }
+
+            LocalStorage.shared.queuePendingAction(
+                type: "update_profile",
+                tripId: nil,
+                payload: payload
+            )
+
+            // Update local state immediately
+            await MainActor.run {
+                if let first = firstName, let last = lastName {
+                    self.userName = "\(first) \(last)"
+                }
+                if let age = age {
+                    self.userAge = age
+                }
+                self.notice = "Profile updated (will sync when online)"
+                self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+            }
+
+            debugLog("[Session] ℹ️ Profile update queued for offline sync")
+            return true
         }
 
         do {
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.patch(
                     self.url("/api/v1/profile"),
-                    body: UpdateProfileRequest(first_name: firstName, last_name: lastName, age: age, phone: phone),
+                    body: UpdateProfileRequest(first_name: firstName, last_name: lastName, age: age),
                     bearer: bearer
                 )
             }
@@ -1416,17 +1676,36 @@ final class Session: ObservableObject {
                 if let age = age {
                     self.userAge = age
                 }
-                if let phone = phone {
-                    self.userPhone = phone
-                }
                 self.notice = "Profile updated successfully"
             }
             return true
         } catch {
+            // Network error - queue for later sync
+            var payload: [String: Any] = [:]
+            if let firstName = firstName { payload["first_name"] = firstName }
+            if let lastName = lastName { payload["last_name"] = lastName }
+            if let age = age { payload["age"] = age }
+
+            LocalStorage.shared.queuePendingAction(
+                type: "update_profile",
+                tripId: nil,
+                payload: payload
+            )
+
+            // Update local state immediately
             await MainActor.run {
-                self.lastError = "Failed to update profile: \(error.localizedDescription)"
+                if let first = firstName, let last = lastName {
+                    self.userName = "\(first) \(last)"
+                }
+                if let age = age {
+                    self.userAge = age
+                }
+                self.notice = "Profile updated (will sync when online)"
+                self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
             }
-            return false
+
+            debugLog("[Session] ℹ️ Profile update queued for offline sync")
+            return true
         }
     }
 
@@ -1463,6 +1742,9 @@ final class Session: ObservableObject {
                 )
             }
 
+            // Clear cached timeline for this trip
+            LocalStorage.shared.clearCachedTimeline(tripId: planId)
+
             await MainActor.run {
                 self.notice = "Trip deleted successfully"
             }
@@ -1477,6 +1759,9 @@ final class Session: ObservableObject {
 
             // Remove from local cache
             LocalStorage.shared.removeCachedTrip(tripId: planId)
+
+            // Clear cached timeline for this trip
+            LocalStorage.shared.clearCachedTimeline(tripId: planId)
 
             await MainActor.run {
                 // Clear active trip if it was the one being deleted
@@ -1622,16 +1907,17 @@ final class Session: ObservableObject {
 
             return response
         } catch {
-            // Queue for later sync when offline
+            // Create a temporary contact with a negative ID for local use
+            // Use UUID hash to guarantee uniqueness (timestamp could collide if multiple contacts created in same second)
+            let tempId = -abs(UUID().hashValue)
+            let tempContact = Contact(id: tempId, user_id: 0, name: name, email: email)
+
+            // Queue for later sync when offline (include temp_id for cleanup after sync)
             LocalStorage.shared.queuePendingAction(
                 type: "add_contact",
                 tripId: nil,
-                payload: ["name": name, "email": email]
+                payload: ["name": name, "email": email, "temp_id": tempId]
             )
-
-            // Create a temporary contact with a negative ID for local use
-            let tempId = -Int(Date().timeIntervalSince1970)
-            let tempContact = Contact(id: tempId, name: name, email: email)
 
             // Cache the temporary contact
             LocalStorage.shared.cacheContact(tempContact)
@@ -1681,7 +1967,7 @@ final class Session: ObservableObject {
             // Update in-memory contacts list
             await MainActor.run {
                 if let index = self.contacts.firstIndex(where: { $0.id == contactId }) {
-                    self.contacts[index] = Contact(id: contactId, name: name, email: email)
+                    self.contacts[index] = Contact(id: contactId, user_id: self.contacts[index].user_id, name: name, email: email)
                 }
                 self.notice = "Contact updated (will sync when online)"
                 self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
@@ -1731,6 +2017,16 @@ final class Session: ObservableObject {
     // MARK: - Activities Management
     @MainActor
     func loadActivities() async {
+        // If offline, use cache immediately - don't wait for network timeout
+        if !NetworkMonitor.shared.isConnected {
+            let cachedActivities = LocalStorage.shared.getCachedActivities()
+            if !cachedActivities.isEmpty {
+                self.activities = cachedActivities.sorted { $0.order < $1.order }
+                debugLog("[Session] 📦 Loaded \(cachedActivities.count) activities from cache (offline)")
+            }
+            return
+        }
+
         debugLog("[Session] 🔄 Loading activities from backend...")
         do {
             let response: [Activity] = try await api.get(
@@ -1796,7 +2092,6 @@ final class Session: ObservableObject {
         userName = nil
         userAge = nil
         userEmail = nil
-        userPhone = nil
         profileCompleted = false
         activeTrip = nil
         activities = []

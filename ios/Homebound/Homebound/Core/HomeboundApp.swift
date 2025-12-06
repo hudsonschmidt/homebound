@@ -283,4 +283,5 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 extension Notification.Name {
     static let hbGotAPNsToken = Notification.Name("hbGotAPNsToken")
     static let hbNavigateToTrip = Notification.Name("hbNavigateToTrip")
+    static let backgroundSyncRequested = Notification.Name("backgroundSyncRequested")
 }

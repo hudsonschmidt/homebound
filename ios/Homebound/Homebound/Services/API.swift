@@ -1,6 +1,15 @@
 import Foundation
 
 struct API {
+    // Custom URLSession with shorter timeout for better offline UX
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 10  // 10 second timeout
+        config.timeoutIntervalForResource = 30
+        config.waitsForConnectivity = false  // Don't wait, fail fast when offline
+        return URLSession(configuration: config)
+    }()
+
     let encoder: JSONEncoder = {
         let e = JSONEncoder()
         let f = DateFormatter()
@@ -57,7 +66,7 @@ struct API {
         } else {
             debugLog("[API] ⚠️ GET \(url.path) - NO bearer token provided!")
         }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
         return try decoder.decode(T.self, from: data)
     }
@@ -74,7 +83,7 @@ struct API {
             debugLog("[API] ⚠️ POST \(url.path) - NO bearer token provided!")
         }
         req.httpBody = try encoder.encode(body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
         if T.self == Empty.self { return Empty() as! T }
         return try decoder.decode(T.self, from: data)
@@ -92,7 +101,7 @@ struct API {
             req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
         }
         req.httpBody = try encoder.encode(body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
         if T.self == Empty.self { return Empty() as! T }
         return try decoder.decode(T.self, from: data)
@@ -106,7 +115,7 @@ struct API {
             req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
         }
         req.httpBody = try encoder.encode(body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
         if T.self == Empty.self { return Empty() as! T }
         return try decoder.decode(T.self, from: data)
@@ -118,7 +127,7 @@ struct API {
             req.addValue("Bearer \(b)", forHTTPHeaderField: "X-Auth-Token")
             req.addValue("Bearer \(b)", forHTTPHeaderField: "Authorization")
         }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
         if T.self == Empty.self { return Empty() as! T }
         return try decoder.decode(T.self, from: data)
@@ -134,13 +143,14 @@ struct API {
         }
 
         let msg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-        throw APIError.server(msg)
+        throw APIError.httpError(statusCode: http.statusCode, message: msg)
     }
 
     struct Empty: Codable {}  // Used for requests/responses with no body
     enum APIError: Error {
         case badResponse
         case unauthorized
-        case server(String)
+        case httpError(statusCode: Int, message: String)  // Includes status code for error handling
+        case server(String)  // Legacy - kept for compatibility
     }
 }

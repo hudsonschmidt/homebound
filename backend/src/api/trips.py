@@ -121,8 +121,8 @@ class TripResponse(BaseModel):
 
 class TimelineEvent(BaseModel):
     id: int
-    what: str
-    timestamp: str
+    kind: str
+    at: str
     lat: float | None
     lon: float | None
     extended_by: int | None
@@ -1087,7 +1087,7 @@ def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user
         events = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, what, timestamp, lat, lon, extended_by
+                SELECT id, what AS kind, timestamp AS at, lat, lon, extended_by
                 FROM events
                 WHERE trip_id = :trip_id
                 ORDER BY timestamp DESC
@@ -1099,8 +1099,8 @@ def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user
         return [
             TimelineEvent(
                 id=e.id,
-                what=e.what,
-                timestamp=str(e.timestamp),
+                kind=e.kind,
+                at=e.at.isoformat() if e.at else "",
                 lat=e.lat,
                 lon=e.lon,
                 extended_by=e.extended_by

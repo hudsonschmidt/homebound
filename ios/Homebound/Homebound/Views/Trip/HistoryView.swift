@@ -36,20 +36,22 @@ struct HistoryView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
     @StateObject private var networkMonitor = NetworkMonitor.shared
-    @State private var allPlans: [Trip] = []
-    @State private var isLoading = true
+    @State private var isLoading = false
     @State private var searchText = ""
     @State private var errorMessage: String?
-    @State private var loadTask: Task<Void, Never>?
     @State private var tripToEdit: Trip?
-    @State private var isShowingCachedData = false
 
     // Presentation mode - controls whether this is shown as a tab or modal
     var showAsTab: Bool = false
     var showStats: Bool = false
 
+    // Derive from session.isOffline instead of tracking separately
+    var isShowingCachedData: Bool {
+        !networkMonitor.isConnected
+    }
+
     var filteredPlans: [Trip] {
-        let filtered = allPlans.filter { plan in
+        let filtered = session.allTrips.filter { plan in
             if !searchText.isEmpty {
                 return plan.title.localizedCaseInsensitiveContains(searchText) ||
                        (plan.location_text ?? "").localizedCaseInsensitiveContains(searchText)
@@ -83,7 +85,7 @@ struct HistoryView: View {
                 Color(.systemBackground)
                     .ignoresSafeArea()
 
-                if isLoading && allPlans.isEmpty {
+                if isLoading && session.allTrips.isEmpty {
                     ProgressView("Loading history...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if filteredPlans.isEmpty && !isLoading {
@@ -101,9 +103,9 @@ struct HistoryView: View {
                         }
 
                         // Stats Section (optional - respects user preference)
-                        if showStats && AppPreferences.shared.showStats && !allPlans.isEmpty {
+                        if showStats && AppPreferences.shared.showStats && !session.allTrips.isEmpty {
                             Section {
-                                TripStatsView(plans: allPlans)
+                                TripStatsView(plans: session.allTrips)
                             }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .listRowBackground(Color.clear)
@@ -198,85 +200,28 @@ struct HistoryView: View {
                         }
                     }
             }
-            .onDisappear {
-                loadTask?.cancel()
-            }
         }
     }
 
     func loadAllPlans() async {
-        // Cancel any existing load task
-        loadTask?.cancel()
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
 
-        // Create new task
-        loadTask = Task {
-            guard !Task.isCancelled else { return }
-            guard let bearer = session.accessToken else { return }
+        // Use session.loadAllTrips() which handles caching and offline
+        _ = await session.loadAllTrips()
 
-            await MainActor.run {
-                isLoading = true
-                errorMessage = nil
-                isShowingCachedData = false
-            }
-
-            do {
-                // Backend returns all trips ordered by created_at DESC (most recent first)
-                let plans: [Trip] = try await session.api.get(
-                    session.url("/api/v1/trips/"),
-                    bearer: bearer
-                )
-
-                debugLog("[HistoryView] 📥 Loaded \(plans.count) total trips from backend")
-
-                // Cache trips for offline access
-                LocalStorage.shared.cacheTrips(plans)
-
-                // Check if task was cancelled before updating UI
-                guard !Task.isCancelled else { return }
-
-                await MainActor.run {
-                    self.allPlans = plans
-                    self.isLoading = false
-                    self.isShowingCachedData = false
-                }
-            } catch {
-                debugLog("[HistoryView] ❌ Failed to load history: \(error)")
-                if let decodingError = error as? DecodingError {
-                    debugLog("[HistoryView] Decoding error details: \(decodingError)")
-                }
-
-                // Only show error if not cancelled
-                if !Task.isCancelled {
-                    // Try to load from cache when offline
-                    let cachedTrips = LocalStorage.shared.getCachedTrips()
-
-                    await MainActor.run {
-                        self.isLoading = false
-
-                        if !cachedTrips.isEmpty {
-                            // Show cached data with disclaimer
-                            self.allPlans = cachedTrips
-                            self.isShowingCachedData = true
-                            debugLog("[HistoryView] 📦 Showing \(cachedTrips.count) cached trips")
-                        } else {
-                            let errorText = error.localizedDescription
-                            if !errorText.contains("cancelled") {
-                                errorMessage = "Failed to load history: \(errorText)"
-                            }
-                        }
-                    }
-                }
-            }
+        await MainActor.run {
+            isLoading = false
         }
     }
 
     func deletePlan(_ plan: Trip) async {
         let success = await session.deletePlan(plan.id)
         if success {
-            await MainActor.run {
-                // Remove the plan from the list
-                self.allPlans.removeAll { $0.id == plan.id }
-            }
+            // Refresh trips to update the list
+            _ = await session.loadAllTrips()
         } else {
             await MainActor.run {
                 errorMessage = "Failed to delete trip"

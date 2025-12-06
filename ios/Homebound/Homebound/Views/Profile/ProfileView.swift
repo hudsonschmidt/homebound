@@ -9,8 +9,6 @@ struct ProfileView: View {
     @State private var editName = ""
     @State private var editingAge = false
     @State private var editAge = ""
-    @State private var editingPhone = false
-    @State private var editPhone = ""
 
     // UI State
     @State private var showSignOutAlert = false
@@ -63,17 +61,6 @@ struct ProfileView: View {
                                 editValue: $editAge,
                                 keyboardType: .numberPad,
                                 onSave: { await updateAge() }
-                            )
-
-                            // Phone Field
-                            EditableField(
-                                label: "Phone",
-                                value: session.userPhone ?? "Not set",
-                                icon: "phone.fill",
-                                isEditing: $editingPhone,
-                                editValue: $editPhone,
-                                keyboardType: .phonePad,
-                                onSave: { await updatePhone() }
                             )
                         }
                         .padding(20)
@@ -219,7 +206,7 @@ struct ProfileView: View {
         let lastName = components.count > 1 ? String(components[1]) : ""
 
         isSaving = true
-        let success = await session.updateProfile(firstName: firstName, lastName: lastName, age: nil, phone: nil)
+        let success = await session.updateProfile(firstName: firstName, lastName: lastName, age: nil)
         isSaving = false
 
         if success {
@@ -238,7 +225,7 @@ struct ProfileView: View {
         }
 
         isSaving = true
-        let success = await session.updateProfile(firstName: nil, lastName: nil, age: age, phone: nil)
+        let success = await session.updateProfile(firstName: nil, lastName: nil, age: age)
         isSaving = false
 
         if success {
@@ -246,25 +233,6 @@ struct ProfileView: View {
             editAge = ""
         } else {
             errorMessage = "Failed to update age"
-            showError = true
-        }
-    }
-
-    func updatePhone() async {
-        guard !editPhone.isEmpty else {
-            editingPhone = false
-            return
-        }
-
-        isSaving = true
-        let success = await session.updateProfile(firstName: nil, lastName: nil, age: nil, phone: editPhone)
-        isSaving = false
-
-        if success {
-            editingPhone = false
-            editPhone = ""
-        } else {
-            errorMessage = "Failed to update phone"
             showError = true
         }
     }

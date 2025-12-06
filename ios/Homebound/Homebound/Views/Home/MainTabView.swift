@@ -207,9 +207,18 @@ struct NewHomeView: View {
         // Load all necessary data in parallel
         async let loadActive: Void = session.loadActivePlan()
         async let loadProfile: Void = session.loadUserProfile()
+        async let loadTrips: [Trip] = session.loadAllTrips()  // Also load all trips for upcoming section
 
         // Wait for all to complete
-        _ = await (loadActive, loadProfile)
+        _ = await (loadActive, loadProfile, loadTrips)
+
+        // Load timeline for active trip
+        if let tripId = session.activeTrip?.id {
+            let events = await session.loadTimeline(planId: tripId)
+            await MainActor.run {
+                self.timeline = events
+            }
+        }
 
         // Trigger a refresh of child views by changing the ID
         await MainActor.run {
@@ -324,7 +333,6 @@ struct ActivePlanCardCompact: View {
     @State private var isPerformingAction = false
     @State private var showingExtendOptions = false
     @State private var selectedExtendMinutes = 30
-    @State private var appeared = false
     @State private var pulseAnimation = false
 
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -388,6 +396,25 @@ struct ActivePlanCardCompact: View {
         0.75
     }
 
+    // Check-in tracking computed properties
+    var checkinEvents: [TimelineEvent] {
+        timeline.filter { $0.kind == "checkin" }
+    }
+
+    var checkinCount: Int {
+        checkinEvents.count
+    }
+
+    var lastCheckinTime: Date? {
+        checkinEvents.compactMap(\.atDate).max()
+    }
+
+    func relativeTimeString(from date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
     var body: some View {
         VStack(spacing: isUrgent ? 16 : 20) {
             // Urgent warning banner for overdue/warning states
@@ -400,6 +427,9 @@ struct ActivePlanCardCompact: View {
 
             // Plan info with activity icon
             planInfoView
+
+            // Check-in info (count and last check-in)
+            checkinInfoView
 
             // Action buttons with haptic feedback
             actionButtonsView
@@ -435,17 +465,12 @@ struct ActivePlanCardCompact: View {
             radius: isUrgent ? 15 : 12,
             y: 6
         )
-        .opacity(appeared ? 1.0 : 0.0)
-        .offset(y: appeared ? 0 : 20)
         .onReceive(timer) { _ in
             updateTimeRemaining()
         }
         .onAppear {
             updateTimeRemaining()
-            withAnimation(.easeOut(duration: 0.5)) {
-                appeared = true
-            }
-            // Start pulse animation for the dot and glow
+            // Start pulse animation for the dot and glow only
             withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
                 pulseAnimation = true
             }
@@ -588,7 +613,6 @@ struct ActivePlanCardCompact: View {
                     .font(timeFont)
                     .fontWeight(.bold)
                     .foregroundStyle(timeColor)
-                    .scaleEffect(timeState == .overdue ? 1.05 : 1.0)
             }
         }
     }
@@ -601,15 +625,22 @@ struct ActivePlanCardCompact: View {
                     if preferences.hapticFeedbackEnabled {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }
-                    if let token = plan.checkin_token {
-                        Task {
-                            isPerformingAction = true
-                            await session.performTokenAction(token, action: "checkin")
-                            if preferences.hapticFeedbackEnabled {
-                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Task {
+                        isPerformingAction = true
+                        let success = await session.checkIn()
+                        if success {
+                            // Reload timeline to show updated check-in count
+                            if let tripId = session.activeTrip?.id {
+                                let events = await session.loadTimeline(planId: tripId)
+                                await MainActor.run {
+                                    self.timeline = events
+                                }
                             }
-                            isPerformingAction = false
                         }
+                        if preferences.hapticFeedbackEnabled {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        }
+                        isPerformingAction = false
                     }
                 }) {
                     Label("Check In", systemImage: "checkmark.circle.fill")
@@ -630,16 +661,14 @@ struct ActivePlanCardCompact: View {
                 if preferences.hapticFeedbackEnabled {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }
-                if let token = plan.checkout_token {
-                    Task {
-                        isPerformingAction = true
-                        await session.performTokenAction(token, action: "checkout")
-                        if preferences.hapticFeedbackEnabled {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                        }
-                        await session.loadActivePlan()
-                        isPerformingAction = false
+                Task {
+                    isPerformingAction = true
+                    _ = await session.completePlan()
+                    if preferences.hapticFeedbackEnabled {
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
                     }
+                    await session.loadActivePlan()
+                    isPerformingAction = false
                 }
             }) {
                 Label("I'm Safe", systemImage: "house.fill")
@@ -692,21 +721,39 @@ struct ActivePlanCardCompact: View {
                     .padding(.horizontal, 2)
                 }
             }
-            .transition(.scale.combined(with: .opacity))
         } else {
             // Show "Extend Time" text link for all states
             Button(action: {
                 if preferences.hapticFeedbackEnabled {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    showingExtendOptions = true
-                }
+                showingExtendOptions = true
             }) {
                 Label("Extend Time", systemImage: "clock.arrow.circlepath")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundStyle(.white.opacity(0.9))
+            }
+        }
+    }
+
+    @ViewBuilder
+    var checkinInfoView: some View {
+        if checkinCount > 0, let lastCheckin = lastCheckinTime {
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.caption)
+                    Text("\(checkinCount) check-in\(checkinCount == 1 ? "" : "s")")
+                        .font(.caption)
+                }
+                .foregroundStyle(.white.opacity(0.7))
+
+                Spacer()
+
+                Text("Last: \(relativeTimeString(from: lastCheckin))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
             }
         }
     }
@@ -758,12 +805,19 @@ extension Notification.Name {
 struct UpcomingTripsSection: View {
     @EnvironmentObject var session: Session
     @EnvironmentObject var preferences: AppPreferences
-    @State private var upcomingPlans: [Trip] = []
     @State private var currentTime = Date()
     @State private var startingTripId: Int? = nil
     @State private var failedTripIds: Set<Int> = [] // Track trips that failed to start
     @State private var tripToEdit: Trip? = nil
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    // Computed property from session state for reactive updates
+    var upcomingPlans: [Trip] {
+        Array(session.allTrips
+            .filter { $0.status == "planned" }
+            .sorted { $0.start_at < $1.start_at }
+            .prefix(preferences.maxUpcomingTrips))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -836,17 +890,9 @@ struct UpcomingTripsSection: View {
     }
 
     func loadUpcomingPlans() async {
-        // Load plans with caching support (uses LocalStorage for offline access)
-        let allPlans = await session.loadAllTrips()
-
-        await MainActor.run {
-            let maxTrips = preferences.maxUpcomingTrips
-            upcomingPlans = allPlans
-                .filter { $0.status == "planned" }
-                .sorted { $0.start_at < $1.start_at }
-                .prefix(maxTrips)
-                .map { $0 }
-        }
+        // Refresh trips from network/cache - updates session.allTrips
+        // The computed property upcomingPlans will automatically update
+        _ = await session.loadAllTrips()
     }
 
     func checkForTripsToAutoStart() {
@@ -873,12 +919,13 @@ struct UpcomingTripsSection: View {
         startingTripId = tripId
         Task {
             let success = await session.startTrip(tripId)
+            if success {
+                // Refresh trips to update the computed property
+                _ = await session.loadAllTrips()
+            }
             await MainActor.run {
                 startingTripId = nil
-                if success {
-                    // Remove from upcoming list and reload
-                    upcomingPlans.removeAll { $0.id == tripId }
-                } else {
+                if !success {
                     // Mark as failed so we don't retry automatically
                     failedTripIds.insert(tripId)
                 }

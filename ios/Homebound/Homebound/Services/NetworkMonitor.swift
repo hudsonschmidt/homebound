@@ -5,7 +5,6 @@ import Combine
 /// Notification posted when network connection is restored after being offline
 extension Notification.Name {
     static let networkDidReconnect = Notification.Name("networkDidReconnect")
-    static let backgroundSyncRequested = Notification.Name("backgroundSyncRequested")
 }
 
 /// Monitors network connectivity and posts notifications on reconnection
@@ -15,10 +14,10 @@ final class NetworkMonitor: ObservableObject {
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
 
-    @Published private(set) var isConnected: Bool = true
+    @Published private(set) var isConnected: Bool = false  // Default to false - safer to assume offline until proven online
     @Published private(set) var connectionType: ConnectionType = .unknown
 
-    private var wasDisconnected: Bool = false
+    private var wasDisconnected: Bool = true  // Start as disconnected
 
     enum ConnectionType {
         case wifi

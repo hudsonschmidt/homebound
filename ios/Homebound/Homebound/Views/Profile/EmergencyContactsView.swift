@@ -159,7 +159,7 @@ struct EmergencyContactsView: View {
         if success {
             await MainActor.run {
                 if let index = savedContacts.firstIndex(where: { $0.id == contact.id }) {
-                    savedContacts[index] = Contact(id: contact.id, user_id: contact.user_id, name: name, phone: nil, email: email)
+                    savedContacts[index] = Contact(id: contact.id, user_id: contact.user_id, name: name, email: email)
                 }
                 contactToEdit = nil
             }
@@ -218,8 +218,8 @@ struct ContactRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                if let email = contact.email, !email.isEmpty {
-                    Text(email)
+                if !contact.email.isEmpty {
+                    Text(contact.email)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -307,7 +307,7 @@ struct EditEmergencyContactSheet: View {
     }
 
     var hasChanges: Bool {
-        name != contact.name || email != (contact.email ?? "")
+        name != contact.name || email != contact.email
     }
 
     var body: some View {
@@ -351,7 +351,7 @@ struct EditEmergencyContactSheet: View {
             }
             .onAppear {
                 name = contact.name
-                email = contact.email ?? ""
+                email = contact.email
             }
         }
     }
