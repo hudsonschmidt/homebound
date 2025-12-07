@@ -222,6 +222,14 @@ async def send_push_to_user(user_id: int, title: str, body: str, data: dict | No
                                    error_message="Device unregistered (410)")
                     success = True  # Not a retry-able error
                     break
+                elif result.status == 400 and result.detail == "BadDeviceToken":
+                    # 400 BadDeviceToken = invalid token, mark for removal (don't retry)
+                    log.info(f"[APNS] Bad device token for user {user_id}, will remove")
+                    tokens_to_remove.append(device.token)
+                    log_notification(user_id, "push", title, body, "failed", device_token=device.token,
+                                   error_message="Bad device token (400)")
+                    success = True  # Not a retry-able error
+                    break
                 else:
                     last_error = f"status={result.status} detail={result.detail}"
                     log.warning(f"[APNS] Failed for user {user_id} (attempt {attempt + 1}/{MAX_RETRIES}): {last_error}")

@@ -49,6 +49,9 @@ class APNsClient:
             else "https://api.push.apple.com"
         )
         self._client: httpx.AsyncClient | None = None
+        # Cache JWT to avoid TooManyProviderTokenUpdates (429) from Apple
+        self._cached_jwt: str | None = None
+        self._jwt_issued_at: float = 0
 
         # Log configuration for debugging
         key_len = len(self.private_key) if self.private_key else 0
@@ -59,12 +62,18 @@ class APNsClient:
 
     def _provider_jwt(self) -> str:
         now = int(time.time())
+        # Reuse cached JWT if less than 50 minutes old (Apple allows 60 min)
+        if self._cached_jwt is not None and (now - self._jwt_issued_at) < 3000:
+            return self._cached_jwt
         # Note: Apple APNs only requires 'alg' and 'kid' - do NOT include 'typ'
         headers = {"alg": "ES256", "kid": self.key_id}
         payload = {"iss": self.team_id, "iat": now}
         # PyJWT returns str directly (not bytes) in recent versions
         token = jwt.encode(payload, self.private_key, algorithm="ES256", headers=headers)
-        return token if isinstance(token, str) else token.decode("utf-8")
+        self._cached_jwt = token if isinstance(token, str) else token.decode("utf-8")
+        self._jwt_issued_at = now
+        log.debug("[APNS] Generated new provider JWT")
+        return self._cached_jwt
 
     async def _client_ctx(self) -> httpx.AsyncClient:
         if self._client is None:
