@@ -1046,9 +1046,9 @@ def delete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                 detail="Trip not found"
             )
 
-        # Clear the last_checkin_id reference first (foreign key constraint)
+        # Clear the last_checkin reference first (foreign key constraint)
         connection.execute(
-            sqlalchemy.text("UPDATE trips SET last_checkin_id = NULL WHERE id = :trip_id"),
+            sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE id = :trip_id"),
             {"trip_id": trip_id}
         )
 
