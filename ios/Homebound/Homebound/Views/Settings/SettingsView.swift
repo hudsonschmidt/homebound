@@ -1093,10 +1093,9 @@ struct PrivacyView: View {
             loadStorageCounts()
         }
         .sheet(isPresented: $showShareSheet) {
-            if let data = exportData {
-                ShareSheet(activityItems: [
-                    ExportedDataFile(data: data, filename: "homebound-export.json")
-                ])
+            if let data = exportData,
+               let fileURL = writeExportDataToTempFile(data) {
+                ShareSheet(activityItems: [fileURL])
             }
         }
     }
@@ -1155,16 +1154,16 @@ struct PrivacyView: View {
             }
         }
     }
-}
 
-// Helper for sharing exported data as a file
-struct ExportedDataFile: Transferable {
-    let data: Data
-    let filename: String
-
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .json) { file in
-            file.data
+    private func writeExportDataToTempFile(_ data: Data) -> URL? {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent("homebound-export.json")
+        do {
+            try data.write(to: fileURL)
+            return fileURL
+        } catch {
+            print("Failed to write export file: \(error)")
+            return nil
         }
     }
 }
