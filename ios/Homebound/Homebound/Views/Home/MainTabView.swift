@@ -247,9 +247,10 @@ struct BigNewTripCard: View {
                         )
                         .frame(width: 80, height: 80)
 
-                    Image(systemName: "location.north.fill")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.white)
+                    Image("Logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 100, height: 100)
                 }
 
                 // Title
