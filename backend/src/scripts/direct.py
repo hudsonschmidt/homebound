@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Broadcast push notification to all users with registered devices.
+Send push notification to a specific user.
 
 Usage:
     python -m src.scripts.direct user_id "Title" "Body"
@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 
-from .. import database as db
 from ..services.notifications import send_push_to_user
 
 
@@ -52,17 +50,9 @@ def main():
 
     args = parser.parse_args()
 
-    total, successful, failed = asyncio.run(
-        broadcast(args.title, args.body, args.dry_run)
+    asyncio.run(
+        broadcast(args.user_id, args.title, args.body, args.dry_run)
     )
-
-    if not args.dry_run and total > 0:
-        print(f"\nSummary:")
-        print(f"  Total users: {total}")
-        print(f"  Successful:  {successful}")
-        print(f"  Failed:      {failed}")
-
-    sys.exit(0 if failed == 0 else 1)
 
 
 if __name__ == "__main__":
