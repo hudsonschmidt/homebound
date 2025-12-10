@@ -41,7 +41,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Broadcast push notification to one user"
     )
-    parser.add_argument("user_id", type=int, help="User ID to send notification to")
+    parser.add_argument("user_id", help="User ID to send notification to")
     parser.add_argument("title", help="Notification title")
     parser.add_argument("body", help="Notification body")
     parser.add_argument(
