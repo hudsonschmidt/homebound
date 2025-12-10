@@ -14,7 +14,9 @@ import asyncio
 from ..services.notifications import send_push_to_user
 
 
-async def broadcast(user_id: int, title: str, body: str, dry_run: bool = False) -> tuple[int, int, int]:   
+async def broadcast(user: str, title: str, body: str, dry_run: bool = False) -> tuple[int, int, int]:   
+    user_id = int(user)
+    
     if dry_run:
         print("\n[DRY RUN] Would send:")
         print(f"  Title: {title}")
