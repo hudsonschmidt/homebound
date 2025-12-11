@@ -873,6 +873,7 @@ struct CustomizationView: View {
 // MARK: - Notification Settings View
 struct NotificationSettingsView: View {
     @EnvironmentObject var preferences: AppPreferences
+    @EnvironmentObject var session: Session
     @State private var notificationsAuthorized = false
     @State private var showingSystemSettings = false
 
@@ -910,7 +911,18 @@ struct NotificationSettingsView: View {
 
             // Trip notifications
             Section {
-                Toggle(isOn: $preferences.tripRemindersEnabled) {
+                Toggle(isOn: Binding(
+                    get: { preferences.tripRemindersEnabled },
+                    set: { newValue in
+                        preferences.tripRemindersEnabled = newValue
+                        Task {
+                            await session.syncNotificationPreferences(
+                                tripReminders: newValue,
+                                checkInAlerts: preferences.checkInAlertsEnabled
+                            )
+                        }
+                    }
+                )) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Trip Reminders")
                         Text("Get notified before trips start and when approaching ETA")
@@ -920,7 +932,18 @@ struct NotificationSettingsView: View {
                 }
                 .disabled(!notificationsAuthorized)
 
-                Toggle(isOn: $preferences.checkInAlertsEnabled) {
+                Toggle(isOn: Binding(
+                    get: { preferences.checkInAlertsEnabled },
+                    set: { newValue in
+                        preferences.checkInAlertsEnabled = newValue
+                        Task {
+                            await session.syncNotificationPreferences(
+                                tripReminders: preferences.tripRemindersEnabled,
+                                checkInAlerts: newValue
+                            )
+                        }
+                    }
+                )) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Check-in Alerts")
                         Text("Reminders to check in during active trips")
@@ -933,9 +956,9 @@ struct NotificationSettingsView: View {
                 Text("Trip Notifications")
             }
 
-            // Emergency notifications
+            // Emergency notifications - always enabled for safety
             Section {
-                Toggle(isOn: $preferences.emergencyNotificationsEnabled) {
+                Toggle(isOn: .constant(true)) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Emergency Notifications")
                         Text("Critical alerts when you're overdue")
@@ -943,11 +966,12 @@ struct NotificationSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .disabled(!notificationsAuthorized)
+                .disabled(true)
+                .tint(.green)
             } header: {
                 Text("Safety Alerts")
             } footer: {
-                Text("Emergency notifications are high priority and will override Do Not Disturb.")
+                Text("Emergency notifications cannot be disabled to keep you safe. They will override Do Not Disturb.")
             }
         }
         .scrollIndicators(.hidden)

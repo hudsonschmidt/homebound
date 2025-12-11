@@ -1917,6 +1917,7 @@ final class Session: ObservableObject {
             LocalStorage.shared.clearCachedTimeline(tripId: planId)
 
             await MainActor.run {
+                self.allTrips.removeAll { $0.id == planId }
                 self.notice = "Trip deleted successfully"
             }
             return true
@@ -1935,6 +1936,7 @@ final class Session: ObservableObject {
             LocalStorage.shared.clearCachedTimeline(tripId: planId)
 
             await MainActor.run {
+                self.allTrips.removeAll { $0.id == planId }
                 // Clear active trip if it was the one being deleted
                 if self.activeTrip?.id == planId {
                     self.activeTrip = nil
@@ -1987,6 +1989,30 @@ final class Session: ObservableObject {
             // If profile endpoint fails, just keep existing cached data
             // Don't auto-signout - tokens last 30 days and user should stay signed in
             debugLog("Failed to load user profile: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Sync Notification Preferences
+    func syncNotificationPreferences(tripReminders: Bool, checkInAlerts: Bool) async {
+        struct NotificationPrefsUpdate: Encodable {
+            let notify_trip_reminders: Bool
+            let notify_checkin_alerts: Bool
+        }
+
+        do {
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.put(
+                    self.url("/api/v1/profile"),
+                    body: NotificationPrefsUpdate(
+                        notify_trip_reminders: tripReminders,
+                        notify_checkin_alerts: checkInAlerts
+                    ),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] Notification preferences synced: tripReminders=\(tripReminders), checkInAlerts=\(checkInAlerts)")
+        } catch {
+            debugLog("[Session] Failed to sync notification preferences: \(error.localizedDescription)")
         }
     }
 

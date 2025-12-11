@@ -211,7 +211,8 @@ async def check_push_notifications():
                 await send_push_to_user(
                     trip.user_id,
                     "Trip Starting Soon",
-                    f"Your trip '{trip.title}' is starting soon!"
+                    f"Your trip '{trip.title}' is starting soon!",
+                    notification_type="trip_reminder"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_starting_soon = true WHERE id = :id"),
@@ -233,7 +234,8 @@ async def check_push_notifications():
                 await send_push_to_user(
                     trip.user_id,
                     "Trip Started",
-                    f"Your trip '{trip.title}' has started. Stay safe!"
+                    f"Your trip '{trip.title}' has started. Stay safe!",
+                    notification_type="trip_reminder"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_trip_started = true WHERE id = :id"),
@@ -258,7 +260,8 @@ async def check_push_notifications():
                 await send_push_to_user(
                     trip.user_id,
                     "Almost Time",
-                    f"You're expected back from '{trip.title}' in a couple minutes! Plan to check out soon, or extend your trip if you need more time!"
+                    f"You're expected back from '{trip.title}' in a couple minutes! Plan to check out soon, or extend your trip if you need more time!",
+                    notification_type="trip_reminder"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_approaching_eta = true WHERE id = :id"),
@@ -282,7 +285,8 @@ async def check_push_notifications():
                 await send_push_to_user(
                     trip.user_id,
                     "Time to Check Out",
-                    f"Your expected return time has passed. Check out or extend your trip '{trip.title}'."
+                    f"Your expected return time has passed. Check out or extend your trip '{trip.title}'.",
+                    notification_type="checkin"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_eta_reached = true WHERE id = :id"),
@@ -313,7 +317,8 @@ async def check_push_notifications():
                     await send_push_to_user(
                         trip.user_id,
                         "Check-in Reminder",
-                        f"Hope your trip is going well! Don't forget to check in!"
+                        f"Hope your trip is going well! Don't forget to check in!",
+                        notification_type="checkin"
                     )
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET last_checkin_reminder = :now WHERE id = :id"),
@@ -348,7 +353,8 @@ async def check_push_notifications():
                     await send_push_to_user(
                         trip.user_id,
                         "Urgent: Check In Now",
-                        f"You're overdue! {int(remaining)} minutes left before contacts are notified."
+                        f"You're overdue! {int(remaining)} minutes left before contacts are notified.",
+                        notification_type="emergency"
                     )
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET last_grace_warning = :now WHERE id = :id"),

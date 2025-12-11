@@ -633,9 +633,15 @@ struct ActivePlanCardCompact: View {
                             // Reload timeline to show updated check-in count
                             if let tripId = session.activeTrip?.id {
                                 let events = await session.loadTimeline(planId: tripId)
+                                // Batch state updates in single MainActor block to reduce re-renders
                                 await MainActor.run {
                                     self.timeline = events
+                                    self.isPerformingAction = false
                                 }
+                                if preferences.hapticFeedbackEnabled {
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                }
+                                return
                             }
                         }
                         if preferences.hapticFeedbackEnabled {
@@ -668,7 +674,8 @@ struct ActivePlanCardCompact: View {
                     if preferences.hapticFeedbackEnabled {
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                     }
-                    await session.loadActivePlan()
+                    // Note: completePlan() already calls loadActivePlan() internally
+                    // and sets activeTrip to nil, so no need to call it again here
                     isPerformingAction = false
                 }
             }) {
@@ -840,8 +847,8 @@ struct UpcomingTripsSection: View {
                 .background(Color(.tertiarySystemBackground))
                 .cornerRadius(12)
             } else {
-                ForEach(upcomingPlans) { plan in
-                    SwipeToEditContainer(onEdit: { tripToEdit = plan }) {
+                List {
+                    ForEach(upcomingPlans) { plan in
                         UpcomingTripCard(
                             plan: plan,
                             currentTime: currentTime,
@@ -853,8 +860,31 @@ struct UpcomingTripsSection: View {
                                 tripToEdit = plan
                             }
                         )
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                startTrip(plan.id)
+                            } label: {
+                                Label("Start", systemImage: "arrow.right.circle")
+                            }
+                            .tint(.green)
+
+                            Button {
+                                tripToEdit = plan
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.blue)
+                        }
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.hidden)
+                .frame(height: CGFloat(upcomingPlans.count) * 120)
+                .scrollDisabled(true)
             }
         }
         .onReceive(timer) { time in
@@ -880,13 +910,15 @@ struct UpcomingTripsSection: View {
             }
         }
         .sheet(item: $tripToEdit) { trip in
-            CreatePlanView(existingTrip: trip)
-                .environmentObject(session)
-                .onDisappear {
-                    Task {
-                        await loadUpcomingPlans()
+            Group {
+                CreatePlanView(existingTrip: trip)
+                    .environmentObject(session)
+                    .onDisappear {
+                        Task {
+                            await loadUpcomingPlans()
+                        }
                     }
-                }
+            }
         }
     }
 
@@ -1037,15 +1069,6 @@ struct UpcomingTripCard: View {
         .background(shouldStart ? Color.green.opacity(0.1) : Color(.tertiarySystemBackground))
         .cornerRadius(12)
         .animation(.easeInOut(duration: 0.3), value: shouldStart)
-        .contextMenu {
-            if let onEdit = onEdit {
-                Button {
-                    onEdit()
-                } label: {
-                    Label("Edit", systemImage: "pencil")
-                }
-            }
-        }
     }
 
     private func formatCountdown(_ interval: TimeInterval) -> String {
@@ -1062,75 +1085,6 @@ struct UpcomingTripCard: View {
             return "\(minutes)m \(seconds)s"
         } else {
             return "\(seconds)s"
-        }
-    }
-}
-
-// MARK: - Swipe to Edit Container
-struct SwipeToEditContainer<Content: View>: View {
-    let onEdit: () -> Void
-    @ViewBuilder let content: () -> Content
-
-    @State private var offset: CGFloat = 0
-    @State private var isRevealed = false
-    private let buttonWidth: CGFloat = 74
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            // Edit button - circular like native iOS swipe actions
-            Button(action: {
-                withAnimation(.spring(response: 0.3)) {
-                    offset = 0
-                    isRevealed = false
-                }
-                onEdit()
-            }) {
-                VStack(spacing: 4) {
-                    // Circular button with icon
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: 52, height: 52)
-                        .overlay(
-                            Image(systemName: "pencil")
-                                .font(.system(size: 22, weight: .medium))
-                                .foregroundStyle(.white)
-                        )
-
-                    Text("Edit")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.blue)
-                }
-            }
-            .frame(width: buttonWidth)
-            .offset(x: 8)
-
-            // Main card content
-            content()
-                .offset(x: offset)
-                .gesture(
-                    DragGesture(minimumDistance: 15)
-                        .onChanged { value in
-                            let translation = value.translation.width
-                            if translation < 0 {
-                                // Swiping left - reveal edit button
-                                offset = max(translation, -buttonWidth - 10)
-                            } else if isRevealed {
-                                // Swiping right to close
-                                offset = min(0, -buttonWidth + translation)
-                            }
-                        }
-                        .onEnded { value in
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                if value.translation.width < -35 {
-                                    offset = -buttonWidth
-                                    isRevealed = true
-                                } else {
-                                    offset = 0
-                                    isRevealed = false
-                                }
-                            }
-                        }
-                )
         }
     }
 }

@@ -168,13 +168,46 @@ async def send_email(
         log.warning(f"Unknown email backend: {settings.EMAIL_BACKEND}")
 
 
-async def send_push_to_user(user_id: int, title: str, body: str, data: dict | None = None):
-    """Send push notification to all user's devices with retry logic."""
+async def send_push_to_user(
+    user_id: int,
+    title: str,
+    body: str,
+    data: dict | None = None,
+    notification_type: str = "general"
+):
+    """Send push notification to all user's devices with retry logic.
+
+    Args:
+        user_id: The user to send the notification to
+        title: Notification title
+        body: Notification body
+        data: Optional data payload
+        notification_type: Type of notification - "trip_reminder", "checkin", "emergency", or "general"
+                          Emergency notifications always send; others respect user preferences.
+    """
     import asyncio
     from ..messaging.apns import get_push_sender
 
     MAX_RETRIES = 3
     RETRY_DELAYS = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
+
+    # Check user preferences (emergency notifications always sent for safety)
+    if notification_type != "emergency":
+        with db.engine.begin() as conn:
+            prefs = conn.execute(
+                sqlalchemy.text(
+                    "SELECT notify_trip_reminders, notify_checkin_alerts FROM users WHERE id = :uid"
+                ),
+                {"uid": user_id}
+            ).fetchone()
+
+            if prefs:
+                if notification_type == "trip_reminder" and not prefs.notify_trip_reminders:
+                    log.info(f"[APNS] Skipping trip reminder for user {user_id} - disabled by preference")
+                    return
+                if notification_type == "checkin" and not prefs.notify_checkin_alerts:
+                    log.info(f"[APNS] Skipping check-in alert for user {user_id} - disabled by preference")
+                    return
 
     if settings.PUSH_BACKEND == "dummy":
         log.info(f"[DUMMY PUSH] User: {user_id} - {title}: {body}")

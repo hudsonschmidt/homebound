@@ -219,10 +219,7 @@ struct HistoryView: View {
 
     func deletePlan(_ plan: Trip) async {
         let success = await session.deletePlan(plan.id)
-        if success {
-            // Refresh trips to update the list
-            _ = await session.loadAllTrips()
-        } else {
+        if !success {
             await MainActor.run {
                 errorMessage = "Failed to delete trip"
             }

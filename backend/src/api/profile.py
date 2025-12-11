@@ -20,6 +20,8 @@ class ProfileUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     age: int | None = None
+    notify_trip_reminders: bool | None = None
+    notify_checkin_alerts: bool | None = None
 
 
 class ProfileResponse(BaseModel):
@@ -29,6 +31,8 @@ class ProfileResponse(BaseModel):
     last_name: str
     age: int
     profile_completed: bool
+    notify_trip_reminders: bool
+    notify_checkin_alerts: bool
 
 
 class ProfileUpdateResponse(BaseModel):
@@ -43,7 +47,7 @@ def get_profile(user_id: int = Depends(auth.get_current_user_id)):
         user = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, email, first_name, last_name, age
+                SELECT id, email, first_name, last_name, age, notify_trip_reminders, notify_checkin_alerts
                 FROM users
                 WHERE id = :user_id
                 """
@@ -71,7 +75,9 @@ def get_profile(user_id: int = Depends(auth.get_current_user_id)):
             first_name=user.first_name,
             last_name=user.last_name,
             age=user.age,
-            profile_completed=profile_completed
+            profile_completed=profile_completed,
+            notify_trip_reminders=user.notify_trip_reminders,
+            notify_checkin_alerts=user.notify_checkin_alerts
         )
 
 
@@ -81,7 +87,7 @@ def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_
     with db.engine.begin() as connection:
         # Build dynamic update query
         updates: list[str] = []
-        params: dict[str, str | int] = {"user_id": user_id}
+        params: dict[str, str | int | bool] = {"user_id": user_id}
 
         if body.first_name is not None:
             updates.append("first_name = :first_name")
@@ -95,6 +101,14 @@ def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_
             updates.append("age = :age")
             params["age"] = body.age
 
+        if body.notify_trip_reminders is not None:
+            updates.append("notify_trip_reminders = :notify_trip_reminders")
+            params["notify_trip_reminders"] = body.notify_trip_reminders
+
+        if body.notify_checkin_alerts is not None:
+            updates.append("notify_checkin_alerts = :notify_checkin_alerts")
+            params["notify_checkin_alerts"] = body.notify_checkin_alerts
+
         if updates:
             connection.execute(
                 sqlalchemy.text(f"UPDATE users SET {', '.join(updates)} WHERE id = :user_id"),
@@ -105,7 +119,7 @@ def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_
         user = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, email, first_name, last_name, age
+                SELECT id, email, first_name, last_name, age, notify_trip_reminders, notify_checkin_alerts
                 FROM users
                 WHERE id = :user_id
                 """
@@ -130,7 +144,9 @@ def update_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "age": user.age,
-                "profile_completed": profile_completed
+                "profile_completed": profile_completed,
+                "notify_trip_reminders": user.notify_trip_reminders,
+                "notify_checkin_alerts": user.notify_checkin_alerts
             }
         )
 
@@ -141,7 +157,7 @@ def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_u
     with db.engine.begin() as connection:
         # Build dynamic update query
         updates: list[str] = []
-        params: dict[str, str | int] = {"user_id": user_id}
+        params: dict[str, str | int | bool] = {"user_id": user_id}
 
         if body.first_name is not None:
             updates.append("first_name = :first_name")
@@ -154,6 +170,14 @@ def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_u
         if body.age is not None:
             updates.append("age = :age")
             params["age"] = body.age
+
+        if body.notify_trip_reminders is not None:
+            updates.append("notify_trip_reminders = :notify_trip_reminders")
+            params["notify_trip_reminders"] = body.notify_trip_reminders
+
+        if body.notify_checkin_alerts is not None:
+            updates.append("notify_checkin_alerts = :notify_checkin_alerts")
+            params["notify_checkin_alerts"] = body.notify_checkin_alerts
 
         if updates:
             connection.execute(
