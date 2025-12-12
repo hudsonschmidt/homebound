@@ -80,6 +80,9 @@ struct TripCreateRequest: Codable {
     var contact2: Int?
     var contact3: Int?
     var timezone: String?  // User's timezone (e.g., "America/New_York")
+    var checkin_interval_min: Int = 30  // Minutes between check-in reminders
+    var notify_start_hour: Int?  // Hour (0-23) when notifications start (nil = no restriction)
+    var notify_end_hour: Int?    // Hour (0-23) when notifications end (nil = no restriction)
 }
 
 struct TripUpdateRequest: Codable {
@@ -96,6 +99,9 @@ struct TripUpdateRequest: Codable {
     var contact2: Int?
     var contact3: Int?
     var timezone: String?
+    var checkin_interval_min: Int?
+    var notify_start_hour: Int?
+    var notify_end_hour: Int?
 }
 
 struct Trip: Codable, Identifiable, Equatable {
@@ -119,6 +125,9 @@ struct Trip: Codable, Identifiable, Equatable {
     var contact3: Int?
     var checkin_token: String?
     var checkout_token: String?
+    var checkin_interval_min: Int?  // Minutes between check-in reminders (nil = default 30)
+    var notify_start_hour: Int?     // Hour (0-23) when notifications start (nil = no restriction)
+    var notify_end_hour: Int?       // Hour (0-23) when notifications end (nil = no restriction)
 
     // Legacy field name for backward compatibility
     var activity_type: String { activity.name }
@@ -132,6 +141,7 @@ struct Trip: Codable, Identifiable, Equatable {
         case completed_at, last_checkin, created_at
         case contact1, contact2, contact3
         case checkin_token, checkout_token
+        case checkin_interval_min, notify_start_hour, notify_end_hour
     }
 
     init(from decoder: Decoder) throws {
@@ -190,6 +200,9 @@ struct Trip: Codable, Identifiable, Equatable {
         contact3 = try container.decodeIfPresent(Int.self, forKey: .contact3)
         checkin_token = try container.decodeIfPresent(String.self, forKey: .checkin_token)
         checkout_token = try container.decodeIfPresent(String.self, forKey: .checkout_token)
+        checkin_interval_min = try container.decodeIfPresent(Int.self, forKey: .checkin_interval_min)
+        notify_start_hour = try container.decodeIfPresent(Int.self, forKey: .notify_start_hour)
+        notify_end_hour = try container.decodeIfPresent(Int.self, forKey: .notify_end_hour)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -217,6 +230,9 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(contact3, forKey: .contact3)
         try container.encodeIfPresent(checkin_token, forKey: .checkin_token)
         try container.encodeIfPresent(checkout_token, forKey: .checkout_token)
+        try container.encodeIfPresent(checkin_interval_min, forKey: .checkin_interval_min)
+        try container.encodeIfPresent(notify_start_hour, forKey: .notify_start_hour)
+        try container.encodeIfPresent(notify_end_hour, forKey: .notify_end_hour)
     }
 
     /// Memberwise initializer for local storage
@@ -240,7 +256,10 @@ struct Trip: Codable, Identifiable, Equatable {
         contact2: Int?,
         contact3: Int?,
         checkin_token: String?,
-        checkout_token: String?
+        checkout_token: String?,
+        checkin_interval_min: Int? = nil,
+        notify_start_hour: Int? = nil,
+        notify_end_hour: Int? = nil
     ) {
         self.id = id
         self.user_id = user_id
@@ -262,6 +281,9 @@ struct Trip: Codable, Identifiable, Equatable {
         self.contact3 = contact3
         self.checkin_token = checkin_token
         self.checkout_token = checkout_token
+        self.checkin_interval_min = checkin_interval_min
+        self.notify_start_hour = notify_start_hour
+        self.notify_end_hour = notify_end_hour
     }
 }
 

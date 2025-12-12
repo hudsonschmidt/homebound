@@ -77,6 +77,9 @@ class TripCreate(BaseModel):
     contact2: int | None = None
     contact3: int | None = None
     timezone: str | None = None  # User's timezone (e.g., "America/New_York")
+    checkin_interval_min: int = 30  # Minutes between check-in reminders
+    notify_start_hour: int | None = None  # Hour (0-23) when notifications start
+    notify_end_hour: int | None = None  # Hour (0-23) when notifications end
 
 
 class TripUpdate(BaseModel):
@@ -94,6 +97,9 @@ class TripUpdate(BaseModel):
     contact2: int | None = None
     contact3: int | None = None
     timezone: str | None = None
+    checkin_interval_min: int | None = None
+    notify_start_hour: int | None = None
+    notify_end_hour: int | None = None
 
 
 class TripResponse(BaseModel):
@@ -117,6 +123,9 @@ class TripResponse(BaseModel):
     contact3: int | None
     checkin_token: str | None
     checkout_token: str | None
+    checkin_interval_min: int | None
+    notify_start_hour: int | None
+    notify_end_hour: int | None
 
 
 class TimelineEvent(BaseModel):
@@ -260,12 +269,14 @@ def create_trip(
                     user_id, title, activity, start, eta, grace_min,
                     location_text, gen_lat, gen_lon, notes, status,
                     contact1, contact2, contact3, created_at,
-                    checkin_token, checkout_token, timezone
+                    checkin_token, checkout_token, timezone,
+                    checkin_interval_min, notify_start_hour, notify_end_hour
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
                     :location_text, :gen_lat, :gen_lon, :notes, :status,
                     :contact1, :contact2, :contact3, :created_at,
-                    :checkin_token, :checkout_token, :timezone
+                    :checkin_token, :checkout_token, :timezone,
+                    :checkin_interval_min, :notify_start_hour, :notify_end_hour
                 )
                 RETURNING id
                 """
@@ -288,7 +299,10 @@ def create_trip(
                 "created_at": datetime.now(UTC).isoformat(),
                 "checkin_token": checkin_token,
                 "checkout_token": checkout_token,
-                "timezone": body.timezone
+                "timezone": body.timezone,
+                "checkin_interval_min": body.checkin_interval_min,
+                "notify_start_hour": body.notify_start_hour,
+                "notify_end_hour": body.notify_end_hour
             }
         )
         row = result.fetchone()
@@ -303,6 +317,7 @@ def create_trip(
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
+                       t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -409,7 +424,10 @@ def create_trip(
             contact2=trip["contact2"],
             contact3=trip["contact3"],
             checkin_token=trip["checkin_token"],
-            checkout_token=trip["checkout_token"]
+            checkout_token=trip["checkout_token"],
+            checkin_interval_min=trip["checkin_interval_min"],
+            notify_start_hour=trip["notify_start_hour"],
+            notify_end_hour=trip["notify_end_hour"]
         )
 
 
@@ -424,6 +442,7 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
+                       t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -471,7 +490,10 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     contact2=trip["contact2"],
                     contact3=trip["contact3"],
                     checkin_token=trip["checkin_token"],
-                    checkout_token=trip["checkout_token"]
+                    checkout_token=trip["checkout_token"],
+                    checkin_interval_min=trip["checkin_interval_min"],
+                    notify_start_hour=trip["notify_start_hour"],
+                    notify_end_hour=trip["notify_end_hour"]
                 )
             )
 
@@ -492,6 +514,7 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
+                       t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -540,7 +563,10 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             contact2=trip["contact2"],
             contact3=trip["contact3"],
             checkin_token=trip["checkin_token"],
-            checkout_token=trip["checkout_token"]
+            checkout_token=trip["checkout_token"],
+            checkin_interval_min=trip["checkin_interval_min"],
+            notify_start_hour=trip["notify_start_hour"],
+            notify_end_hour=trip["notify_end_hour"]
         )
 
 
@@ -555,6 +581,7 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
+                       t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -604,7 +631,10 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             contact2=trip["contact2"],
             contact3=trip["contact3"],
             checkin_token=trip["checkin_token"],
-            checkout_token=trip["checkout_token"]
+            checkout_token=trip["checkout_token"],
+            checkin_interval_min=trip["checkin_interval_min"],
+            notify_start_hour=trip["notify_start_hour"],
+            notify_end_hour=trip["notify_end_hour"]
         )
 
 
@@ -699,6 +729,9 @@ def update_trip(
             "gen_lon": body.gen_lon,
             "notes": body.notes,
             "timezone": body.timezone,
+            "checkin_interval_min": body.checkin_interval_min,
+            "notify_start_hour": body.notify_start_hour,
+            "notify_end_hour": body.notify_end_hour,
         }
 
         for field, value in simple_fields.items():
@@ -733,6 +766,7 @@ def update_trip(
                        t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
+                       t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -777,7 +811,10 @@ def update_trip(
             contact2=updated_trip["contact2"],
             contact3=updated_trip["contact3"],
             checkin_token=updated_trip["checkin_token"],
-            checkout_token=updated_trip["checkout_token"]
+            checkout_token=updated_trip["checkout_token"],
+            checkin_interval_min=updated_trip["checkin_interval_min"],
+            notify_start_hour=updated_trip["notify_start_hour"],
+            notify_end_hour=updated_trip["notify_end_hour"]
         )
 
 

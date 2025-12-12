@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
+import pytz
 import sqlalchemy
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -17,7 +18,7 @@ log = logging.getLogger(__name__)
 # Notification timing constants (in minutes)
 STARTING_SOON_MINUTES = 15  # Notify 15 min before scheduled start
 APPROACHING_ETA_MINUTES = 15  # Notify 15 min before ETA
-CHECKIN_REMINDER_INTERVAL = 30  # Remind to check in every 30 min
+DEFAULT_CHECKIN_REMINDER_INTERVAL = 30  # Default reminder interval (used if trip doesn't specify)
 GRACE_WARNING_INTERVAL = 5  # Warn every 5 min during grace period
 
 # Global scheduler instance
@@ -294,18 +295,45 @@ async def check_push_notifications():
                 )
                 log.info(f"[Push] Sent 'ETA reached' notification for trip {trip.id}")
 
-            # 5. Check-in Reminders - during active trips (every 30 min)
+            # 5. Check-in Reminders - during active trips (per-trip interval)
+            # Fetch all active trips with their notification settings
             need_checkin_reminder = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title, last_checkin_reminder
+                    SELECT id, user_id, title, last_checkin_reminder,
+                           COALESCE(checkin_interval_min, :default_interval) as interval_min,
+                           notify_start_hour, notify_end_hour, timezone
                     FROM trips
                     WHERE status = 'active'
-                    AND (last_checkin_reminder IS NULL OR last_checkin_reminder <= :cutoff)
                 """),
-                {"cutoff": now - timedelta(minutes=CHECKIN_REMINDER_INTERVAL)}
+                {"default_interval": DEFAULT_CHECKIN_REMINDER_INTERVAL}
             ).fetchall()
 
             for trip in need_checkin_reminder:
+                # Check if enough time has passed since last reminder (using trip's custom interval)
+                interval_min = trip.interval_min
+                cutoff = now - timedelta(minutes=interval_min)
+
+                if trip.last_checkin_reminder is not None and trip.last_checkin_reminder > cutoff:
+                    continue  # Not time yet for this trip
+
+                # Check if current time is within notification hours (quiet hours check)
+                if trip.notify_start_hour is not None and trip.notify_end_hour is not None:
+                    user_tz = pytz.timezone(trip.timezone) if trip.timezone else pytz.UTC
+                    user_now = datetime.now(user_tz)
+                    current_hour = user_now.hour
+
+                    # Handle normal range (e.g., 8-22) vs overnight range (e.g., 22-8)
+                    if trip.notify_start_hour <= trip.notify_end_hour:
+                        # Normal range: active if current_hour is between start and end
+                        in_active_hours = trip.notify_start_hour <= current_hour < trip.notify_end_hour
+                    else:
+                        # Overnight range: active if current_hour >= start OR current_hour < end
+                        in_active_hours = current_hour >= trip.notify_start_hour or current_hour < trip.notify_end_hour
+
+                    if not in_active_hours:
+                        log.info(f"[Push] Skipping check-in reminder for trip {trip.id} - outside notification hours ({current_hour}h not in {trip.notify_start_hour}-{trip.notify_end_hour})")
+                        continue  # Skip notification, but don't update last_checkin_reminder
+
                 # Skip if this is a brand new trip (don't spam immediately)
                 if trip.last_checkin_reminder is None:
                     # Just mark the time, don't send notification on first pass
@@ -317,16 +345,17 @@ async def check_push_notifications():
                     await send_push_to_user(
                         trip.user_id,
                         "Check-in Reminder",
-                        f"Hope your trip is going well! Don't forget to check in!",
+                        "Hope your trip is going well! Don't forget to check in!",
                         notification_type="checkin"
                     )
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET last_checkin_reminder = :now WHERE id = :id"),
                         {"now": now, "id": trip.id}
                     )
-                    log.info(f"[Push] Sent check-in reminder for trip {trip.id}")
+                    log.info(f"[Push] Sent check-in reminder for trip {trip.id} (interval: {interval_min}min)")
 
             # 6. Grace Period Warnings - every 5 min during grace period
+            # SAFETY-CRITICAL: These warnings ALWAYS send regardless of quiet hours
             # Only send warnings for trips that are overdue (not yet notified)
             # Once contacts are notified (overdue_notified), stop sending warnings to user
             in_grace_period = conn.execute(

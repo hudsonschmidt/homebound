@@ -27,6 +27,13 @@ struct CreatePlanView: View {
     @State private var notes = ""
     @State private var hasAppliedDefaults = false
 
+    // Notification settings
+    @State private var checkinIntervalMinutes: Int = 30
+    @State private var useNotificationHours: Bool = false
+    @State private var notifyStartHour: Int = 8   // 8:00 AM default
+    @State private var notifyEndHour: Int = 22    // 10:00 PM default
+    @State private var showCustomInterval: Bool = false
+
     // Contact management
     @State private var contacts: [EmergencyContact] = []
     @State private var showAddContact = false
@@ -78,7 +85,12 @@ struct CreatePlanView: View {
                                 isManualETA: $isManualETA,
                                 graceMinutes: $graceMinutes,
                                 showZeroGraceWarning: $showZeroGraceWarning,
-                                isEditMode: isEditMode
+                                isEditMode: isEditMode,
+                                checkinIntervalMinutes: $checkinIntervalMinutes,
+                                useNotificationHours: $useNotificationHours,
+                                notifyStartHour: $notifyStartHour,
+                                notifyEndHour: $notifyEndHour,
+                                showCustomInterval: $showCustomInterval
                             )
                         case 3:
                             Step3EmergencyContacts(
@@ -162,6 +174,14 @@ struct CreatePlanView: View {
                         isManualETA = true  // Treat existing ETA as manually set
                         graceMinutes = Double(trip.grace_minutes)
                         notes = trip.notes ?? ""
+
+                        // Pre-populate notification settings
+                        checkinIntervalMinutes = trip.checkin_interval_min ?? 30
+                        if let startHour = trip.notify_start_hour, let endHour = trip.notify_end_hour {
+                            useNotificationHours = true
+                            notifyStartHour = startHour
+                            notifyEndHour = endHour
+                        }
 
                         // Pre-populate contacts from existing trip
                         let contactIds = [trip.contact1, trip.contact2, trip.contact3].compactMap { $0 }
@@ -304,7 +324,10 @@ struct CreatePlanView: View {
                     contact1: contactIds.count > 0 ? contactIds[0] : nil,
                     contact2: contactIds.count > 1 ? contactIds[1] : nil,
                     contact3: contactIds.count > 2 ? contactIds[2] : nil,
-                    timezone: userTimezone
+                    timezone: userTimezone,
+                    checkin_interval_min: checkinIntervalMinutes,
+                    notify_start_hour: useNotificationHours ? notifyStartHour : nil,
+                    notify_end_hour: useNotificationHours ? notifyEndHour : nil
                 )
 
                 let updatedTrip = await session.updateTrip(tripId, updates: updates)
@@ -335,7 +358,10 @@ struct CreatePlanView: View {
                     contact1: contactIds.count > 0 ? contactIds[0] : nil,
                     contact2: contactIds.count > 1 ? contactIds[1] : nil,
                     contact3: contactIds.count > 2 ? contactIds[2] : nil,
-                    timezone: userTimezone
+                    timezone: userTimezone,
+                    checkin_interval_min: checkinIntervalMinutes,
+                    notify_start_hour: useNotificationHours ? notifyStartHour : nil,
+                    notify_end_hour: useNotificationHours ? notifyEndHour : nil
                 )
 
                 let createdPlan = await session.createPlan(plan)
@@ -493,6 +519,13 @@ struct Step2TimeSettings: View {
     @Binding var graceMinutes: Double
     @Binding var showZeroGraceWarning: Bool
     var isEditMode: Bool = false
+
+    // Notification settings bindings
+    @Binding var checkinIntervalMinutes: Int
+    @Binding var useNotificationHours: Bool
+    @Binding var notifyStartHour: Int
+    @Binding var notifyEndHour: Int
+    @Binding var showCustomInterval: Bool
 
     @State private var selectedStartDate = Date()
     @State private var selectedEndDate = Date()
@@ -942,6 +975,137 @@ struct Step2TimeSettings: View {
         }
     }
 
+    // MARK: - Notification Settings Section
+    private var notificationSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Check-in Reminders", systemImage: "bell.badge")
+                .font(.headline)
+                .foregroundStyle(Color.hbBrand)
+
+            VStack(spacing: 16) {
+                // Check-in interval picker
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Reminder frequency")
+                        .font(.subheadline)
+
+                    HStack(spacing: 12) {
+                        ForEach([15, 30, 60, 120], id: \.self) { minutes in
+                            Button(action: {
+                                checkinIntervalMinutes = minutes
+                                showCustomInterval = false
+                            }) {
+                                Text(minutes < 60 ? "\(minutes)m" : "\(minutes/60)h")
+                                    .font(.subheadline)
+                                    .fontWeight(checkinIntervalMinutes == minutes && !showCustomInterval ? .semibold : .regular)
+                                    .foregroundStyle(checkinIntervalMinutes == minutes && !showCustomInterval ? .white : .primary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 4)
+                                    .background(checkinIntervalMinutes == minutes && !showCustomInterval ? Color.hbBrand : Color(.tertiarySystemFill))
+                                    .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    // Custom button on separate row
+                    Button(action: { showCustomInterval = true }) {
+                        Text("Custom")
+                            .font(.subheadline)
+                            .fontWeight(showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? .semibold : .regular)
+                            .foregroundStyle(showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? .white : .primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? Color.hbBrand : Color(.tertiarySystemFill))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+
+                    // Custom interval input
+                    if showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) {
+                        HStack {
+                            TextField("Minutes", value: $checkinIntervalMinutes, format: .number)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                            Text("minutes")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text("How often you'll be reminded to check in during your trip")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Notification hours toggle (available for all trips)
+                Divider()
+                    .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle(isOn: $useNotificationHours) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Set notification hours")
+                                .font(.subheadline)
+                            Text("Only receive reminders during specific hours")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if useNotificationHours {
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("From")
+                                    .font(.subheadline)
+                                Spacer()
+                                Text(formatHour(notifyStartHour))
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Stepper("", value: $notifyStartHour, in: 0...23)
+                                    .labelsHidden()
+                            }
+
+                            HStack {
+                                Text("Until")
+                                    .font(.subheadline)
+                                Spacer()
+                                Text(formatHour(notifyEndHour))
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Stepper("", value: $notifyEndHour, in: 0...23)
+                                    .labelsHidden()
+                            }
+
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "exclamationmark.shield.fill")
+                                    .foregroundStyle(.orange)
+                                    .font(.caption)
+                                Text("Emergency alerts during grace period always come through")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding()
+                        .background(Color(.tertiarySystemFill))
+                        .cornerRadius(8)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemFill))
+        .cornerRadius(12)
+    }
+
+    private func formatHour(_ hour: Int) -> String {
+        if hour == 0 { return "12:00 AM" }
+        if hour == 12 { return "12:00 PM" }
+        if hour < 12 { return "\(hour):00 AM" }
+        return "\(hour - 12):00 PM"
+    }
+
     // MARK: - Time Selection Phase
     @ViewBuilder
     private var timeSelectionPhase: some View {
@@ -950,6 +1114,7 @@ struct Step2TimeSettings: View {
             departureTimeSection
             returnTimeSection
             gracePeriodSection
+            notificationSettingsSection
         }
     }
 

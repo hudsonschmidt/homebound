@@ -808,3 +808,275 @@ def test_update_trip_empty_update():
     assert updated.notes == trip.notes
 
     cleanup_test_data(user_id)
+
+
+# ============================================================================
+# NOTIFICATION SETTINGS TESTS
+# ============================================================================
+
+def test_create_trip_with_notification_settings():
+    """Test creating a trip with custom notification settings"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Multi-day Trip",
+        activity="Camping",
+        start=now,
+        eta=now + timedelta(hours=48),
+        grace_min=30,
+        location_text="Campground",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id,
+        checkin_interval_min=60,  # Check in every hour
+        notify_start_hour=8,      # Start notifications at 8 AM
+        notify_end_hour=22        # End notifications at 10 PM
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.checkin_interval_min == 60
+    assert trip.notify_start_hour == 8
+    assert trip.notify_end_hour == 22
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_default_notification_settings():
+    """Test that default notification settings are applied when not specified"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Default Settings Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        contact1=contact_id
+        # No notification settings specified
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Default interval is 30, quiet hours are null (no restriction)
+    assert trip.checkin_interval_min == 30
+    assert trip.notify_start_hour is None
+    assert trip.notify_end_hour is None
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_custom_checkin_interval():
+    """Test creating a trip with a custom check-in interval"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Frequent Checkins",
+        activity="Running",
+        start=now,
+        eta=now + timedelta(hours=3),
+        grace_min=15,
+        contact1=contact_id,
+        checkin_interval_min=15  # Check in every 15 minutes
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.checkin_interval_min == 15
+    assert trip.notify_start_hour is None
+    assert trip.notify_end_hour is None
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_quiet_hours_only():
+    """Test creating a trip with quiet hours but default interval"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Overnight Trip",
+        activity="Camping",
+        start=now,
+        eta=now + timedelta(hours=24),
+        grace_min=60,
+        contact1=contact_id,
+        notify_start_hour=7,   # 7 AM
+        notify_end_hour=21     # 9 PM
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.checkin_interval_min == 30  # Default
+    assert trip.notify_start_hour == 7
+    assert trip.notify_end_hour == 21
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_notification_settings():
+    """Test updating a planned trip's notification settings"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    # Original trip should have default settings
+    assert trip.checkin_interval_min == 30  # Default
+    assert trip.notify_start_hour is None
+    assert trip.notify_end_hour is None
+
+    # Update notification settings
+    update_data = TripUpdate(
+        checkin_interval_min=120,  # 2 hours
+        notify_start_hour=6,
+        notify_end_hour=23
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.checkin_interval_min == 120
+    assert updated.notify_start_hour == 6
+    assert updated.notify_end_hour == 23
+
+    # Other fields should be unchanged
+    assert updated.title == trip.title
+    assert updated.grace_min == trip.grace_min
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_checkin_interval_only():
+    """Test updating only the check-in interval"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    trip = create_planned_trip(user_id, contact_id)
+
+    update_data = TripUpdate(checkin_interval_min=45)
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.checkin_interval_min == 45
+    assert updated.notify_start_hour is None  # Unchanged
+    assert updated.notify_end_hour is None    # Unchanged
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trip_includes_notification_settings():
+    """Test that get_trip returns notification settings"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Get Trip Test",
+        activity="Biking",
+        start=now + timedelta(hours=24),  # Future start for planned status
+        eta=now + timedelta(hours=26),
+        grace_min=30,
+        contact1=contact_id,
+        checkin_interval_min=90,
+        notify_start_hour=9,
+        notify_end_hour=20
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    created = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Fetch the trip
+    fetched = get_trip(created.id, user_id=user_id)
+
+    assert fetched.checkin_interval_min == 90
+    assert fetched.notify_start_hour == 9
+    assert fetched.notify_end_hour == 20
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trips_includes_notification_settings():
+    """Test that get_trips returns notification settings for all trips"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    # Create trip with custom settings
+    create_trip(
+        TripCreate(
+            title="Trip 1",
+            activity="Hiking",
+            start=now,
+            eta=now + timedelta(hours=2),
+            grace_min=30,
+            contact1=contact_id,
+            checkin_interval_min=45,
+            notify_start_hour=8,
+            notify_end_hour=22
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    # Create trip with default settings
+    create_trip(
+        TripCreate(
+            title="Trip 2",
+            activity="Biking",
+            start=now,
+            eta=now + timedelta(hours=1),
+            grace_min=20,
+            contact1=contact_id
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    trips = get_trips(user_id=user_id)
+
+    trip1 = next(t for t in trips if t.title == "Trip 1")
+    trip2 = next(t for t in trips if t.title == "Trip 2")
+
+    assert trip1.checkin_interval_min == 45
+    assert trip1.notify_start_hour == 8
+    assert trip1.notify_end_hour == 22
+
+    assert trip2.checkin_interval_min == 30  # Default
+    assert trip2.notify_start_hour is None
+    assert trip2.notify_end_hour is None
+
+    cleanup_test_data(user_id)
+
+
+def test_get_active_trip_includes_notification_settings():
+    """Test that get_active_trip returns notification settings"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Active with Settings",
+        activity="Running",
+        start=now,  # Starts now = active
+        eta=now + timedelta(hours=1),
+        grace_min=15,
+        contact1=contact_id,
+        checkin_interval_min=15,
+        notify_start_hour=6,
+        notify_end_hour=23
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    create_trip(trip_data, background_tasks, user_id=user_id)
+
+    active = get_active_trip(user_id=user_id)
+
+    assert active is not None
+    assert active.checkin_interval_min == 15
+    assert active.notify_start_hour == 6
+    assert active.notify_end_hour == 23
+
+    cleanup_test_data(user_id)
