@@ -695,3 +695,161 @@ async def test_default_interval_used_when_not_specified(test_user_with_trip):
             sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
             {"trip_id": trip_id}
         )
+
+
+@pytest.mark.asyncio
+async def test_checkin_reminder_overnight_hours_handling(test_user_with_trip):
+    """Test overnight notification hours (e.g., 22:00 to 08:00) don't cause errors"""
+    user_id = test_user_with_trip["user_id"]
+    activity_id = test_user_with_trip["activity_id"]
+    contact_id = test_user_with_trip["contact_id"]
+
+    now = datetime.utcnow()
+
+    with db.engine.begin() as conn:
+        # Set overnight hours: 22:00 to 08:00 (start > end means overnight)
+        trip_id = create_active_trip_with_notification_settings(
+            conn, user_id, activity_id, contact_id,
+            checkin_interval_min=15,
+            notify_start_hour=22,  # 10 PM
+            notify_end_hour=8,     # 8 AM (overnight wrap)
+            timezone="UTC",
+            last_checkin_reminder=now - timedelta(minutes=60)
+        )
+
+    mock_push = AsyncMock()
+
+    with patch("src.services.scheduler.send_push_to_user", mock_push):
+        from src.services.scheduler import check_push_notifications
+        # This should not crash with overnight hours
+        await check_push_notifications()
+
+    # Cleanup
+    with db.engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip_id}
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkin_reminder_respects_long_custom_interval(test_user_with_trip):
+    """Test that long custom intervals (2 hours) are respected"""
+    user_id = test_user_with_trip["user_id"]
+    activity_id = test_user_with_trip["activity_id"]
+    contact_id = test_user_with_trip["contact_id"]
+
+    now = datetime.utcnow()
+
+    with db.engine.begin() as conn:
+        # Set a 2-hour (120 min) interval, last reminder was 90 mins ago
+        trip_id = create_active_trip_with_notification_settings(
+            conn, user_id, activity_id, contact_id,
+            checkin_interval_min=120,  # 2 hours
+            notify_start_hour=None,
+            notify_end_hour=None,
+            timezone="UTC",
+            last_checkin_reminder=now - timedelta(minutes=90)  # Only 90 mins ago
+        )
+
+    mock_push = AsyncMock()
+
+    with patch("src.services.scheduler.send_push_to_user", mock_push):
+        from src.services.scheduler import check_push_notifications
+        await check_push_notifications()
+
+        # Should NOT send reminder because 90 < 120 (custom interval)
+        checkin_calls = [
+            call for call in mock_push.call_args_list
+            if len(call[0]) >= 2 and call[0][1] == "Check-in Reminder"
+        ]
+        assert len(checkin_calls) == 0
+
+    # Cleanup
+    with db.engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip_id}
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkin_reminder_sent_after_long_interval_elapsed(test_user_with_trip):
+    """Test that reminder IS sent after long custom interval has elapsed"""
+    user_id = test_user_with_trip["user_id"]
+    activity_id = test_user_with_trip["activity_id"]
+    contact_id = test_user_with_trip["contact_id"]
+
+    now = datetime.utcnow()
+
+    with db.engine.begin() as conn:
+        # Set a 2-hour (120 min) interval, last reminder was 150 mins ago
+        trip_id = create_active_trip_with_notification_settings(
+            conn, user_id, activity_id, contact_id,
+            checkin_interval_min=120,  # 2 hours
+            notify_start_hour=None,
+            notify_end_hour=None,
+            timezone="UTC",
+            last_checkin_reminder=now - timedelta(minutes=150)  # 150 mins ago > 120
+        )
+
+    mock_push = AsyncMock()
+
+    with patch("src.services.scheduler.send_push_to_user", mock_push):
+        from src.services.scheduler import check_push_notifications
+        await check_push_notifications()
+
+        # Should send reminder because 150 > 120 (custom interval)
+        checkin_calls = [
+            call for call in mock_push.call_args_list
+            if len(call[0]) >= 2 and call[0][1] == "Check-in Reminder"
+        ]
+        assert len(checkin_calls) >= 1
+
+    # Cleanup
+    with db.engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip_id}
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkin_reminder_short_15min_interval(test_user_with_trip):
+    """Test that short intervals (15 min) work correctly"""
+    user_id = test_user_with_trip["user_id"]
+    activity_id = test_user_with_trip["activity_id"]
+    contact_id = test_user_with_trip["contact_id"]
+
+    now = datetime.utcnow()
+
+    with db.engine.begin() as conn:
+        # Set a 15-minute interval, last reminder was 20 mins ago
+        trip_id = create_active_trip_with_notification_settings(
+            conn, user_id, activity_id, contact_id,
+            checkin_interval_min=15,
+            notify_start_hour=None,
+            notify_end_hour=None,
+            timezone="UTC",
+            last_checkin_reminder=now - timedelta(minutes=20)  # 20 mins ago > 15
+        )
+
+    mock_push = AsyncMock()
+
+    with patch("src.services.scheduler.send_push_to_user", mock_push):
+        from src.services.scheduler import check_push_notifications
+        await check_push_notifications()
+
+        # Should send reminder because 20 > 15
+        checkin_calls = [
+            call for call in mock_push.call_args_list
+            if len(call[0]) >= 2 and call[0][1] == "Check-in Reminder"
+        ]
+        assert len(checkin_calls) >= 1
+
+    # Cleanup
+    with db.engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip_id}
+        )
