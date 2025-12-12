@@ -1323,6 +1323,209 @@ def test_export_user_data_nonexistent_user():
     assert "not found" in exc_info.value.detail.lower()
 
 
+def test_get_profile_includes_notification_preferences():
+    """Test that get_profile returns notification preferences"""
+    test_email = "notification-prefs@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user with default notification preferences
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Notify",
+                "last_name": "Test",
+                "age": 28
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    # Get profile
+    profile = get_profile(user_id=user_id)
+
+    # Verify notification preferences are included with default values (True)
+    assert hasattr(profile, 'notify_trip_reminders')
+    assert hasattr(profile, 'notify_checkin_alerts')
+    assert profile.notify_trip_reminders is True
+    assert profile.notify_checkin_alerts is True
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+def test_update_notification_preferences():
+    """Test updating notification preferences via PUT endpoint"""
+    test_email = "update-notify@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Update",
+                "last_name": "Notify",
+                "age": 30
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    # Disable trip reminders
+    update_data = ProfileUpdate(notify_trip_reminders=False)
+    response = update_profile(update_data, user_id=user_id)
+
+    assert response.ok is True
+    assert response.user["notify_trip_reminders"] is False
+    assert response.user["notify_checkin_alerts"] is True  # Should remain unchanged
+
+    # Disable check-in alerts
+    update_data = ProfileUpdate(notify_checkin_alerts=False)
+    response = update_profile(update_data, user_id=user_id)
+
+    assert response.user["notify_trip_reminders"] is False  # Should remain unchanged
+    assert response.user["notify_checkin_alerts"] is False
+
+    # Re-enable both
+    update_data = ProfileUpdate(notify_trip_reminders=True, notify_checkin_alerts=True)
+    response = update_profile(update_data, user_id=user_id)
+
+    assert response.user["notify_trip_reminders"] is True
+    assert response.user["notify_checkin_alerts"] is True
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+def test_patch_notification_preferences():
+    """Test updating notification preferences via PATCH endpoint"""
+    test_email = "patch-notify@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Patch",
+                "last_name": "Notify",
+                "age": 25
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    # Disable trip reminders via PATCH
+    update_data = ProfileUpdate(notify_trip_reminders=False)
+    response = patch_profile(update_data, user_id=user_id)
+
+    assert response["ok"] is True
+
+    # Verify the update persisted
+    profile = get_profile(user_id=user_id)
+    assert profile.notify_trip_reminders is False
+    assert profile.notify_checkin_alerts is True  # Should remain unchanged
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+def test_update_profile_with_notification_prefs_and_other_fields():
+    """Test updating notification preferences along with other profile fields"""
+    test_email = "combo-update@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Combo",
+                "last_name": "Update",
+                "age": 22
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    # Update profile fields and notification preferences together
+    update_data = ProfileUpdate(
+        first_name="Updated",
+        age=23,
+        notify_trip_reminders=False,
+        notify_checkin_alerts=False
+    )
+    response = update_profile(update_data, user_id=user_id)
+
+    assert response.ok is True
+    assert response.user["first_name"] == "Updated"
+    assert response.user["last_name"] == "Update"  # Unchanged
+    assert response.user["age"] == 23
+    assert response.user["notify_trip_reminders"] is False
+    assert response.user["notify_checkin_alerts"] is False
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
 def test_export_user_data_full():
     """Test exporting complete user data with profile, trips, and contacts"""
     test_email = "export-full@homeboundapp.com"

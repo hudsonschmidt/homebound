@@ -264,3 +264,320 @@ def test_notification_logging_failure(test_user_with_device):
         assert result is not None
         assert result[0] == "failed"
         assert result[1] == "Connection timeout"
+
+
+# --- Notification Preference Tests ---
+
+@pytest.fixture
+def test_user_with_device_prefs_disabled():
+    """Create a test user with device and notification preferences disabled"""
+    test_email = "notification_prefs_test@homeboundapp.com"
+
+    with db.engine.begin() as conn:
+        # Clean up any existing test data
+        if table_exists(conn, "notification_logs"):
+            conn.execute(
+                sqlalchemy.text("DELETE FROM notification_logs WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": test_email}
+            )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user with notifications disabled
+        result = conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO users (email, first_name, last_name, age, notify_trip_reminders, notify_checkin_alerts)
+                VALUES (:email, 'Prefs', 'Test', 30, false, false)
+                RETURNING id
+            """),
+            {"email": test_email}
+        )
+        user_id = result.fetchone()[0]
+
+        # Create device
+        conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO devices (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
+                VALUES (:user_id, 'ios', 'test_prefs_token_12345', 'com.homeboundapp.test', 'development', NOW(), NOW())
+            """),
+            {"user_id": user_id}
+        )
+
+    yield {"user_id": user_id, "email": test_email, "token": "test_prefs_token_12345"}
+
+    # Cleanup
+    with db.engine.begin() as conn:
+        if table_exists(conn, "notification_logs"):
+            conn.execute(
+                sqlalchemy.text("DELETE FROM notification_logs WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+@pytest.mark.asyncio
+async def test_trip_reminder_respects_user_preference_disabled(test_user_with_device_prefs_disabled):
+    """Test that trip reminders are skipped when user has disabled them"""
+    user_id = test_user_with_device_prefs_disabled["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Send trip_reminder notification - should be skipped
+            await send_push_to_user(
+                user_id,
+                "Trip Reminder",
+                "Your trip starts soon!",
+                notification_type="trip_reminder"
+            )
+
+            # Sender should NOT have been called because preference is disabled
+            mock_sender.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_checkin_alert_respects_user_preference_disabled(test_user_with_device_prefs_disabled):
+    """Test that check-in alerts are skipped when user has disabled them"""
+    user_id = test_user_with_device_prefs_disabled["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Send checkin notification - should be skipped
+            await send_push_to_user(
+                user_id,
+                "Check-in Reminder",
+                "Please check in!",
+                notification_type="checkin"
+            )
+
+            # Sender should NOT have been called because preference is disabled
+            mock_sender.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_emergency_notification_ignores_preferences(test_user_with_device_prefs_disabled):
+    """Test that emergency notifications are always sent regardless of preferences"""
+    user_id = test_user_with_device_prefs_disabled["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Send emergency notification - should always be sent
+            await send_push_to_user(
+                user_id,
+                "Emergency Alert",
+                "This is urgent!",
+                notification_type="emergency"
+            )
+
+            # Sender SHOULD have been called even though preferences are disabled
+            mock_sender.send.assert_called_once()
+            call_args = mock_sender.send.call_args
+            assert call_args[0][1] == "Emergency Alert"
+
+
+@pytest.mark.asyncio
+async def test_general_notification_ignores_preferences(test_user_with_device_prefs_disabled):
+    """Test that general notifications are sent regardless of specific preferences"""
+    user_id = test_user_with_device_prefs_disabled["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Send general notification (default type) - should be sent
+            await send_push_to_user(
+                user_id,
+                "General Notice",
+                "Just an update"
+            )
+
+            # Sender SHOULD have been called (general doesn't check specific prefs)
+            mock_sender.send.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_trip_reminder_sent_when_preference_enabled(test_user_with_device):
+    """Test that trip reminders are sent when user has them enabled"""
+    user_id = test_user_with_device["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Send trip_reminder notification - should be sent (default preference is True)
+            await send_push_to_user(
+                user_id,
+                "Trip Reminder",
+                "Your trip starts soon!",
+                notification_type="trip_reminder"
+            )
+
+            # Sender SHOULD have been called
+            mock_sender.send.assert_called_once()
+            call_args = mock_sender.send.call_args
+            assert call_args[0][1] == "Trip Reminder"
+
+
+@pytest.mark.asyncio
+async def test_checkin_alert_sent_when_preference_enabled(test_user_with_device):
+    """Test that check-in alerts are sent when user has them enabled"""
+    user_id = test_user_with_device["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Send checkin notification - should be sent (default preference is True)
+            await send_push_to_user(
+                user_id,
+                "Check-in Reminder",
+                "Please check in!",
+                notification_type="checkin"
+            )
+
+            # Sender SHOULD have been called
+            mock_sender.send.assert_called_once()
+            call_args = mock_sender.send.call_args
+            assert call_args[0][1] == "Check-in Reminder"
+
+
+@pytest.fixture
+def test_user_with_mixed_preferences():
+    """Create a test user with trip reminders enabled but check-in alerts disabled"""
+    test_email = "mixed_prefs_test@homeboundapp.com"
+
+    with db.engine.begin() as conn:
+        # Clean up any existing test data
+        if table_exists(conn, "notification_logs"):
+            conn.execute(
+                sqlalchemy.text("DELETE FROM notification_logs WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": test_email}
+            )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user with trip reminders ON, check-in alerts OFF
+        result = conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO users (email, first_name, last_name, age, notify_trip_reminders, notify_checkin_alerts)
+                VALUES (:email, 'Mixed', 'Prefs', 28, true, false)
+                RETURNING id
+            """),
+            {"email": test_email}
+        )
+        user_id = result.fetchone()[0]
+
+        # Create device
+        conn.execute(
+            sqlalchemy.text("""
+                INSERT INTO devices (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
+                VALUES (:user_id, 'ios', 'test_mixed_token_12345', 'com.homeboundapp.test', 'development', NOW(), NOW())
+            """),
+            {"user_id": user_id}
+        )
+
+    yield {"user_id": user_id, "email": test_email, "token": "test_mixed_token_12345"}
+
+    # Cleanup
+    with db.engine.begin() as conn:
+        if table_exists(conn, "notification_logs"):
+            conn.execute(
+                sqlalchemy.text("DELETE FROM notification_logs WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+
+
+@pytest.mark.asyncio
+async def test_mixed_preferences_trip_reminder_sent(test_user_with_mixed_preferences):
+    """Test that trip reminders are sent when only that preference is enabled"""
+    user_id = test_user_with_mixed_preferences["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Trip reminder should be sent (enabled)
+            await send_push_to_user(
+                user_id,
+                "Trip Reminder",
+                "Your trip starts soon!",
+                notification_type="trip_reminder"
+            )
+
+            mock_sender.send.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_mixed_preferences_checkin_alert_skipped(test_user_with_mixed_preferences):
+    """Test that check-in alerts are skipped when only that preference is disabled"""
+    user_id = test_user_with_mixed_preferences["user_id"]
+
+    mock_sender = AsyncMock()
+    mock_sender.send = AsyncMock(return_value=MockPushResult(ok=True, status=200))
+
+    with patch("src.messaging.apns.get_push_sender", return_value=mock_sender):
+        with patch("src.services.notifications.settings") as mock_settings:
+            mock_settings.PUSH_BACKEND = "apns"
+
+            # Check-in alert should be skipped (disabled)
+            await send_push_to_user(
+                user_id,
+                "Check-in Reminder",
+                "Please check in!",
+                notification_type="checkin"
+            )
+
+            mock_sender.send.assert_not_called()

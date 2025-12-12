@@ -77,7 +77,8 @@ struct CreatePlanView: View {
                                 etaTime: $etaTime,
                                 isManualETA: $isManualETA,
                                 graceMinutes: $graceMinutes,
-                                showZeroGraceWarning: $showZeroGraceWarning
+                                showZeroGraceWarning: $showZeroGraceWarning,
+                                isEditMode: isEditMode
                             )
                         case 3:
                             Step3EmergencyContacts(
@@ -491,6 +492,7 @@ struct Step2TimeSettings: View {
     @Binding var isManualETA: Bool
     @Binding var graceMinutes: Double
     @Binding var showZeroGraceWarning: Bool
+    var isEditMode: Bool = false
 
     @State private var selectedStartDate = Date()
     @State private var selectedEndDate = Date()
@@ -502,6 +504,7 @@ struct Step2TimeSettings: View {
     @State private var returnHour = 11  // 11:00 AM (2 hours after default 9:00 AM departure)
     @State private var returnMinute = 0
     @State private var returnAMPM = 0 // 0 = AM (changed from 1 PM to match default 2-hour trip)
+    @State private var showCalendarHelp = false
 
     // For the date range visualization
     var dateRangeString: String {
@@ -540,391 +543,425 @@ struct Step2TimeSettings: View {
         return etaTime > startTime && etaTime > now
     }
 
+    private var returnTimeString: String {
+        "\(returnHour):\(String(format: "%02d", returnMinute)) \(returnAMPM == 0 ? "AM" : "PM")"
+    }
+
+    private var departureTimeString: String {
+        "\(departureHour):\(String(format: "%02d", departureMinute)) \(departureAMPM == 0 ? "AM" : "PM")"
+    }
+
+    // MARK: - Header Section
+    @ViewBuilder
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Time Settings")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+
+                Button(action: { showCalendarHelp = true }) {
+                    Image(systemName: "questionmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.hbBrand.opacity(0.7))
+                }
+            }
+            Text(!showingTimeSelection ? "Select your trip dates" : "Set departure and return times")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 20)
+    }
+
+    // MARK: - Date Range Display
+    @ViewBuilder
+    private var dateRangeDisplay: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Departure")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(selectedStartDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+
+            Image(systemName: "arrow.right")
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Return")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(selectedEndDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .background(Color(.secondarySystemFill))
+        .cornerRadius(12, corners: [.topLeft, .topRight])
+    }
+
+    // MARK: - Date Selection Phase
+    @ViewBuilder
+    private var dateSelectionPhase: some View {
+        VStack(spacing: 20) {
+            VStack(spacing: 0) {
+                dateRangeDisplay
+
+                MultiDatePicker(
+                    startDate: $selectedStartDate,
+                    endDate: $selectedEndDate
+                )
+                .padding()
+                .background(Color(.secondarySystemFill))
+                .cornerRadius(12, corners: [.bottomLeft, .bottomRight])
+            }
+
+            datesSummarySection
+        }
+    }
+
+    // MARK: - Dates Summary Section
+    @ViewBuilder
+    private var datesSummarySection: some View {
+        VStack {
+            HStack {
+                Image(systemName: "calendar.badge.checkmark")
+                    .foregroundStyle(Color.hbBrand)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(dateRangeString)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text(tripDurationString)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+
+                Button("Set Times") {
+                    showingTimeSelection = true
+                }
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.hbBrand)
+                .foregroundStyle(.white)
+                .cornerRadius(8)
+            }
+            .padding()
+            .background(Color(.tertiarySystemFill))
+            .cornerRadius(12)
+
+            // ---------------------------------------------------------
+            HStack(alignment: .top, spacing: 8) {
+                Text("Starting: Now")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Ending at: \(returnTimeString)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Grace period: \(Int(graceMinutes)) min")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .background(Color(.tertiarySystemFill))
+            .cornerRadius(12)
+        }
+    }
+
+    // MARK: - Date Range Summary Header
+    @ViewBuilder
+    private var dateRangeSummaryHeader: some View {
+        HStack {
+            Image(systemName: "calendar.circle.fill")
+                .font(.title2)
+                .foregroundStyle(Color.hbBrand)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(dateRangeString)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(tripDurationString)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("Change Dates") {
+                showingTimeSelection = false
+            }
+            .font(.caption)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color(.tertiarySystemFill))
+            .foregroundStyle(Color.hbBrand)
+            .cornerRadius(6)
+        }
+        .padding()
+        .background(Color(.secondarySystemFill))
+        .cornerRadius(12)
+    }
+
+    // MARK: - Time Picker Component
+    @ViewBuilder
+    private func timePicker(hourBinding: Binding<Int>, minuteBinding: Binding<Int>, ampmBinding: Binding<Int>) -> some View {
+        HStack(spacing: 4) {
+            // Looping hour picker (1-12)
+            LoopingHourPicker(selection: hourBinding)
+                .frame(width: 50, height: 100)
+                .clipped()
+
+            Text(":")
+                .font(.title2)
+                .fontWeight(.medium)
+
+            // Looping minute picker (0-59)
+            LoopingMinutePicker(selection: minuteBinding)
+                .frame(width: 60, height: 100)
+                .clipped()
+
+            // Looping AM/PM picker
+            LoopingAMPMPicker(selection: ampmBinding)
+                .frame(width: 60, height: 100)
+                .clipped()
+
+            Spacer()
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: - Departure Time Section
+    @ViewBuilder
+    private var departureTimeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Departure Time", systemImage: "airplane.departure")
+                    .font(.headline)
+                    .foregroundStyle(Color.hbBrand)
+
+                Spacer()
+
+                if isSelectedDateToday {
+                    Button(isStartingNow ? "Start Later" : "Starting Now") {
+                        isStartingNow.toggle()
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(isStartingNow ? Color(.tertiarySystemFill) : Color.hbBrand)
+                    .foregroundStyle(isStartingNow ? Color.hbBrand : .white)
+                    .cornerRadius(6)
+                }
+            }
+
+            if isStartingNow && isSelectedDateToday {
+                startingNowDisplay
+            } else {
+                departureTimePickerContent
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemFill))
+        .cornerRadius(12)
+    }
+
+    @ViewBuilder
+    private var startingNowDisplay: some View {
+        HStack {
+            Image(systemName: "clock.fill")
+                .font(.title2)
+                .foregroundStyle(Color.hbBrand)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Starting Now")
+                    .font(.headline)
+                Text("Trip will begin immediately when created")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding()
+        .background(Color.hbBrand.opacity(0.1))
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var departureTimePickerContent: some View {
+        Group {
+            if !isSelectedDateToday {
+                HStack {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Set departure time for \(selectedStartDate.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 4)
+            }
+
+            timePicker(hourBinding: $departureHour, minuteBinding: $departureMinute, ampmBinding: $departureAMPM)
+
+            Text("\(selectedStartDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(departureTimeString)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Return Time Section
+    @ViewBuilder
+    private var returnTimeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Return Time", systemImage: "airplane.arrival")
+                    .font(.headline)
+                    .foregroundStyle(isReturnTimeValid ? Color.orange : Color.red)
+
+                Spacer()
+
+                if !isReturnTimeValid {
+                    Text("Must be in future")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fontWeight(.medium)
+                }
+            }
+
+            timePicker(hourBinding: $returnHour, minuteBinding: $returnMinute, ampmBinding: $returnAMPM)
+
+            if isReturnTimeValid {
+                Text("\(selectedEndDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(returnTimeString)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    Text("Return time must be in the future")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            Text("If your trip is taking place out of service, plan your return time to be when you know you will be back in coverage, that way the grace period can be used effectively.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(isReturnTimeValid ? Color(.secondarySystemFill) : Color.red.opacity(0.1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isReturnTimeValid ? Color.clear : Color.red.opacity(0.5), lineWidth: 1)
+        )
+        .cornerRadius(12)
+    }
+
+    // MARK: - Grace Period Section
+    @ViewBuilder
+    private var gracePeriodSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Grace Period", systemImage: "hourglass")
+                .font(.headline)
+                .foregroundStyle(.orange)
+
+            VStack(spacing: 16) {
+                HStack {
+                    Text("Alert delay after return time")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(Int(graceMinutes)) min")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(graceMinutes == 0 ? .red : .orange)
+                }
+
+                Slider(value: $graceMinutes, in: 0...120, step: 1)
+                    .tint(graceMinutes == 0 ? .red : .orange)
+
+                graceQuickSelectButtons
+            }
+
+            graceWarningText
+        }
+        .padding()
+        .background(Color(.secondarySystemFill))
+        .cornerRadius(12)
+    }
+
+    @ViewBuilder
+    private var graceQuickSelectButtons: some View {
+        HStack(spacing: 8) {
+            ForEach([0, 15, 30, 60], id: \.self) { minutes in
+                Button(action: {
+                    graceMinutes = Double(minutes)
+                }) {
+                    let isSelected = graceMinutes == Double(minutes)
+                    Text("\(minutes)m")
+                        .font(.caption)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .foregroundStyle(isSelected ? .white : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(graceButtonBackground(minutes: minutes, isSelected: isSelected))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func graceButtonBackground(minutes: Int, isSelected: Bool) -> Color {
+        if isSelected {
+            return minutes == 0 ? Color.red : Color.orange
+        }
+        return Color(.tertiarySystemFill)
+    }
+
+    @ViewBuilder
+    private var graceWarningText: some View {
+        if graceMinutes == 0 {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text("Contacts will be notified immediately if you're late")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        } else {
+            Text("Contacts will be notified \(Int(graceMinutes)) minutes after your return time")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Time Selection Phase
+    @ViewBuilder
+    private var timeSelectionPhase: some View {
+        VStack(spacing: 20) {
+            dateRangeSummaryHeader
+            departureTimeSection
+            returnTimeSection
+            gracePeriodSection
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Header
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Time Settings")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    Text(!showingTimeSelection ? "Select your trip dates" : "Set departure and return times")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 20)
+                headerSection
 
                 if !showingTimeSelection {
-                    // PHASE 1: Date Selection
-                    VStack(spacing: 20) {
-                        // Instructions
-                        HStack {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundStyle(Color.hbBrand)
-                            Text("Tap departure date, then tap return date")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .background(Color(.tertiarySystemFill))
-                        .cornerRadius(12)
-
-                        // Single Calendar for Date Range
-                        VStack(spacing: 0) {
-                            // Custom date range display
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Departure")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text(selectedStartDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                }
-
-                                Image(systemName: "arrow.right")
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Return")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text(selectedEndDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                }
-
-                                Spacer()
-                            }
-                            .padding()
-                            .background(Color(.secondarySystemFill))
-                            .cornerRadius(12, corners: [.topLeft, .topRight])
-
-                            // Multi-date picker using DatePicker
-                            MultiDatePicker(
-                                startDate: $selectedStartDate,
-                                endDate: $selectedEndDate
-                            )
-                            .padding()
-                            .background(Color(.secondarySystemFill))
-                            .cornerRadius(12, corners: [.bottomLeft, .bottomRight])
-                        }
-
-                        // Selected dates summary
-                        HStack {
-                            Image(systemName: "calendar.badge.checkmark")
-                                .foregroundStyle(Color.hbBrand)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(dateRangeString)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Text(tripDurationString)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-
-                            Button("Set Times") {
-                                showingTimeSelection = true
-                            }
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Color.hbBrand)
-                            .foregroundStyle(.white)
-                            .cornerRadius(8)
-                        }
-                        .padding()
-                        .background(Color(.tertiarySystemFill))
-                        .cornerRadius(12)
-                    }
+                    dateSelectionPhase
                 } else {
-                    // PHASE 2: Time Selection
-                    VStack(spacing: 20) {
-                        // Date Range Summary with Edit Button
-                        HStack {
-                            Image(systemName: "calendar.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(Color.hbBrand)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(dateRangeString)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Text(tripDurationString)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer()
-
-                            Button("Change Dates") {
-                                showingTimeSelection = false
-                            }
-                            .font(.caption)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color(.tertiarySystemFill))
-                            .foregroundStyle(Color.hbBrand)
-                            .cornerRadius(6)
-                        }
-                        .padding()
-                        .background(Color(.secondarySystemFill))
-                        .cornerRadius(12)
-
-                        // Departure Time
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Label("Departure Time", systemImage: "airplane.departure")
-                                    .font(.headline)
-                                    .foregroundStyle(Color.hbBrand)
-
-                                Spacer()
-
-                                // Only show "Starting Now" toggle if selected date is today
-                                if isSelectedDateToday {
-                                    Button(isStartingNow ? "Start Later" : "Starting Now") {
-                                        isStartingNow.toggle()
-                                    }
-                                    .font(.caption)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(isStartingNow ? Color(.tertiarySystemFill) : (Color.hbBrand))
-                                    .foregroundStyle(isStartingNow ? (Color.hbBrand) : .white)
-                                    .cornerRadius(6)
-                                }
-                            }
-
-                            if isStartingNow && isSelectedDateToday {
-                                // Starting Now UI (only shown when today is selected)
-                                HStack {
-                                    Image(systemName: "clock.fill")
-                                        .font(.title2)
-                                        .foregroundStyle(Color.hbBrand)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Starting Now")
-                                            .font(.headline)
-                                        Text("Trip will begin immediately when created")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                }
-                                .padding()
-                                .background(Color.hbBrand.opacity(0.1))
-                                .cornerRadius(8)
-                            } else {
-                                // Show helpful message for future dates
-                                if !isSelectedDateToday {
-                                    HStack {
-                                        Image(systemName: "info.circle")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Text("Set departure time for \(selectedStartDate.formatted(date: .abbreviated, time: .omitted))")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .padding(.bottom, 4)
-                                }
-
-                                // Custom time picker
-                                HStack(spacing: 4) {
-                                    // Hour Picker (12-hour format)
-                                    Picker("Hour", selection: $departureHour) {
-                                        ForEach(1...12, id: \.self) { hour in
-                                            Text("\(hour)")
-                                                .tag(hour)
-                                        }
-                                    }
-                                    .pickerStyle(.wheel)
-                                    .frame(width: 50, height: 100)
-                                    .clipped()
-
-                                    Text(":")
-                                        .font(.title2)
-                                        .fontWeight(.medium)
-
-                                    // Minute Picker (every minute)
-                                    Picker("Minute", selection: $departureMinute) {
-                                        ForEach(0..<60, id: \.self) { minute in
-                                            Text(String(format: "%02d", minute))
-                                                .tag(minute)
-                                        }
-                                    }
-                                    .pickerStyle(.wheel)
-                                    .frame(width: 60, height: 100)
-                                    .clipped()
-
-                                    // AM/PM Picker
-                                    Picker("AM/PM", selection: $departureAMPM) {
-                                        Text("AM").tag(0)
-                                        Text("PM").tag(1)
-                                    }
-                                    .pickerStyle(.wheel)
-                                    .frame(width: 60, height: 100)
-                                    .clipped()
-
-                                    Spacer()
-                                }
-                                .padding(.horizontal)
-
-                                Text("\(selectedStartDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(departureHour):\(String(format: "%02d", departureMinute)) \(departureAMPM == 0 ? "AM" : "PM")")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding()
-                        .background(Color(.secondarySystemFill))
-                        .cornerRadius(12)
-
-                        // Return Time
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Label("Return Time", systemImage: "airplane.arrival")
-                                    .font(.headline)
-                                    .foregroundStyle(isReturnTimeValid ? Color.orange : Color.red)
-
-                                Spacer()
-
-                                if !isReturnTimeValid {
-                                    Text("Must be in future")
-                                        .font(.caption)
-                                        .foregroundStyle(.red)
-                                        .fontWeight(.medium)
-                                }
-                            }
-
-                            HStack(spacing: 4) {
-                                // Hour Picker (12-hour format)
-                                Picker("Hour", selection: $returnHour) {
-                                    ForEach(1...12, id: \.self) { hour in
-                                        Text("\(hour)")
-                                            .tag(hour)
-                                    }
-                                }
-                                .pickerStyle(.wheel)
-                                .frame(width: 50, height: 100)
-                                .clipped()
-
-                                Text(":")
-                                    .font(.title2)
-                                    .fontWeight(.medium)
-
-                                // Minute Picker (every minute)
-                                Picker("Minute", selection: $returnMinute) {
-                                    ForEach(0..<60, id: \.self) { minute in
-                                        Text(String(format: "%02d", minute))
-                                            .tag(minute)
-                                    }
-                                }
-                                .pickerStyle(.wheel)
-                                .frame(width: 60, height: 100)
-                                .clipped()
-
-                                // AM/PM Picker
-                                Picker("AM/PM", selection: $returnAMPM) {
-                                    Text("AM").tag(0)
-                                    Text("PM").tag(1)
-                                }
-                                .pickerStyle(.wheel)
-                                .frame(width: 60, height: 100)
-                                .clipped()
-
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-
-                            if isReturnTimeValid {
-                                Text("\(selectedEndDate.formatted(.dateTime.weekday(.wide).month(.wide).day())) at \(returnHour):\(String(format: "%02d", returnMinute)) \(returnAMPM == 0 ? "AM" : "PM")")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.red)
-                                    Text("Return time must be in the future")
-                                        .font(.caption)
-                                        .foregroundStyle(.red)
-                                }
-                            }
-
-                            Text("If your trip is taking place out of service, plan your return time to be when you know you will be back in coverage, that way the grace period can be used effectively.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .background(isReturnTimeValid ? Color(.secondarySystemFill) : Color.red.opacity(0.1))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(isReturnTimeValid ? Color.clear : Color.red.opacity(0.5), lineWidth: 1)
-                        )
-                        .cornerRadius(12)
-
-                        // Grace Period
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("Grace Period", systemImage: "hourglass")
-                                .font(.headline)
-                                .foregroundStyle(.orange)
-
-                            VStack(spacing: 16) {
-                                HStack {
-                                    Text("Alert delay after return time")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Text("\(Int(graceMinutes)) min")
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(graceMinutes == 0 ? .red : .orange)
-                                }
-
-                                // Slider from 0 to 120 minutes
-                                Slider(value: $graceMinutes, in: 0...120, step: 1)
-                                    .tint(graceMinutes == 0 ? .red : .orange)
-
-                                // Quick select buttons
-                                HStack(spacing: 8) {
-                                    ForEach([0, 15, 30, 60], id: \.self) { minutes in
-                                        Button(action: {
-                                            graceMinutes = Double(minutes)
-                                        }) {
-                                            Text("\(minutes)m")
-                                                .font(.caption)
-                                                .fontWeight(graceMinutes == Double(minutes) ? .semibold : .regular)
-                                                .foregroundStyle(graceMinutes == Double(minutes) ? .white : Color.primary)
-                                                .frame(maxWidth: .infinity)
-                                                .padding(.vertical, 8)
-                                                .background(
-                                                    graceMinutes == Double(minutes) ?
-                                                        (minutes == 0 ? Color.red : Color.orange) :
-                                                        Color(.tertiarySystemFill)
-                                                )
-                                                .cornerRadius(8)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-
-                            if graceMinutes == 0 {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.red)
-                                    Text("Contacts will be notified immediately if you're late")
-                                        .font(.caption)
-                                        .foregroundStyle(.red)
-                                }
-                            } else {
-                                Text("Contacts will be notified \(Int(graceMinutes)) minutes after your return time")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding()
-                        .background(Color(.secondarySystemFill))
-                        .cornerRadius(12)
-                    }
+                    timeSelectionPhase
                 }
 
                 Spacer(minLength: 100)
@@ -932,7 +969,14 @@ struct Step2TimeSettings: View {
             .padding(.horizontal)
         }
         .scrollIndicators(.hidden)
+        .scrollDismissesKeyboard(.interactively)
         .onAppear {
+            // When editing an existing trip, don't default to "Starting Now"
+            // This preserves the trip's scheduled start time
+            if isEditMode {
+                isStartingNow = false
+            }
+
             // Initialize with current date/time values
             selectedStartDate = startTime
             selectedEndDate = etaTime
@@ -988,6 +1032,12 @@ struct Step2TimeSettings: View {
                 // When transitioning to time selection, ensure dates are properly set
                 updateDates()
             }
+        }
+        .sheet(isPresented: $showCalendarHelp) {
+            HelpSheet(
+                title: "Time Settings",
+                message: "Select when you're leaving and when you expect to return. The grace period is extra time before your contacts are notified if you haven't checked in."
+            )
         }
     }
 
@@ -1368,7 +1418,6 @@ struct Step3EmergencyContacts: View {
 
     @State private var savedContacts: [Contact] = []
     @State private var isLoadingSaved = false
-    @State private var showingContacts = false
 
     var body: some View {
         ScrollView {
@@ -1384,41 +1433,73 @@ struct Step3EmergencyContacts: View {
                 }
                 .padding(.top, 20)
 
-                // Action Buttons
-                HStack(spacing: 12) {
-                    // Select from Saved Contacts
-                    Button(action: {
-                        Task {
-                            isLoadingSaved = true
-                            await loadContacts()
-                            showingContacts = true
-                        }
-                    }) {
-                        HStack {
-                            if isLoadingSaved {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "person.crop.circle.badge.checkmark")
-                                    .font(.title3)
+                // Your Contacts Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack{
+                        Text("Your Contacts (\(contacts.count)/3 selected)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        // Required contact message when none selected
+                        if contacts.isEmpty && !savedContacts.isEmpty {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(Color.orange)
+                                Text("≥1 contact required")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            Text("Choose Saved")
-                                .fontWeight(.medium)
+                        }
+
+                        if contacts.count >= 3 {
+                            HStack {
+                                Image(systemName: "info.circle.fill")
+                                    .foregroundStyle(Color.orange)
+                                Text("Max contacts added")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if isLoadingSaved {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.vertical, 20)
+                    } else if savedContacts.isEmpty {
+                        // Empty state - no saved contacts
+                        VStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.badge.questionmark")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.secondary)
+                            Text("No saved contacts yet")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color(.secondarySystemFill))
-                        .foregroundStyle(Color.hbBrand)
-                        .cornerRadius(12)
+                        .padding(.vertical, 20)
+                    } else {
+                        // Inline contact list with toggle selection
+                        ForEach(savedContacts) { contact in
+                            ContactSelectionRow(
+                                contact: contact,
+                                isSelected: isContactSelected(contact),
+                                canSelect: contacts.count < 3 || isContactSelected(contact)
+                            ) { selected in
+                                toggleContact(contact, selected: selected)
+                            }
+                        }
                     }
-                    .disabled(isLoadingSaved)
 
-                    // Add New Contact
+                    // Add New Contact Button
                     Button(action: { showAddContact = true }) {
                         HStack {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title3)
-                            Text("Add New")
+                            Text("Add New Contact")
                                 .fontWeight(.medium)
                         }
                         .frame(maxWidth: .infinity)
@@ -1428,52 +1509,6 @@ struct Step3EmergencyContacts: View {
                         .cornerRadius(12)
                     }
                 }
-
-                if contacts.isEmpty {
-                    // Empty State
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.crop.circle.badge.exclamationmark")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.orange)
-
-                        Text("No contacts selected")
-                            .font(.headline)
-
-                        Text("Choose from your saved contacts or add new ones. At least one emergency contact is required.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
-                } else {
-                    // Selected Contacts
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Selected Contacts (\(contacts.count)/3)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        ForEach(contacts) { contact in
-                            ContactCard(contact: contact) {
-                                contacts.removeAll { $0.id == contact.id }
-                            }
-                        }
-                    }
-
-                    if contacts.count >= 3 {
-                        HStack {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundStyle(Color.orange)
-                            Text("Maximum of 3 contacts reached")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .background(Color(.tertiarySystemFill))
-                        .cornerRadius(8)
-                    }
-                }
-
                 Spacer(minLength: 100)
             }
             .padding(.horizontal)
@@ -1484,14 +1519,8 @@ struct Step3EmergencyContacts: View {
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .task {
+            isLoadingSaved = true
             await loadContacts()
-        }
-        .sheet(isPresented: $showingContacts) {
-            ContactsSelectionSheet(
-                savedContacts: savedContacts,
-                selectedContacts: $contacts,
-                isPresented: $showingContacts
-            )
         }
     }
 
@@ -1503,6 +1532,26 @@ struct Step3EmergencyContacts: View {
             debugLog("DEBUG: Loaded \(loaded.count) saved contacts")
         }
     }
+
+    private func isContactSelected(_ contact: Contact) -> Bool {
+        contacts.contains { $0.savedContactId == contact.id }
+    }
+
+    private func toggleContact(_ contact: Contact, selected: Bool) {
+        if selected {
+            // Add contact if under limit
+            if contacts.count < 3 {
+                contacts.append(EmergencyContact(
+                    name: contact.name,
+                    email: contact.email,
+                    savedContactId: contact.id
+                ))
+            }
+        } else {
+            // Remove contact
+            contacts.removeAll { $0.savedContactId == contact.id }
+        }
+    }
 }
 
 // MARK: - Step 4: Additional Notes
@@ -1511,15 +1560,24 @@ struct Step4AdditionalNotes: View {
     @Binding var isCreating: Bool
     var isEditMode: Bool = false
     let onSubmit: () -> Void
+    @State private var showNotesHelp = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 // Header
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Additional Notes")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
+                    HStack {
+                        Text("Additional Notes")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+
+                        Button(action: { showNotesHelp = true }) {
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color.hbBrand.opacity(0.7))
+                        }
+                    }
                     Text("Any extra details? (Optional)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -1591,6 +1649,12 @@ struct Step4AdditionalNotes: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
+        .sheet(isPresented: $showNotesHelp) {
+            HelpSheet(
+                title: "Additional Notes",
+                message: "Add any extra details your contacts might need, like your planned route, who you're with, or specific locations you'll visit."
+            )
+        }
     }
 }
 
@@ -1888,6 +1952,153 @@ struct ContactSelectionRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!canSelect && !isSelected)
+    }
+}
+
+// MARK: - Help Sheet
+struct HelpSheet: View {
+    let title: String
+    let message: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(Color.hbBrand)
+
+                Text(message)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+            }
+            .padding()
+            .padding(.top, 20)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+    }
+}
+
+// MARK: - Looping Pickers
+struct LoopingHourPicker: View {
+    @Binding var selection: Int
+
+    // Create a large range of repeated hours for looping effect
+    private let repetitions = 100
+    private let hours = Array(1...12)
+
+    private var allHours: [Int] {
+        var result: [Int] = []
+        for _ in 0..<repetitions {
+            result.append(contentsOf: hours)
+        }
+        return result
+    }
+
+    // Find the middle index for the current selection
+    private func middleIndex(for hour: Int) -> Int {
+        let middleRepetition = repetitions / 2
+        let indexInCycle = hour - 1 // Convert 1-12 to 0-11
+        return middleRepetition * 12 + indexInCycle
+    }
+
+    var body: some View {
+        Picker("Hour", selection: Binding(
+            get: { middleIndex(for: selection) },
+            set: { newIndex in
+                selection = allHours[newIndex]
+            }
+        )) {
+            ForEach(Array(allHours.enumerated()), id: \.offset) { index, hour in
+                Text("\(hour)")
+                    .tag(index)
+            }
+        }
+        .pickerStyle(.wheel)
+    }
+}
+
+struct LoopingMinutePicker: View {
+    @Binding var selection: Int
+
+    // Create a large range of repeated minutes for looping effect
+    private let repetitions = 100
+    private let minutes = Array(0..<60)
+
+    private var allMinutes: [Int] {
+        var result: [Int] = []
+        for _ in 0..<repetitions {
+            result.append(contentsOf: minutes)
+        }
+        return result
+    }
+
+    // Find the middle index for the current selection
+    private func middleIndex(for minute: Int) -> Int {
+        let middleRepetition = repetitions / 2
+        return middleRepetition * 60 + minute
+    }
+
+    var body: some View {
+        Picker("Minute", selection: Binding(
+            get: { middleIndex(for: selection) },
+            set: { newIndex in
+                selection = allMinutes[newIndex]
+            }
+        )) {
+            ForEach(Array(allMinutes.enumerated()), id: \.offset) { index, minute in
+                Text(String(format: "%02d", minute))
+                    .tag(index)
+            }
+        }
+        .pickerStyle(.wheel)
+    }
+}
+
+struct LoopingAMPMPicker: View {
+    @Binding var selection: Int
+
+    // Create a large range of repeated AM/PM for looping effect
+    private let repetitions = 100
+    private let values = [0, 1] // 0 = AM, 1 = PM
+
+    private var allValues: [Int] {
+        var result: [Int] = []
+        for _ in 0..<repetitions {
+            result.append(contentsOf: values)
+        }
+        return result
+    }
+
+    // Find the middle index for the current selection
+    private func middleIndex(for value: Int) -> Int {
+        let middleRepetition = repetitions / 2
+        return middleRepetition * 2 + value
+    }
+
+    var body: some View {
+        Picker("AM/PM", selection: Binding(
+            get: { middleIndex(for: selection) },
+            set: { newIndex in
+                selection = allValues[newIndex]
+            }
+        )) {
+            ForEach(Array(allValues.enumerated()), id: \.offset) { index, value in
+                Text(value == 0 ? "AM" : "PM")
+                    .tag(index)
+            }
+        }
+        .pickerStyle(.wheel)
     }
 }
 

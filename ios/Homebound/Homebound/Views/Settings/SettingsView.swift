@@ -508,6 +508,7 @@ struct AccountView: View {
     @State private var isDeleting = false
 
     @State private var showingLogoutAlert = false
+    @FocusState private var isAgeFocused: Bool
 
     var body: some View {
         List {
@@ -620,8 +621,18 @@ struct AccountView: View {
                             .multilineTextAlignment(.trailing)
                             .textFieldStyle(.plain)
                             .keyboardType(.numberPad)
+                            .focused($isAgeFocused)
                             .onSubmit {
                                 saveAge()
+                            }
+                            .toolbar {
+                                ToolbarItemGroup(placement: .keyboard) {
+                                    Spacer()
+                                    Button("Done") {
+                                        isAgeFocused = false
+                                        saveAge()
+                                    }
+                                }
                             }
                     } else {
                         Text(age > 0 ? "\(age)" : "Not set")
@@ -679,6 +690,7 @@ struct AccountView: View {
             }
         }
         .scrollIndicators(.hidden)
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
