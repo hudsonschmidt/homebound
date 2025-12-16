@@ -15,6 +15,7 @@ from src.api import auth
 from src.api.activities import Activity
 from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
+    send_trip_completed_emails,
     send_trip_created_emails,
     send_trip_extended_emails,
     send_trip_starting_now_emails,
@@ -927,16 +928,23 @@ def update_trip(
 
 
 @router.post("/{trip_id}/complete")
-def complete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
+def complete_trip(
+    trip_id: int,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
     """Mark a trip as completed"""
     with db.engine.begin() as connection:
-        # Verify trip ownership and status
+        # Verify trip ownership and status, fetch details needed for email
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, status
-                FROM trips
-                WHERE id = :trip_id AND user_id = :user_id
+                SELECT t.id, t.status, t.title, t.location_text,
+                       t.contact1, t.contact2, t.contact3, t.timezone,
+                       a.name as activity_name
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.id = :trip_id AND t.user_id = :user_id
                 """
             ),
             {"trip_id": trip_id, "user_id": user_id}
@@ -955,6 +963,26 @@ def complete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)
                 detail="Trip is not active or overdue"
             )
 
+        # Fetch user name for email
+        user = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+        user_name = f"{user.first_name} {user.last_name}".strip() if user else "User"
+
+        # Fetch contact emails
+        contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+        contact_ids = [c for c in contact_ids if c is not None]
+        contacts_for_email = []
+        if contact_ids:
+            contacts = connection.execute(
+                sqlalchemy.text(
+                    "SELECT id, name, email FROM contacts WHERE id = ANY(:ids)"
+                ),
+                {"ids": contact_ids}
+            ).fetchall()
+            contacts_for_email = [{"email": c.email, "name": c.name} for c in contacts]
+
         # Update trip status
         connection.execute(
             sqlalchemy.text(
@@ -967,20 +995,49 @@ def complete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)
             {"trip_id": trip_id, "completed_at": datetime.now(UTC).isoformat()}
         )
 
+        # Prepare data for email
+        trip_data = {
+            "title": trip.title,
+            "location_text": trip.location_text
+        }
+        user_timezone = trip.timezone
+        activity_name = trip.activity_name
+
+        # Schedule background task to send emails to contacts
+        def send_emails_sync():
+            asyncio.run(send_trip_completed_emails(
+                trip=trip_data,
+                contacts=contacts_for_email,
+                user_name=user_name,
+                activity_name=activity_name,
+                user_timezone=user_timezone
+            ))
+
+        if contacts_for_email:
+            background_tasks.add_task(send_emails_sync)
+
         return {"ok": True, "message": "Trip completed successfully"}
 
 
 @router.post("/{trip_id}/start")
-def start_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
+def start_trip(
+    trip_id: int,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
     """Start a planned trip (change status from 'planned' to 'active')"""
     with db.engine.begin() as connection:
-        # Verify trip ownership and status
+        # Verify trip ownership and status, fetch details needed for email
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, status, start
-                FROM trips
-                WHERE id = :trip_id AND user_id = :user_id
+                SELECT t.id, t.status, t.start, t.title, t.eta, t.location_text,
+                       t.start_location_text, t.has_separate_locations,
+                       t.contact1, t.contact2, t.contact3, t.timezone,
+                       a.name as activity_name
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.id = :trip_id AND t.user_id = :user_id
                 """
             ),
             {"trip_id": trip_id, "user_id": user_id}
@@ -998,6 +1055,26 @@ def start_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                 detail="Trip is not in planned status"
             )
 
+        # Fetch user name for email
+        user = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+        user_name = f"{user.first_name} {user.last_name}".strip() if user else "User"
+
+        # Fetch contact emails
+        contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+        contact_ids = [c for c in contact_ids if c is not None]
+        contacts_for_email = []
+        if contact_ids:
+            contacts = connection.execute(
+                sqlalchemy.text(
+                    "SELECT id, name, email FROM contacts WHERE id = ANY(:ids)"
+                ),
+                {"ids": contact_ids}
+            ).fetchall()
+            contacts_for_email = [{"email": c.email, "name": c.name} for c in contacts]
+
         # Update trip status to active
         connection.execute(
             sqlalchemy.text(
@@ -1009,6 +1086,30 @@ def start_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             ),
             {"trip_id": trip_id}
         )
+
+        # Prepare data for email
+        trip_data = {
+            "title": trip.title,
+            "eta": trip.eta,
+            "location_text": trip.location_text
+        }
+        trip_start_location = trip.start_location_text if trip.has_separate_locations else None
+        user_timezone = trip.timezone
+        activity_name = trip.activity_name
+
+        # Schedule background task to send emails to contacts
+        def send_emails_sync():
+            asyncio.run(send_trip_starting_now_emails(
+                trip=trip_data,
+                contacts=contacts_for_email,
+                user_name=user_name,
+                activity_name=activity_name,
+                user_timezone=user_timezone,
+                start_location=trip_start_location
+            ))
+
+        if contacts_for_email:
+            background_tasks.add_task(send_emails_sync)
 
         return {"ok": True, "message": "Trip started successfully"}
 

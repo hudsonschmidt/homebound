@@ -925,8 +925,8 @@ struct Step2TimeSettings: View {
                 .frame(width: 60, height: 100)
                 .clipped()
 
-            // Looping AM/PM picker
-            LoopingAMPMPicker(selection: ampmBinding)
+            // AM/PM picker
+            AMPMPicker(selection: ampmBinding)
                 .frame(width: 60, height: 100)
                 .clipped()
 
@@ -1059,6 +1059,70 @@ struct Step2TimeSettings: View {
                 .stroke(isReturnTimeValid ? Color.clear : Color.red.opacity(0.5), lineWidth: 1)
         )
         .cornerRadius(12)
+    }
+
+    // MARK: - Timezone Settings Section
+    private var timezoneSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showTimezoneOptions.toggle()
+                }
+            }) {
+                HStack {
+                    Image(systemName: "globe")
+                        .foregroundStyle(showTimezoneOptions ? Color.hbBrand : .secondary)
+                    Text("Different timezone?")
+                        .font(.subheadline)
+                        .foregroundStyle(showTimezoneOptions ? Color.hbBrand : .primary)
+                    Spacer()
+                    Image(systemName: showTimezoneOptions ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(Color(.secondarySystemFill))
+                .cornerRadius(12)
+            }
+            .buttonStyle(.plain)
+
+            if showTimezoneOptions {
+                VStack(spacing: 16) {
+                    // Start time timezone
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Start time timezone")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        TimezonePicker(selectedTimezone: $startTimezone)
+                    }
+
+                    Divider()
+
+                    // Return time timezone
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Return time timezone")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        TimezonePicker(selectedTimezone: $etaTimezone)
+                    }
+
+                    // Info note
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Text("Times will be converted to UTC for storage. Your contacts will see times in their local timezone.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding()
+                .background(Color(.tertiarySystemFill))
+                .cornerRadius(12)
+            }
+        }
     }
 
     // MARK: - Grace Period Section
@@ -1268,70 +1332,6 @@ struct Step2TimeSettings: View {
         if hour == 12 { return "12:00 PM" }
         if hour < 12 { return "\(hour):00 AM" }
         return "\(hour - 12):00 PM"
-    }
-
-    // MARK: - Timezone Settings Section
-    private var timezoneSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Button(action: {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showTimezoneOptions.toggle()
-                }
-            }) {
-                HStack {
-                    Image(systemName: "globe")
-                        .foregroundStyle(showTimezoneOptions ? Color.hbBrand : .secondary)
-                    Text("Different timezone?")
-                        .font(.subheadline)
-                        .foregroundStyle(showTimezoneOptions ? Color.hbBrand : .primary)
-                    Spacer()
-                    Image(systemName: showTimezoneOptions ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-                .background(Color(.secondarySystemFill))
-                .cornerRadius(12)
-            }
-            .buttonStyle(.plain)
-
-            if showTimezoneOptions {
-                VStack(spacing: 16) {
-                    // Start time timezone
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Start time timezone")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-
-                        TimezonePicker(selectedTimezone: $startTimezone)
-                    }
-
-                    Divider()
-
-                    // Return time timezone
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Return time timezone")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-
-                        TimezonePicker(selectedTimezone: $etaTimezone)
-                    }
-
-                    // Info note
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "info.circle")
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                        Text("Times will be converted to UTC for storage. Your contacts will see times in their local timezone.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding()
-                .background(Color(.tertiarySystemFill))
-                .cornerRadius(12)
-            }
-        }
     }
 
     // MARK: - Time Selection Phase
@@ -2459,38 +2459,13 @@ struct LoopingMinutePicker: View {
     }
 }
 
-struct LoopingAMPMPicker: View {
+struct AMPMPicker: View {
     @Binding var selection: Int
 
-    // Create a large range of repeated AM/PM for looping effect
-    private let repetitions = 100
-    private let values = [0, 1] // 0 = AM, 1 = PM
-
-    private var allValues: [Int] {
-        var result: [Int] = []
-        for _ in 0..<repetitions {
-            result.append(contentsOf: values)
-        }
-        return result
-    }
-
-    // Find the middle index for the current selection
-    private func middleIndex(for value: Int) -> Int {
-        let middleRepetition = repetitions / 2
-        return middleRepetition * 2 + value
-    }
-
     var body: some View {
-        Picker("AM/PM", selection: Binding(
-            get: { middleIndex(for: selection) },
-            set: { newIndex in
-                selection = allValues[newIndex]
-            }
-        )) {
-            ForEach(Array(allValues.enumerated()), id: \.offset) { index, value in
-                Text(value == 0 ? "AM" : "PM")
-                    .tag(index)
-            }
+        Picker("AM/PM", selection: $selection) {
+            Text("AM").tag(0)
+            Text("PM").tag(1)
         }
         .pickerStyle(.wheel)
     }
