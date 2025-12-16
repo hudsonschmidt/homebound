@@ -40,7 +40,7 @@ def checkin_with_token(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       t.timezone, t.location_text, t.eta, a.name as activity_name
+                       t.timezone, t.location_text, t.eta, t.notify_self, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkin_token = :token
@@ -87,14 +87,15 @@ def checkin_with_token(
             {"event_id": event_id, "trip_id": trip.id, "now": now.isoformat()}
         )
 
-        # Fetch user name for email notification
+        # Fetch user name and email for notification
         user = connection.execute(
-            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
             {"user_id": trip.user_id}
         ).fetchone()
         user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
         if not user_name:
             user_name = "A Homebound user"
+        owner_email = user.email if user and trip.notify_self else None
 
         # Fetch contacts with email for notification
         all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
@@ -144,10 +145,12 @@ def checkin_with_token(
                 activity_name=activity_name,
                 user_timezone=user_timezone,
                 coordinates=coordinates_str,
-                location_name=location_name
+                location_name=location_name,
+                owner_email=owner_email
             ))
 
-        background_tasks.add_task(send_notifications_sync)
+        if contacts_for_email or owner_email:
+            background_tasks.add_task(send_notifications_sync)
         num_contacts = len(contacts_for_email)
         log.info(f"[Checkin] Scheduled checkin update emails for {num_contacts} contacts")
 
@@ -167,7 +170,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       t.timezone, t.location_text, a.name as activity_name
+                       t.timezone, t.location_text, t.notify_self, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkout_token = :token
@@ -211,14 +214,15 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             {"user_id": trip.user_id, "trip_id": trip.id, "timestamp": now.isoformat()}
         )
 
-        # Fetch user name for email notification
+        # Fetch user name and email for notification
         user = connection.execute(
-            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
             {"user_id": trip.user_id}
         ).fetchone()
         user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
         if not user_name:
             user_name = "A Homebound user"
+        owner_email = user.email if user and trip.notify_self else None
 
         # Fetch contacts with email for notification
         all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
@@ -250,7 +254,8 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                     contacts=contacts_for_email,
                     user_name=user_name,
                     activity_name=activity_name,
-                    user_timezone=user_timezone
+                    user_timezone=user_timezone,
+                    owner_email=owner_email
                 ))
             else:
                 # Normal completion email
@@ -259,10 +264,12 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                     contacts=contacts_for_email,
                     user_name=user_name,
                     activity_name=activity_name,
-                    user_timezone=user_timezone
+                    user_timezone=user_timezone,
+                    owner_email=owner_email
                 ))
 
-        background_tasks.add_task(send_notifications_sync)
+        if contacts_for_email or owner_email:
+            background_tasks.add_task(send_notifications_sync)
         email_type = "overdue resolved" if was_overdue else "completion"
         log.info(f"[Checkout] Scheduled {email_type} emails for {len(contacts_for_email)} contacts")
 

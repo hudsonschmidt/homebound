@@ -359,7 +359,8 @@ def test_complete_trip():
     )
 
     # Complete the trip
-    result = complete_trip(trip.id, user_id=user_id)
+    complete_bg_tasks = MagicMock(spec=BackgroundTasks)
+    result = complete_trip(trip.id, complete_bg_tasks, user_id=user_id)
     assert result["ok"] is True
 
     # Verify trip is completed
@@ -393,11 +394,12 @@ def test_complete_already_completed_trip():
         user_id=user_id
     )
 
-    complete_trip(trip.id, user_id=user_id)
+    complete_bg_tasks = MagicMock(spec=BackgroundTasks)
+    complete_trip(trip.id, complete_bg_tasks, user_id=user_id)
 
     # Try to complete again
     with pytest.raises(HTTPException) as exc_info:
-        complete_trip(trip.id, user_id=user_id)
+        complete_trip(trip.id, complete_bg_tasks, user_id=user_id)
 
     assert exc_info.value.status_code == 400
     assert "not active" in exc_info.value.detail.lower()
@@ -684,7 +686,8 @@ def test_update_completed_trip_fails():
 
     background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(trip_data, background_tasks, user_id=user_id)
-    complete_trip(trip.id, user_id=user_id)
+    complete_bg_tasks = MagicMock(spec=BackgroundTasks)
+    complete_trip(trip.id, complete_bg_tasks, user_id=user_id)
 
     # Try to update
     update_data = TripUpdate(title="Should Fail")
@@ -2171,5 +2174,309 @@ def test_create_trip_timezone_with_locations():
     # Verify timezones
     assert trip.start_timezone == "America/Los_Angeles"
     assert trip.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)
+
+
+# ============================================================================
+# NOTIFY SELF TESTS
+# ============================================================================
+
+def test_create_trip_with_notify_self_enabled():
+    """Test creating a trip with notify_self enabled"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Notify Self Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id,
+        notify_self=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.notify_self is True
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_notify_self_defaults_to_false():
+    """Test that notify_self defaults to False when not specified"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Default Notify Self Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id
+        # notify_self not specified - should default to False
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.notify_self is False
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_with_notify_self_disabled():
+    """Test creating a trip with notify_self explicitly disabled"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="No Notify Self Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id,
+        notify_self=False
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.notify_self is False
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trip_includes_notify_self():
+    """Test that get_trip returns notify_self field"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Get Trip Notify Self Test",
+        activity="Biking",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=26),
+        grace_min=30,
+        contact1=contact_id,
+        notify_self=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    created = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Fetch the trip
+    fetched = get_trip(created.id, user_id=user_id)
+
+    assert fetched.notify_self is True
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trips_includes_notify_self():
+    """Test that get_trips returns notify_self for all trips"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    # Create trip with notify_self enabled
+    create_trip(
+        TripCreate(
+            title="Trip With Notify Self",
+            activity="Hiking",
+            start=now,
+            eta=now + timedelta(hours=2),
+            grace_min=30,
+            contact1=contact_id,
+            notify_self=True
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    # Create trip with notify_self disabled
+    create_trip(
+        TripCreate(
+            title="Trip Without Notify Self",
+            activity="Biking",
+            start=now,
+            eta=now + timedelta(hours=1),
+            grace_min=20,
+            contact1=contact_id,
+            notify_self=False
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    trips = get_trips(user_id=user_id)
+
+    trip_with_notify = next(t for t in trips if t.title == "Trip With Notify Self")
+    trip_without_notify = next(t for t in trips if t.title == "Trip Without Notify Self")
+
+    assert trip_with_notify.notify_self is True
+    assert trip_without_notify.notify_self is False
+
+    cleanup_test_data(user_id)
+
+
+def test_get_active_trip_includes_notify_self():
+    """Test that get_active_trip returns notify_self field"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Active With Notify Self",
+        activity="Running",
+        start=now,  # Starts now = active
+        eta=now + timedelta(hours=1),
+        grace_min=15,
+        contact1=contact_id,
+        notify_self=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    create_trip(trip_data, background_tasks, user_id=user_id)
+
+    active = get_active_trip(user_id=user_id)
+
+    assert active is not None
+    assert active.notify_self is True
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_enable_notify_self():
+    """Test updating a trip to enable notify_self"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip without notify_self (future start = planned)
+    trip = create_planned_trip(user_id, contact_id)
+    assert trip.notify_self is False
+
+    # Update to enable notify_self
+    update_data = TripUpdate(notify_self=True)
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.notify_self is True
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_disable_notify_self():
+    """Test updating a trip to disable notify_self"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with notify_self enabled (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Update Notify Self Trip",
+        activity="Hiking",
+        start=now + timedelta(hours=24),  # Future = planned
+        eta=now + timedelta(hours=26),
+        grace_min=30,
+        contact1=contact_id,
+        notify_self=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "planned"
+    assert trip.notify_self is True
+
+    # Update to disable notify_self
+    update_data = TripUpdate(notify_self=False)
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.notify_self is False
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_notify_self_unchanged():
+    """Test that notify_self remains unchanged when not in update"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with notify_self enabled (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Keep Notify Self Trip",
+        activity="Hiking",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=26),
+        grace_min=30,
+        contact1=contact_id,
+        notify_self=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.notify_self is True
+
+    # Update other field without touching notify_self
+    update_data = TripUpdate(title="Updated Title")
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.title == "Updated Title"
+    assert updated.notify_self is True  # Should remain unchanged
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_notify_self_with_all_features():
+    """Test creating a trip with notify_self and all other features"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Full Featured With Notify Self",
+        activity="Driving",
+        start=now,
+        eta=now + timedelta(hours=6),
+        grace_min=45,
+        location_text="Los Angeles, CA",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="San Francisco, CA",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id,
+        timezone="America/Los_Angeles",
+        start_timezone="America/Los_Angeles",
+        eta_timezone="America/Los_Angeles",
+        checkin_interval_min=60,
+        notify_start_hour=8,
+        notify_end_hour=22,
+        notify_self=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Verify notify_self
+    assert trip.notify_self is True
+
+    # Verify other features still work
+    assert trip.has_separate_locations is True
+    assert trip.start_location_text == "San Francisco, CA"
+    assert trip.start_timezone == "America/Los_Angeles"
+    assert trip.checkin_interval_min == 60
+    assert trip.notify_start_hour == 8
+    assert trip.notify_end_hour == 22
 
     cleanup_test_data(user_id)

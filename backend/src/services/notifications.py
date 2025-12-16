@@ -320,9 +320,13 @@ async def send_overdue_notifications(
     contacts: list[Any],
     user_name: str = "Someone",
     user_timezone: str | None = None,
-    start_location: str | None = None
+    start_location: str | None = None,
+    owner_email: str | None = None
 ):
-    """Send overdue notifications to contacts via email and push."""
+    """Send overdue notifications to contacts via email and push.
+
+    If owner_email is provided, also sends a copy to the trip owner.
+    """
     from ..messaging.resend_backend import create_overdue_notification_email_html
 
     # Extract trip data
@@ -339,34 +343,45 @@ async def send_overdue_notifications(
     display_location = trip_location_text if should_display_location(trip_location_text) else None
     display_start_location = start_location if should_display_location(start_location) else None
 
+    # Build list of all recipients (contacts + owner if enabled)
+    recipients = []
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-
         if contact_email:
-            subject = f"URGENT: {user_name} is overdue on their {trip_title}"
+            recipients.append(contact_email)
 
-            html_body = create_overdue_notification_email_html(
-                user_name=user_name,
-                plan_title=trip_title,
-                activity=trip_activity,
-                start_time=start_formatted,
-                expected_time=eta_formatted,
-                location=display_location,
-                notes=trip_notes,
-                start_location=display_start_location
-            )
-            plain_body = html_to_text(html_body)
+    # Add owner email if notify_self is enabled
+    if owner_email and owner_email not in recipients:
+        recipients.append(owner_email)
 
-            await send_email(
-                contact_email,
-                subject,
-                plain_body,
-                html_body,
-                from_email=settings.RESEND_ALERTS_EMAIL,
-                high_priority=True
-            )
+    for recipient_email in recipients:
+        subject = f"URGENT: {user_name} is overdue on their {trip_title}"
+        # Use different subject for owner
+        if recipient_email == owner_email:
+            subject = f"URGENT: Your trip '{trip_title}' is overdue"
 
-            log.info(f"Sent overdue notification to {contact_email} for trip '{trip_title}'")
+        html_body = create_overdue_notification_email_html(
+            user_name=user_name,
+            plan_title=trip_title,
+            activity=trip_activity,
+            start_time=start_formatted,
+            expected_time=eta_formatted,
+            location=display_location,
+            notes=trip_notes,
+            start_location=display_start_location
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            recipient_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_ALERTS_EMAIL,
+            high_priority=True
+        )
+
+        log.info(f"Sent overdue notification to {recipient_email} for trip '{trip_title}'")
 
     message = f"URGENT: {trip_title} was expected by {eta_formatted} but hasn't checked in."
     await send_push_to_user(trip_user_id, "Check-in Overdue", message)
@@ -378,9 +393,13 @@ async def send_trip_created_emails(
     user_name: str,
     activity_name: str,
     user_timezone: str | None = None,
-    start_location: str | None = None
+    start_location: str | None = None,
+    owner_email: str | None = None
 ):
-    """Send notification emails to contacts when they're added to a trip."""
+    """Send notification emails to contacts when they're added to a trip.
+
+    If owner_email is provided, also sends a copy to the trip owner.
+    """
     from ..messaging.resend_backend import create_trip_created_email_html
 
     # Extract trip data
@@ -393,32 +412,43 @@ async def send_trip_created_emails(
 
     display_start_location = start_location if should_display_location(start_location) else None
 
+    # Build list of all recipients (contacts + owner if enabled)
+    recipients = []
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-
         if contact_email:
-            subject = f"{user_name} added you as an emergency contact to their trip"
+            recipients.append(contact_email)
 
-            html_body = create_trip_created_email_html(
-                user_name=user_name,
-                plan_title=trip_title,
-                activity=activity_name,
-                start_time=start_formatted,
-                expected_time=eta_formatted,
-                location=trip_location_text,
-                start_location=display_start_location
-            )
-            plain_body = html_to_text(html_body)
+    # Add owner email if notify_self is enabled
+    if owner_email and owner_email not in recipients:
+        recipients.append(owner_email)
 
-            await send_email(
-                contact_email,
-                subject,
-                plain_body,
-                html_body,
-                from_email=settings.RESEND_HELLO_EMAIL
-            )
+    for recipient_email in recipients:
+        subject = f"{user_name} added you as an emergency contact to their trip"
+        # Use different subject for owner
+        if recipient_email == owner_email:
+            subject = f"Your trip '{trip_title}' has been created"
 
-            log.info(f"Sent trip created notification to {contact_email} for trip '{trip_title}'")
+        html_body = create_trip_created_email_html(
+            user_name=user_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            start_time=start_formatted,
+            expected_time=eta_formatted,
+            location=trip_location_text,
+            start_location=display_start_location
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            recipient_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_HELLO_EMAIL
+        )
+
+        log.info(f"Sent trip created notification to {recipient_email} for trip '{trip_title}'")
 
 # Trip starting --------------------------------------------------------------------------------
 async def send_trip_starting_now_emails(
@@ -427,9 +457,13 @@ async def send_trip_starting_now_emails(
     user_name: str,
     activity_name: str,
     user_timezone: str | None = None,
-    start_location: str | None = None
+    start_location: str | None = None,
+    owner_email: str | None = None
 ):
-    """Send notification emails to contacts when a trip starts immediately."""
+    """Send notification emails to contacts when a trip starts immediately.
+
+    If owner_email is provided, also sends a copy to the trip owner.
+    """
     from ..messaging.resend_backend import create_trip_starting_now_email_html
 
     # Extract trip data
@@ -441,31 +475,42 @@ async def send_trip_starting_now_emails(
 
     display_start_location = start_location if should_display_location(start_location) else None
 
+    # Build list of all recipients (contacts + owner if enabled)
+    recipients = []
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-
         if contact_email:
-            subject = f"{user_name}'s trip just started!"
+            recipients.append(contact_email)
 
-            html_body = create_trip_starting_now_email_html(
-                user_name=user_name,
-                plan_title=trip_title,
-                activity=activity_name,
-                expected_time=eta_formatted,
-                location=trip_location_text,
-                start_location=display_start_location
-            )
-            plain_body = html_to_text(html_body)
+    # Add owner email if notify_self is enabled
+    if owner_email and owner_email not in recipients:
+        recipients.append(owner_email)
 
-            await send_email(
-                contact_email,
-                subject,
-                plain_body,
-                html_body,
-                from_email=settings.RESEND_HELLO_EMAIL
-            )
+    for recipient_email in recipients:
+        subject = f"{user_name}'s trip just started!"
+        # Use different subject for owner
+        if recipient_email == owner_email:
+            subject = f"Your trip '{trip_title}' has started"
 
-            log.info(f"Sent trip starting now notification to {contact_email} for trip '{trip_title}'")
+        html_body = create_trip_starting_now_email_html(
+            user_name=user_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            expected_time=eta_formatted,
+            location=trip_location_text,
+            start_location=display_start_location
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            recipient_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_HELLO_EMAIL
+        )
+
+        log.info(f"Sent trip starting now notification to {recipient_email} for trip '{trip_title}'")
 
 # Check in --------------------------------------------------------------------------------
 async def send_checkin_update_emails(
@@ -475,9 +520,13 @@ async def send_checkin_update_emails(
     activity_name: str,
     user_timezone: str | None = None,
     coordinates: str | None = None,
-    location_name: str | None = None
+    location_name: str | None = None,
+    owner_email: str | None = None
 ):
-    """Send check-in update emails to contacts when user checks in."""
+    """Send check-in update emails to contacts when user checks in.
+
+    If owner_email is provided, also sends a copy to the trip owner.
+    """
     from ..messaging.resend_backend import create_checkin_update_email_html
 
     # Extract trip data
@@ -490,33 +539,44 @@ async def send_checkin_update_emails(
 
     display_location = trip_location_text if should_display_location(trip_location_text) else None
 
+    # Build list of all recipients (contacts + owner if enabled)
+    recipients = []
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-
         if contact_email:
-            subject = f"{user_name} checked in"
+            recipients.append(contact_email)
 
-            html_body = create_checkin_update_email_html(
-                user_name=user_name,
-                plan_title=trip_title,
-                activity=activity_name,
-                checkin_time=checkin_time,
-                expected_time=expected_time,
-                coordinates=coordinates,
-                location=display_location,
-                location_name=location_name
-            )
-            plain_body = html_to_text(html_body)
+    # Add owner email if notify_self is enabled
+    if owner_email and owner_email not in recipients:
+        recipients.append(owner_email)
 
-            await send_email(
-                contact_email,
-                subject,
-                plain_body,
-                html_body,
-                from_email=settings.RESEND_UPDATE_EMAIL
-            )
+    for recipient_email in recipients:
+        subject = f"{user_name} checked in"
+        # Use different subject for owner
+        if recipient_email == owner_email:
+            subject = f"Your check-in was recorded for '{trip_title}'"
 
-            log.info(f"Sent checkin update to {contact_email} for trip '{trip_title}'")
+        html_body = create_checkin_update_email_html(
+            user_name=user_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            checkin_time=checkin_time,
+            expected_time=expected_time,
+            coordinates=coordinates,
+            location=display_location,
+            location_name=location_name
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            recipient_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_UPDATE_EMAIL
+        )
+
+        log.info(f"Sent checkin update to {recipient_email} for trip '{trip_title}'")
 
 # Trip extended --------------------------------------------------------------------------------
 async def send_trip_extended_emails(
@@ -525,9 +585,13 @@ async def send_trip_extended_emails(
     user_name: str,
     activity_name: str,
     extended_by_minutes: int,
-    user_timezone: str | None = None
+    user_timezone: str | None = None,
+    owner_email: str | None = None
 ):
-    """Send notification emails to contacts when user extends their trip."""
+    """Send notification emails to contacts when user extends their trip.
+
+    If owner_email is provided, also sends a copy to the trip owner.
+    """
     from ..messaging.resend_backend import create_trip_extended_email_html
 
     # Extract trip data
@@ -539,31 +603,42 @@ async def send_trip_extended_emails(
 
     display_location = trip_location_text if should_display_location(trip_location_text) else None
 
+    # Build list of all recipients (contacts + owner if enabled)
+    recipients = []
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-
         if contact_email:
-            subject = f"{user_name} extended their trip"
+            recipients.append(contact_email)
 
-            html_body = create_trip_extended_email_html(
-                user_name=user_name,
-                plan_title=trip_title,
-                activity=activity_name,
-                extended_by=extended_by_minutes,
-                new_eta=new_eta_formatted,
-                location=display_location
-            )
-            plain_body = html_to_text(html_body)
+    # Add owner email if notify_self is enabled
+    if owner_email and owner_email not in recipients:
+        recipients.append(owner_email)
 
-            await send_email(
-                contact_email,
-                subject,
-                plain_body,
-                html_body,
-                from_email=settings.RESEND_UPDATE_EMAIL
-            )
+    for recipient_email in recipients:
+        subject = f"{user_name} extended their trip"
+        # Use different subject for owner
+        if recipient_email == owner_email:
+            subject = f"Your trip '{trip_title}' has been extended"
 
-            log.info(f"Sent trip extended notification to {contact_email} for trip '{trip_title}'")
+        html_body = create_trip_extended_email_html(
+            user_name=user_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            extended_by=extended_by_minutes,
+            new_eta=new_eta_formatted,
+            location=display_location
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            recipient_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_UPDATE_EMAIL
+        )
+
+        log.info(f"Sent trip extended notification to {recipient_email} for trip '{trip_title}'")
 
 # Trip completed --------------------------------------------------------------------------------
 async def send_trip_completed_emails(
@@ -571,9 +646,13 @@ async def send_trip_completed_emails(
     contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: str | None = None
+    user_timezone: str | None = None,
+    owner_email: str | None = None
 ):
-    """Send notification emails to contacts when a trip is completed safely."""
+    """Send notification emails to contacts when a trip is completed safely.
+
+    If owner_email is provided, also sends a copy to the trip owner.
+    """
     from ..messaging.resend_backend import create_trip_completed_email_html
 
     # Extract trip data
@@ -582,29 +661,40 @@ async def send_trip_completed_emails(
 
     display_location = trip_location_text if should_display_location(trip_location_text) else None
 
+    # Build list of all recipients (contacts + owner if enabled)
+    recipients = []
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-
         if contact_email:
-            subject = f"{user_name} is Homebound!"
+            recipients.append(contact_email)
 
-            html_body = create_trip_completed_email_html(
-                user_name=user_name,
-                plan_title=trip_title,
-                activity=activity_name,
-                location=display_location
-            )
-            plain_body = html_to_text(html_body)
+    # Add owner email if notify_self is enabled
+    if owner_email and owner_email not in recipients:
+        recipients.append(owner_email)
 
-            await send_email(
-                contact_email,
-                subject,
-                plain_body,
-                html_body,
-                from_email=settings.RESEND_UPDATE_EMAIL
-            )
+    for recipient_email in recipients:
+        subject = f"{user_name} is Homebound!"
+        # Use different subject for owner
+        if recipient_email == owner_email:
+            subject = f"Your trip '{trip_title}' is complete!"
 
-            log.info(f"Sent trip completed notification to {contact_email} for trip '{trip_title}'")
+        html_body = create_trip_completed_email_html(
+            user_name=user_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            location=display_location
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            recipient_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_UPDATE_EMAIL
+        )
+
+        log.info(f"Sent trip completed notification to {recipient_email} for trip '{trip_title}'")
 
 # Overdue resolved --------------------------------------------------------------------------------
 async def send_overdue_resolved_emails(
@@ -612,35 +702,50 @@ async def send_overdue_resolved_emails(
     contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: str | None = None
+    user_timezone: str | None = None,
+    owner_email: str | None = None
 ):
-    """Send urgent "all clear" emails when an overdue trip is resolved."""
+    """Send urgent "all clear" emails when an overdue trip is resolved.
+
+    If owner_email is provided, also sends a copy to the trip owner.
+    """
     from ..messaging.resend_backend import create_overdue_resolved_email_html
 
     # Extract trip data
     trip_title = get_attr(trip, 'title')
 
+    # Build list of all recipients (contacts + owner if enabled)
+    recipients = []
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-
         if contact_email:
-            subject = f"{user_name} is safe!"
+            recipients.append(contact_email)
 
-            html_body = create_overdue_resolved_email_html(
-                user_name=user_name,
-                plan_title=trip_title,
-                activity=activity_name
-            )
-            plain_body = html_to_text(html_body)
+    # Add owner email if notify_self is enabled
+    if owner_email and owner_email not in recipients:
+        recipients.append(owner_email)
 
-            await send_email(
-                contact_email,
-                subject,
-                plain_body,
-                html_body,
-                from_email=settings.RESEND_ALERTS_EMAIL,
-                high_priority=True
-            )
+    for recipient_email in recipients:
+        subject = f"{user_name} is safe!"
+        # Use different subject for owner
+        if recipient_email == owner_email:
+            subject = f"Overdue resolved: Your trip '{trip_title}'"
 
-            log.info(f"Sent overdue resolved notification to {contact_email} for trip '{trip_title}'")
+        html_body = create_overdue_resolved_email_html(
+            user_name=user_name,
+            plan_title=trip_title,
+            activity=activity_name
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            recipient_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_ALERTS_EMAIL,
+            high_priority=True
+        )
+
+        log.info(f"Sent overdue resolved notification to {recipient_email} for trip '{trip_title}'")
 

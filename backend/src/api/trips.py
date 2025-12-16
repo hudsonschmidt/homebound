@@ -87,6 +87,7 @@ class TripCreate(BaseModel):
     checkin_interval_min: int = 30  # Minutes between check-in reminders
     notify_start_hour: int | None = None  # Hour (0-23) when notifications start
     notify_end_hour: int | None = None  # Hour (0-23) when notifications end
+    notify_self: bool = False  # Send copy of all emails to trip owner
 
 
 class TripUpdate(BaseModel):
@@ -113,6 +114,7 @@ class TripUpdate(BaseModel):
     checkin_interval_min: int | None = None
     notify_start_hour: int | None = None
     notify_end_hour: int | None = None
+    notify_self: bool | None = None  # Send copy of all emails to trip owner
 
 
 class TripResponse(BaseModel):
@@ -146,6 +148,7 @@ class TripResponse(BaseModel):
     timezone: str | None
     start_timezone: str | None
     eta_timezone: str | None
+    notify_self: bool
 
 
 class TimelineEvent(BaseModel):
@@ -311,7 +314,7 @@ def create_trip(
                     notes, status,
                     contact1, contact2, contact3, created_at,
                     checkin_token, checkout_token, timezone, start_timezone, eta_timezone,
-                    checkin_interval_min, notify_start_hour, notify_end_hour
+                    checkin_interval_min, notify_start_hour, notify_end_hour, notify_self
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
                     :location_text, :gen_lat, :gen_lon,
@@ -319,7 +322,7 @@ def create_trip(
                     :notes, :status,
                     :contact1, :contact2, :contact3, :created_at,
                     :checkin_token, :checkout_token, :timezone, :start_timezone, :eta_timezone,
-                    :checkin_interval_min, :notify_start_hour, :notify_end_hour
+                    :checkin_interval_min, :notify_start_hour, :notify_end_hour, :notify_self
                 )
                 RETURNING id
                 """
@@ -351,7 +354,8 @@ def create_trip(
                 "eta_timezone": body.eta_timezone,
                 "checkin_interval_min": body.checkin_interval_min,
                 "notify_start_hour": body.notify_start_hour,
-                "notify_end_hour": body.notify_end_hour
+                "notify_end_hour": body.notify_end_hour,
+                "notify_self": body.notify_self
             }
         )
         row = result.fetchone()
@@ -369,7 +373,7 @@ def create_trip(
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -394,14 +398,17 @@ def create_trip(
             order=trip["activity_order"]
         )
 
-        # Fetch user name for email notification
+        # Fetch user name and email for notification
         user = connection.execute(
-            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
             {"user_id": user_id}
         ).fetchone()
         user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
         if not user_name:
             user_name = "A Homebound user"
+        user_email = user.email if user else None
+        # Only include owner email if notify_self is enabled
+        owner_email = user_email if body.notify_self else None
 
         # Fetch contacts with email for notification
         all_contact_ids = [body.contact1, body.contact2, body.contact3]
@@ -442,7 +449,8 @@ def create_trip(
                     user_name=user_name,
                     activity_name=activity_obj.name,
                     user_timezone=user_timezone,
-                    start_location=trip_start_location
+                    start_location=trip_start_location,
+                    owner_email=owner_email
                 ))
             else:
                 # Trip is scheduled for later - send "upcoming trip" email
@@ -452,7 +460,8 @@ def create_trip(
                     user_name=user_name,
                     activity_name=activity_obj.name,
                     user_timezone=user_timezone,
-                    start_location=trip_start_location
+                    start_location=trip_start_location,
+                    owner_email=owner_email
                 ))
 
         background_tasks.add_task(send_emails_sync)
@@ -490,7 +499,8 @@ def create_trip(
             notify_end_hour=trip["notify_end_hour"],
             timezone=trip["timezone"],
             start_timezone=trip["start_timezone"],
-            eta_timezone=trip["eta_timezone"]
+            eta_timezone=trip["eta_timezone"],
+            notify_self=trip["notify_self"]
         )
 
 
@@ -508,7 +518,7 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -566,7 +576,8 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     notify_end_hour=trip["notify_end_hour"],
                     timezone=trip["timezone"],
                     start_timezone=trip["start_timezone"],
-                    eta_timezone=trip["eta_timezone"]
+                    eta_timezone=trip["eta_timezone"],
+                    notify_self=trip["notify_self"]
                 )
             )
 
@@ -590,7 +601,7 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -649,7 +660,8 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             notify_end_hour=trip["notify_end_hour"],
             timezone=trip["timezone"],
             start_timezone=trip["start_timezone"],
-            eta_timezone=trip["eta_timezone"]
+            eta_timezone=trip["eta_timezone"],
+            notify_self=trip["notify_self"]
         )
 
 
@@ -667,7 +679,7 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -727,7 +739,8 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             notify_end_hour=trip["notify_end_hour"],
             timezone=trip["timezone"],
             start_timezone=trip["start_timezone"],
-            eta_timezone=trip["eta_timezone"]
+            eta_timezone=trip["eta_timezone"],
+            notify_self=trip["notify_self"]
         )
 
 
@@ -831,6 +844,7 @@ def update_trip(
             "checkin_interval_min": body.checkin_interval_min,
             "notify_start_hour": body.notify_start_hour,
             "notify_end_hour": body.notify_end_hour,
+            "notify_self": body.notify_self,
         }
 
         for field, value in simple_fields.items():
@@ -868,7 +882,7 @@ def update_trip(
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -923,7 +937,8 @@ def update_trip(
             notify_end_hour=updated_trip["notify_end_hour"],
             timezone=updated_trip["timezone"],
             start_timezone=updated_trip["start_timezone"],
-            eta_timezone=updated_trip["eta_timezone"]
+            eta_timezone=updated_trip["eta_timezone"],
+            notify_self=updated_trip["notify_self"]
         )
 
 
@@ -940,7 +955,7 @@ def complete_trip(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.status, t.title, t.location_text,
-                       t.contact1, t.contact2, t.contact3, t.timezone,
+                       t.contact1, t.contact2, t.contact3, t.timezone, t.notify_self,
                        a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
@@ -963,12 +978,13 @@ def complete_trip(
                 detail="Trip is not active or overdue"
             )
 
-        # Fetch user name for email
+        # Fetch user name and email for notification
         user = connection.execute(
-            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
             {"user_id": user_id}
         ).fetchone()
         user_name = f"{user.first_name} {user.last_name}".strip() if user else "User"
+        owner_email = user.email if user and trip.notify_self else None
 
         # Fetch contact emails
         contact_ids = [trip.contact1, trip.contact2, trip.contact3]
@@ -1010,10 +1026,11 @@ def complete_trip(
                 contacts=contacts_for_email,
                 user_name=user_name,
                 activity_name=activity_name,
-                user_timezone=user_timezone
+                user_timezone=user_timezone,
+                owner_email=owner_email
             ))
 
-        if contacts_for_email:
+        if contacts_for_email or owner_email:
             background_tasks.add_task(send_emails_sync)
 
         return {"ok": True, "message": "Trip completed successfully"}
@@ -1131,7 +1148,7 @@ def extend_trip(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.status, t.eta, t.title, t.contact1, t.contact2, t.contact3,
-                       t.timezone, a.name as activity_name
+                       t.timezone, t.notify_self, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.id = :trip_id AND t.user_id = :user_id
@@ -1215,14 +1232,15 @@ def extend_trip(
             }
         )
 
-        # Fetch user name for email notification
+        # Fetch user name and email for notification
         user = connection.execute(
-            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
             {"user_id": user_id}
         ).fetchone()
         user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
         if not user_name:
             user_name = "A Homebound user"
+        owner_email = user.email if user and trip.notify_self else None
 
         # Fetch contacts with email for notification
         all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
@@ -1255,10 +1273,12 @@ def extend_trip(
                 user_name=user_name,
                 activity_name=activity_name,
                 extended_by_minutes=extended_by,
-                user_timezone=user_timezone
+                user_timezone=user_timezone,
+                owner_email=owner_email
             ))
 
-        background_tasks.add_task(send_emails_sync)
+        if contacts_for_email or owner_email:
+            background_tasks.add_task(send_emails_sync)
         num_contacts = len(contacts_for_email)
         log.info(f"[Trips] Scheduled extended trip emails for {num_contacts} contacts")
 

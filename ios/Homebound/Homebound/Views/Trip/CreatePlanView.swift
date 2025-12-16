@@ -49,6 +49,7 @@ struct CreatePlanView: View {
     @State private var showAddContact = false
     @State private var newContactName = ""
     @State private var newContactEmail = ""
+    @State private var notifySelf = false  // Send copy of all emails to account email
 
     // UI State
     @State private var isCreating = false
@@ -114,7 +115,8 @@ struct CreatePlanView: View {
                                 contacts: $contacts,
                                 showAddContact: $showAddContact,
                                 newContactName: $newContactName,
-                                newContactEmail: $newContactEmail
+                                newContactEmail: $newContactEmail,
+                                notifySelf: $notifySelf
                             )
                             .environmentObject(session)
                         case 4:
@@ -229,6 +231,9 @@ struct CreatePlanView: View {
                                 ))
                             }
                         }
+
+                        // Pre-populate notify self setting
+                        notifySelf = trip.notify_self
                     } else if let defaultActivityId = AppPreferences.shared.defaultActivityId,
                        let activity = session.activities.first(where: { $0.id == defaultActivityId }) {
                         selectedActivity = activity.name.lowercased().replacingOccurrences(of: " ", with: "_")
@@ -373,7 +378,8 @@ struct CreatePlanView: View {
                     eta_timezone: showTimezoneOptions ? etaTimezone.identifier : nil,
                     checkin_interval_min: checkinIntervalMinutes,
                     notify_start_hour: useNotificationHours ? notifyStartHour : nil,
-                    notify_end_hour: useNotificationHours ? notifyEndHour : nil
+                    notify_end_hour: useNotificationHours ? notifyEndHour : nil,
+                    notify_self: notifySelf
                 )
 
                 let updatedTrip = await session.updateTrip(tripId, updates: updates)
@@ -413,7 +419,8 @@ struct CreatePlanView: View {
                     eta_timezone: showTimezoneOptions ? etaTimezone.identifier : nil,
                     checkin_interval_min: checkinIntervalMinutes,
                     notify_start_hour: useNotificationHours ? notifyStartHour : nil,
-                    notify_end_hour: useNotificationHours ? notifyEndHour : nil
+                    notify_end_hour: useNotificationHours ? notifyEndHour : nil,
+                    notify_self: notifySelf
                 )
 
                 let createdPlan = await session.createPlan(plan)
@@ -1809,6 +1816,7 @@ struct Step3EmergencyContacts: View {
     @Binding var showAddContact: Bool
     @Binding var newContactName: String
     @Binding var newContactEmail: String
+    @Binding var notifySelf: Bool
 
     @State private var savedContacts: [Contact] = []
     @State private var isLoadingSaved = false
@@ -1826,6 +1834,23 @@ struct Step3EmergencyContacts: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.top, 20)
+
+                // Send me a copy toggle
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: $notifySelf) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Send me a copy")
+                                .font(.body)
+                            Text("Receive all trip emails at your account email")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(.accentColor)
+                }
+                .padding()
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(12)
 
                 // Your Contacts Section
                 VStack(alignment: .leading, spacing: 12) {
