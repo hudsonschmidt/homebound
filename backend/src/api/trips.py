@@ -1177,9 +1177,13 @@ def extend_trip(
             current_eta = trip.eta
         else:
             current_eta = datetime.fromisoformat(trip.eta)
-        new_eta = current_eta + timedelta(minutes=minutes)
 
         now = datetime.now(UTC)
+        # If currently past ETA (overdue), extend from now instead of original ETA
+        if now > current_eta:
+            new_eta = now + timedelta(minutes=minutes)
+        else:
+            new_eta = current_eta + timedelta(minutes=minutes)
 
         # Log checkin event first (extending is also a check-in) and get the event ID
         result = connection.execute(

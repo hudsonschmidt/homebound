@@ -2768,16 +2768,17 @@ def test_extend_trip_basic():
 
 
 def test_extend_trip_updates_overdue_to_active():
-    """Extending an overdue trip should change status back to active"""
+    """Extending an overdue trip should change status back to active and extend from current time"""
     user_id, contact_id = setup_test_user_and_contact()
 
-    # Create active trip
+    # Create active trip with ETA in the past (simulating overdue)
     now = datetime.now(UTC)
+    past_eta = now - timedelta(minutes=30)  # ETA was 30 minutes ago
     trip_data = TripCreate(
         title="Overdue Trip",
         activity="Hiking",
-        start=now,
-        eta=now + timedelta(hours=2),
+        start=now - timedelta(hours=2),  # Started 2 hours ago
+        eta=past_eta,
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id
@@ -2793,17 +2794,37 @@ def test_extend_trip_updates_overdue_to_active():
             {"trip_id": trip.id}
         )
 
-    # Extend trip
+    # Extend trip by 60 minutes
+    before_extend = datetime.now(UTC)
     result = extend_trip(trip.id, 60, background_tasks, user_id=user_id)
+    after_extend = datetime.now(UTC)
     assert result["ok"] is True
 
-    # Verify status changed to active
+    # Verify status changed to active and ETA is extended from current time (not past ETA)
     with db.engine.begin() as connection:
         db_trip = connection.execute(
-            sqlalchemy.text("SELECT status FROM trips WHERE id = :trip_id"),
+            sqlalchemy.text("SELECT status, eta FROM trips WHERE id = :trip_id"),
             {"trip_id": trip.id}
         ).fetchone()
         assert db_trip.status == "active"
+
+        # Parse the ETA from database
+        db_eta = db_trip.eta.replace(tzinfo=UTC) if db_trip.eta.tzinfo is None else db_trip.eta
+
+        # New ETA should be approximately now + 60 minutes (extended from current time)
+        # NOT past_eta + 60 minutes (which would still be in the past or barely in the future)
+        expected_min = before_extend + timedelta(minutes=60)
+        expected_max = after_extend + timedelta(minutes=60)
+
+        assert db_eta >= expected_min - timedelta(seconds=5), \
+            f"ETA should be at least {expected_min}, got {db_eta}"
+        assert db_eta <= expected_max + timedelta(seconds=5), \
+            f"ETA should be at most {expected_max}, got {db_eta}"
+
+        # Importantly, new ETA should NOT be close to past_eta + 60 (the old buggy behavior)
+        buggy_eta = past_eta + timedelta(minutes=60)
+        assert abs((db_eta - buggy_eta).total_seconds()) > 1500, \
+            f"ETA appears to be extended from old ETA ({buggy_eta}) instead of current time"
 
     cleanup_test_data(user_id)
 

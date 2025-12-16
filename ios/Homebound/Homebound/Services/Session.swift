@@ -1591,7 +1591,10 @@ final class Session: ObservableObject {
         }
 
         // Calculate new ETA locally for offline update
-        let newETA = plan.eta_at.addingTimeInterval(Double(minutes) * 60)
+        // If currently past ETA (overdue), extend from now instead of original ETA
+        let now = Date()
+        let baseTime = now > plan.eta_at ? now : plan.eta_at
+        let newETA = baseTime.addingTimeInterval(Double(minutes) * 60)
         let newETAString = ISO8601DateFormatter().string(from: newETA)
 
         // Check if offline FIRST - queue immediately without waiting for network timeout
