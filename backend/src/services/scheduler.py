@@ -51,7 +51,7 @@ async def check_overdue_trips():
             overdue_trips = conn.execute(
                 sqlalchemy.text("""
                     SELECT t.id, t.user_id, t.title, t.eta, t.grace_min, t.location_text, t.status, t.timezone,
-                           t.start, t.notes, a.name as activity_name
+                           t.start, t.notes, t.start_location_text, t.has_separate_locations, a.name as activity_name
                     FROM trips t
                     JOIN activities a ON t.activity = a.id
                     WHERE t.status IN ('active', 'overdue') AND t.eta < :now
@@ -131,7 +131,9 @@ async def check_overdue_trips():
                                 log.info(f"[Scheduler] Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
                                 # Send notifications with user's timezone
                                 user_timezone = trip.timezone if hasattr(trip, 'timezone') else None
-                                await send_overdue_notifications(trip, list(contacts), user_name, user_timezone)
+                                # Get start location if trip has separate start/destination
+                                start_location = trip.start_location_text if trip.has_separate_locations else None
+                                await send_overdue_notifications(trip, list(contacts), user_name, user_timezone, start_location)
                                 log.info(f"[Scheduler] Overdue notifications sent for trip {trip_id}")
 
                                 # Mark as notified

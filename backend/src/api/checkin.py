@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from pydantic import BaseModel
 
 from src import database as db
+from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
     send_checkin_update_emails,
     send_overdue_resolved_emails,
@@ -114,11 +115,18 @@ def checkin_with_token(
         activity_name = trip.activity_name
         user_timezone = trip.timezone
 
-        # Format coordinates if provided
+        # Format coordinates if provided and perform reverse geocoding
         coordinates_str = None
+        location_name = None
         if lat is not None and lon is not None:
             coordinates_str = f"{lat:.6f}, {lon:.6f}"
             log.info(f"[Checkin] Received coordinates: {coordinates_str}")
+            # Reverse geocode to get human-readable location name
+            location_name = reverse_geocode_sync(lat, lon)
+            if location_name:
+                log.info(f"[Checkin] Reverse geocoded to: {location_name}")
+            else:
+                log.info("[Checkin] Reverse geocoding returned no result")
 
         # Schedule background task to send checkin update emails to contacts and push to user
         def send_notifications_sync():
@@ -135,7 +143,8 @@ def checkin_with_token(
                 user_name=user_name,
                 activity_name=activity_name,
                 user_timezone=user_timezone,
-                coordinates=coordinates_str
+                coordinates=coordinates_str,
+                location_name=location_name
             ))
 
         background_tasks.add_task(send_notifications_sync)

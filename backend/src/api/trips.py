@@ -72,11 +72,17 @@ class TripCreate(BaseModel):
     location_text: str | None = None
     gen_lat: float | None = None
     gen_lon: float | None = None
+    start_location_text: str | None = None  # Optional start location for trips with separate start/end
+    start_lat: float | None = None
+    start_lon: float | None = None
+    has_separate_locations: bool = False  # True if trip has separate start and destination
     notes: str | None = None
     contact1: int | None = None  # Contact ID reference
     contact2: int | None = None
     contact3: int | None = None
-    timezone: str | None = None  # User's timezone (e.g., "America/New_York")
+    timezone: str | None = None  # User's timezone (e.g., "America/New_York") - used for notifications
+    start_timezone: str | None = None  # Timezone for start time (e.g., "America/Los_Angeles")
+    eta_timezone: str | None = None  # Timezone for return time (e.g., "America/New_York")
     checkin_interval_min: int = 30  # Minutes between check-in reminders
     notify_start_hour: int | None = None  # Hour (0-23) when notifications start
     notify_end_hour: int | None = None  # Hour (0-23) when notifications end
@@ -92,11 +98,17 @@ class TripUpdate(BaseModel):
     location_text: str | None = None
     gen_lat: float | None = None
     gen_lon: float | None = None
+    start_location_text: str | None = None
+    start_lat: float | None = None
+    start_lon: float | None = None
+    has_separate_locations: bool | None = None
     notes: str | None = None
     contact1: int | None = None  # Contact ID reference
     contact2: int | None = None
     contact3: int | None = None
     timezone: str | None = None
+    start_timezone: str | None = None
+    eta_timezone: str | None = None
     checkin_interval_min: int | None = None
     notify_start_hour: int | None = None
     notify_end_hour: int | None = None
@@ -113,6 +125,10 @@ class TripResponse(BaseModel):
     location_text: str | None
     gen_lat: float | None
     gen_lon: float | None
+    start_location_text: str | None
+    start_lat: float | None
+    start_lon: float | None
+    has_separate_locations: bool
     notes: str | None
     status: str
     completed_at: str | None
@@ -126,6 +142,9 @@ class TripResponse(BaseModel):
     checkin_interval_min: int | None
     notify_start_hour: int | None
     notify_end_hour: int | None
+    timezone: str | None
+    start_timezone: str | None
+    eta_timezone: str | None
 
 
 class TimelineEvent(BaseModel):
@@ -261,21 +280,44 @@ def create_trip(
             else:
                 log.warning(f"[Trips] No valid coords: ({body.gen_lat}, {body.gen_lon})")
 
+        # Resolve "Current Location" for start location if separate locations are used
+        start_location_text = body.start_location_text
+        if body.has_separate_locations and start_location_text and start_location_text.lower().strip() == "current location":
+            log.info("[Trips] Detected 'Current Location' for start, checking coordinates...")
+            has_valid_start_coords = (
+                body.start_lat is not None and
+                body.start_lon is not None and
+                (body.start_lat != 0.0 or body.start_lon != 0.0)
+            )
+            if has_valid_start_coords:
+                log.info(f"[Trips] Reverse geocoding start at ({body.start_lat}, {body.start_lon})")
+                assert body.start_lat is not None and body.start_lon is not None
+                geocoded_start = reverse_geocode_sync(body.start_lat, body.start_lon)
+                if geocoded_start:
+                    start_location_text = geocoded_start
+                    log.info(f"[Trips] Start geocoded to: {start_location_text}")
+                else:
+                    log.warning("[Trips] Start geocoding failed, keeping 'Current Location'")
+
         # Insert trip
         result = connection.execute(
             sqlalchemy.text(
                 """
                 INSERT INTO trips (
                     user_id, title, activity, start, eta, grace_min,
-                    location_text, gen_lat, gen_lon, notes, status,
+                    location_text, gen_lat, gen_lon,
+                    start_location_text, start_lat, start_lon, has_separate_locations,
+                    notes, status,
                     contact1, contact2, contact3, created_at,
-                    checkin_token, checkout_token, timezone,
+                    checkin_token, checkout_token, timezone, start_timezone, eta_timezone,
                     checkin_interval_min, notify_start_hour, notify_end_hour
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
-                    :location_text, :gen_lat, :gen_lon, :notes, :status,
+                    :location_text, :gen_lat, :gen_lon,
+                    :start_location_text, :start_lat, :start_lon, :has_separate_locations,
+                    :notes, :status,
                     :contact1, :contact2, :contact3, :created_at,
-                    :checkin_token, :checkout_token, :timezone,
+                    :checkin_token, :checkout_token, :timezone, :start_timezone, :eta_timezone,
                     :checkin_interval_min, :notify_start_hour, :notify_end_hour
                 )
                 RETURNING id
@@ -291,6 +333,10 @@ def create_trip(
                 "location_text": location_text or "Unknown Location",  # Default if not provided
                 "gen_lat": body.gen_lat if body.gen_lat is not None else 0.0,  # Default to 0.0
                 "gen_lon": body.gen_lon if body.gen_lon is not None else 0.0,  # Default to 0.0
+                "start_location_text": start_location_text if body.has_separate_locations else None,
+                "start_lat": body.start_lat if body.has_separate_locations else None,
+                "start_lon": body.start_lon if body.has_separate_locations else None,
+                "has_separate_locations": body.has_separate_locations,
                 "notes": body.notes,
                 "status": initial_status,
                 "contact1": body.contact1,
@@ -300,6 +346,8 @@ def create_trip(
                 "checkin_token": checkin_token,
                 "checkout_token": checkout_token,
                 "timezone": body.timezone,
+                "start_timezone": body.start_timezone,
+                "eta_timezone": body.eta_timezone,
                 "checkin_interval_min": body.checkin_interval_min,
                 "notify_start_hour": body.notify_start_hour,
                 "notify_end_hour": body.notify_end_hour
@@ -314,10 +362,13 @@ def create_trip(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
-                       t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
+                       t.location_text, t.gen_lat, t.gen_lon,
+                       t.start_location_text, t.start_lat, t.start_lon, t.has_separate_locations,
+                       t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
+                       t.timezone, t.start_timezone, t.eta_timezone,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -373,9 +424,11 @@ def create_trip(
             "location_text": trip["location_text"]
         }
 
-        # Capture timezone and status for closure
+        # Capture timezone, status, and start location for closure
         user_timezone = body.timezone
         is_starting_now = initial_status == 'active'
+        # Only include start location if trip has separate start/destination
+        trip_start_location = trip["start_location_text"] if trip["has_separate_locations"] else None
 
         # Schedule background task to send emails to contacts
         # Use different email templates based on whether trip is starting now or upcoming
@@ -387,7 +440,8 @@ def create_trip(
                     contacts=contacts_for_email,
                     user_name=user_name,
                     activity_name=activity_obj.name,
-                    user_timezone=user_timezone
+                    user_timezone=user_timezone,
+                    start_location=trip_start_location
                 ))
             else:
                 # Trip is scheduled for later - send "upcoming trip" email
@@ -396,7 +450,8 @@ def create_trip(
                     contacts=contacts_for_email,
                     user_name=user_name,
                     activity_name=activity_obj.name,
-                    user_timezone=user_timezone
+                    user_timezone=user_timezone,
+                    start_location=trip_start_location
                 ))
 
         background_tasks.add_task(send_emails_sync)
@@ -415,6 +470,10 @@ def create_trip(
             location_text=trip["location_text"],
             gen_lat=trip["gen_lat"],
             gen_lon=trip["gen_lon"],
+            start_location_text=trip["start_location_text"],
+            start_lat=trip["start_lat"],
+            start_lon=trip["start_lon"],
+            has_separate_locations=trip["has_separate_locations"],
             notes=trip["notes"],
             status=trip["status"],
             completed_at=to_iso8601(trip["completed_at"]),
@@ -427,7 +486,10 @@ def create_trip(
             checkout_token=trip["checkout_token"],
             checkin_interval_min=trip["checkin_interval_min"],
             notify_start_hour=trip["notify_start_hour"],
-            notify_end_hour=trip["notify_end_hour"]
+            notify_end_hour=trip["notify_end_hour"],
+            timezone=trip["timezone"],
+            start_timezone=trip["start_timezone"],
+            eta_timezone=trip["eta_timezone"]
         )
 
 
@@ -439,10 +501,13 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
-                       t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
+                       t.location_text, t.gen_lat, t.gen_lon,
+                       t.start_location_text, t.start_lat, t.start_lon, t.has_separate_locations,
+                       t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
+                       t.timezone, t.start_timezone, t.eta_timezone,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -481,6 +546,10 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     location_text=trip["location_text"],
                     gen_lat=trip["gen_lat"],
                     gen_lon=trip["gen_lon"],
+                    start_location_text=trip["start_location_text"],
+                    start_lat=trip["start_lat"],
+                    start_lon=trip["start_lon"],
+                    has_separate_locations=trip["has_separate_locations"],
                     notes=trip["notes"],
                     status=trip["status"],
                     completed_at=to_iso8601(trip["completed_at"]),
@@ -493,7 +562,10 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     checkout_token=trip["checkout_token"],
                     checkin_interval_min=trip["checkin_interval_min"],
                     notify_start_hour=trip["notify_start_hour"],
-                    notify_end_hour=trip["notify_end_hour"]
+                    notify_end_hour=trip["notify_end_hour"],
+                    timezone=trip["timezone"],
+                    start_timezone=trip["start_timezone"],
+                    eta_timezone=trip["eta_timezone"]
                 )
             )
 
@@ -511,10 +583,13 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
-                       t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
+                       t.location_text, t.gen_lat, t.gen_lon,
+                       t.start_location_text, t.start_lat, t.start_lon, t.has_separate_locations,
+                       t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
+                       t.timezone, t.start_timezone, t.eta_timezone,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -554,6 +629,10 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             location_text=trip["location_text"],
             gen_lat=trip["gen_lat"],
             gen_lon=trip["gen_lon"],
+            start_location_text=trip["start_location_text"],
+            start_lat=trip["start_lat"],
+            start_lon=trip["start_lon"],
+            has_separate_locations=trip["has_separate_locations"],
             notes=trip["notes"],
             status=trip["status"],
             completed_at=to_iso8601(trip["completed_at"]),
@@ -566,7 +645,10 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             checkout_token=trip["checkout_token"],
             checkin_interval_min=trip["checkin_interval_min"],
             notify_start_hour=trip["notify_start_hour"],
-            notify_end_hour=trip["notify_end_hour"]
+            notify_end_hour=trip["notify_end_hour"],
+            timezone=trip["timezone"],
+            start_timezone=trip["start_timezone"],
+            eta_timezone=trip["eta_timezone"]
         )
 
 
@@ -578,10 +660,13 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
-                       t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
+                       t.location_text, t.gen_lat, t.gen_lon,
+                       t.start_location_text, t.start_lat, t.start_lon, t.has_separate_locations,
+                       t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
+                       t.timezone, t.start_timezone, t.eta_timezone,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -622,6 +707,10 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             location_text=trip["location_text"],
             gen_lat=trip["gen_lat"],
             gen_lon=trip["gen_lon"],
+            start_location_text=trip["start_location_text"],
+            start_lat=trip["start_lat"],
+            start_lon=trip["start_lon"],
+            has_separate_locations=trip["has_separate_locations"],
             notes=trip["notes"],
             status=trip["status"],
             completed_at=to_iso8601(trip["completed_at"]),
@@ -634,7 +723,10 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             checkout_token=trip["checkout_token"],
             checkin_interval_min=trip["checkin_interval_min"],
             notify_start_hour=trip["notify_start_hour"],
-            notify_end_hour=trip["notify_end_hour"]
+            notify_end_hour=trip["notify_end_hour"],
+            timezone=trip["timezone"],
+            start_timezone=trip["start_timezone"],
+            eta_timezone=trip["eta_timezone"]
         )
 
 
@@ -727,8 +819,14 @@ def update_trip(
             "location_text": body.location_text,
             "gen_lat": body.gen_lat,
             "gen_lon": body.gen_lon,
+            "start_location_text": body.start_location_text,
+            "start_lat": body.start_lat,
+            "start_lon": body.start_lon,
+            "has_separate_locations": body.has_separate_locations,
             "notes": body.notes,
             "timezone": body.timezone,
+            "start_timezone": body.start_timezone,
+            "eta_timezone": body.eta_timezone,
             "checkin_interval_min": body.checkin_interval_min,
             "notify_start_hour": body.notify_start_hour,
             "notify_end_hour": body.notify_end_hour,
@@ -763,10 +861,13 @@ def update_trip(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
-                       t.location_text, t.gen_lat, t.gen_lon, t.notes, t.status, t.completed_at,
+                       t.location_text, t.gen_lat, t.gen_lon,
+                       t.start_location_text, t.start_lat, t.start_lon, t.has_separate_locations,
+                       t.notes, t.status, t.completed_at,
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
+                       t.timezone, t.start_timezone, t.eta_timezone,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -802,6 +903,10 @@ def update_trip(
             location_text=updated_trip["location_text"],
             gen_lat=updated_trip["gen_lat"],
             gen_lon=updated_trip["gen_lon"],
+            start_location_text=updated_trip["start_location_text"],
+            start_lat=updated_trip["start_lat"],
+            start_lon=updated_trip["start_lon"],
+            has_separate_locations=updated_trip["has_separate_locations"],
             notes=updated_trip["notes"],
             status=updated_trip["status"],
             completed_at=to_iso8601(updated_trip["completed_at"]),
@@ -814,7 +919,10 @@ def update_trip(
             checkout_token=updated_trip["checkout_token"],
             checkin_interval_min=updated_trip["checkin_interval_min"],
             notify_start_hour=updated_trip["notify_start_hour"],
-            notify_end_hour=updated_trip["notify_end_hour"]
+            notify_end_hour=updated_trip["notify_end_hour"],
+            timezone=updated_trip["timezone"],
+            start_timezone=updated_trip["start_timezone"],
+            eta_timezone=updated_trip["eta_timezone"]
         )
 
 

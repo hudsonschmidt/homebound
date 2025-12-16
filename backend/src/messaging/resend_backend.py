@@ -176,6 +176,21 @@ def create_magic_link_email_html(email: str, code: str) -> str:
     return render_template("magic_link", code=code, email=email)
 
 
+def build_start_location_section(start_location: str | None, destination: str | None) -> str:
+    """Build HTML for location section based on whether trip has separate start/destination.
+
+    If start_location is provided, shows both "Starting from" and "Destination".
+    Otherwise, shows single "Location" field.
+    """
+    destination_html = destination if destination else "Not specified"
+
+    if start_location:
+        return f"""<p><strong>Starting from:</strong> {start_location}</p>
+            <p><strong>Destination:</strong> {destination_html}</p>"""
+    else:
+        return f"""<p><strong>Location:</strong> {destination_html}</p>"""
+
+
 def create_overdue_notification_email_html(
     user_name: str,
     plan_title: str,
@@ -183,11 +198,12 @@ def create_overdue_notification_email_html(
     start_time: str,
     expected_time: str,
     location: str | None = None,
-    notes: str | None = None
+    notes: str | None = None,
+    start_location: str | None = None
 ) -> str:
     """Create HTML email template for overdue notifications."""
-    location_html = location if location else "Not specified"
     notes_text = notes if notes else "None"
+    start_location_section = build_start_location_section(start_location, location)
 
     return render_template(
         "overdue",
@@ -196,7 +212,7 @@ def create_overdue_notification_email_html(
         activity=activity,
         start_time=start_time,
         expected_time=expected_time,
-        location_html=location_html,
+        start_location_section=start_location_section,
         notes=notes_text
     )
 
@@ -207,10 +223,11 @@ def create_trip_created_email_html(
     activity: str,
     start_time: str,
     expected_time: str,
-    location: str | None = None
+    location: str | None = None,
+    start_location: str | None = None
 ) -> str:
     """Create HTML email template for trip created notifications to contacts."""
-    location_html = location if location else "Not specified"
+    start_location_section = build_start_location_section(start_location, location)
 
     return render_template(
         "new_trip",
@@ -219,7 +236,7 @@ def create_trip_created_email_html(
         activity=activity,
         start_time=start_time,
         expected_time=expected_time,
-        location_html=location_html
+        start_location_section=start_location_section
     )
 
 
@@ -228,10 +245,11 @@ def create_trip_starting_now_email_html(
     plan_title: str,
     activity: str,
     expected_time: str,
-    location: str | None = None
+    location: str | None = None,
+    start_location: str | None = None
 ) -> str:
     """Create HTML email template for trip starting immediately notifications."""
-    location_html = location if location else "Not specified"
+    start_location_section = build_start_location_section(start_location, location)
 
     return render_template(
         "new_trip_now",
@@ -239,7 +257,7 @@ def create_trip_starting_now_email_html(
         plan_title=plan_title,
         activity=activity,
         expected_time=expected_time,
-        location_html=location_html
+        start_location_section=start_location_section
     )
 
 
@@ -250,17 +268,20 @@ def create_checkin_update_email_html(
     checkin_time: str,
     expected_time: str,
     coordinates: str | None = None,
-    location: str | None = None
+    location: str | None = None,
+    location_name: str | None = None
 ) -> str:
     """Create HTML email template for check-in update notifications."""
     location_html = location if location else "Not specified"
     coordinates_text = coordinates if coordinates else "Not available"
+    location_name_text = location_name if location_name else "Not available"
 
     return render_template(
         "checkin",
         user_name=user_name,
         checkin_time=checkin_time,
         coordinates=coordinates_text,
+        location_name=location_name_text,
         plan_title=plan_title,
         activity=activity,
         expected_time=expected_time,

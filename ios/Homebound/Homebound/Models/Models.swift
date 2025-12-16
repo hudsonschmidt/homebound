@@ -75,11 +75,17 @@ struct TripCreateRequest: Codable {
     var location_text: String?
     var gen_lat: Double?
     var gen_lon: Double?
+    var start_location_text: String?  // Optional start location for trips with separate start/end
+    var start_lat: Double?
+    var start_lon: Double?
+    var has_separate_locations: Bool = false  // True if trip has separate start and destination
     var notes: String?
     var contact1: Int?
     var contact2: Int?
     var contact3: Int?
-    var timezone: String?  // User's timezone (e.g., "America/New_York")
+    var timezone: String?  // User's timezone (e.g., "America/New_York") - used for notifications
+    var start_timezone: String?  // Timezone for start time (e.g., "America/Los_Angeles")
+    var eta_timezone: String?    // Timezone for return time (e.g., "America/New_York")
     var checkin_interval_min: Int = 30  // Minutes between check-in reminders
     var notify_start_hour: Int?  // Hour (0-23) when notifications start (nil = no restriction)
     var notify_end_hour: Int?    // Hour (0-23) when notifications end (nil = no restriction)
@@ -94,11 +100,17 @@ struct TripUpdateRequest: Codable {
     var location_text: String?
     var gen_lat: Double?
     var gen_lon: Double?
+    var start_location_text: String?
+    var start_lat: Double?
+    var start_lon: Double?
+    var has_separate_locations: Bool?
     var notes: String?
     var contact1: Int?
     var contact2: Int?
     var contact3: Int?
     var timezone: String?
+    var start_timezone: String?
+    var eta_timezone: String?
     var checkin_interval_min: Int?
     var notify_start_hour: Int?
     var notify_end_hour: Int?
@@ -115,6 +127,10 @@ struct Trip: Codable, Identifiable, Equatable {
     var location_text: String?
     var location_lat: Double?  // Maps from backend 'gen_lat'
     var location_lng: Double?  // Maps from backend 'gen_lon'
+    var start_location_text: String?  // Optional start location for trips with separate start/end
+    var start_lat: Double?
+    var start_lng: Double?  // Maps from backend 'start_lon'
+    var has_separate_locations: Bool  // True if trip has separate start and destination
     var notes: String?
     var status: String
     var completed_at: Date?
@@ -128,6 +144,9 @@ struct Trip: Codable, Identifiable, Equatable {
     var checkin_interval_min: Int?  // Minutes between check-in reminders (nil = default 30)
     var notify_start_hour: Int?     // Hour (0-23) when notifications start (nil = no restriction)
     var notify_end_hour: Int?       // Hour (0-23) when notifications end (nil = no restriction)
+    var timezone: String?           // User's timezone for notifications
+    var start_timezone: String?     // Timezone for start time
+    var eta_timezone: String?       // Timezone for return time
 
     // Legacy field name for backward compatibility
     var activity_type: String { activity.name }
@@ -138,10 +157,12 @@ struct Trip: Codable, Identifiable, Equatable {
         case grace_min
         case location_text
         case gen_lat, gen_lon
+        case start_location_text, start_lat, start_lon, has_separate_locations
         case completed_at, last_checkin, created_at
         case contact1, contact2, contact3
         case checkin_token, checkout_token
         case checkin_interval_min, notify_start_hour, notify_end_hour
+        case timezone, start_timezone, eta_timezone
     }
 
     init(from decoder: Decoder) throws {
@@ -176,6 +197,10 @@ struct Trip: Codable, Identifiable, Equatable {
         location_text = try container.decodeIfPresent(String.self, forKey: .location_text)
         location_lat = try container.decodeIfPresent(Double.self, forKey: .gen_lat)
         location_lng = try container.decodeIfPresent(Double.self, forKey: .gen_lon)
+        start_location_text = try container.decodeIfPresent(String.self, forKey: .start_location_text)
+        start_lat = try container.decodeIfPresent(Double.self, forKey: .start_lat)
+        start_lng = try container.decodeIfPresent(Double.self, forKey: .start_lon)
+        has_separate_locations = try container.decodeIfPresent(Bool.self, forKey: .has_separate_locations) ?? false
         notes = try container.decodeIfPresent(String.self, forKey: .notes)
         status = try container.decode(String.self, forKey: .status)
 
@@ -203,6 +228,9 @@ struct Trip: Codable, Identifiable, Equatable {
         checkin_interval_min = try container.decodeIfPresent(Int.self, forKey: .checkin_interval_min)
         notify_start_hour = try container.decodeIfPresent(Int.self, forKey: .notify_start_hour)
         notify_end_hour = try container.decodeIfPresent(Int.self, forKey: .notify_end_hour)
+        timezone = try container.decodeIfPresent(String.self, forKey: .timezone)
+        start_timezone = try container.decodeIfPresent(String.self, forKey: .start_timezone)
+        eta_timezone = try container.decodeIfPresent(String.self, forKey: .eta_timezone)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -217,6 +245,10 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(location_text, forKey: .location_text)
         try container.encodeIfPresent(location_lat, forKey: .gen_lat)
         try container.encodeIfPresent(location_lng, forKey: .gen_lon)
+        try container.encodeIfPresent(start_location_text, forKey: .start_location_text)
+        try container.encodeIfPresent(start_lat, forKey: .start_lat)
+        try container.encodeIfPresent(start_lng, forKey: .start_lon)
+        try container.encode(has_separate_locations, forKey: .has_separate_locations)
         try container.encodeIfPresent(notes, forKey: .notes)
         try container.encode(status, forKey: .status)
         // Encode completed_at as ISO8601 string
@@ -233,6 +265,9 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(checkin_interval_min, forKey: .checkin_interval_min)
         try container.encodeIfPresent(notify_start_hour, forKey: .notify_start_hour)
         try container.encodeIfPresent(notify_end_hour, forKey: .notify_end_hour)
+        try container.encodeIfPresent(timezone, forKey: .timezone)
+        try container.encodeIfPresent(start_timezone, forKey: .start_timezone)
+        try container.encodeIfPresent(eta_timezone, forKey: .eta_timezone)
     }
 
     /// Memberwise initializer for local storage
@@ -247,6 +282,10 @@ struct Trip: Codable, Identifiable, Equatable {
         location_text: String?,
         location_lat: Double?,
         location_lng: Double?,
+        start_location_text: String? = nil,
+        start_lat: Double? = nil,
+        start_lng: Double? = nil,
+        has_separate_locations: Bool = false,
         notes: String?,
         status: String,
         completed_at: Date?,
@@ -259,7 +298,10 @@ struct Trip: Codable, Identifiable, Equatable {
         checkout_token: String?,
         checkin_interval_min: Int? = nil,
         notify_start_hour: Int? = nil,
-        notify_end_hour: Int? = nil
+        notify_end_hour: Int? = nil,
+        timezone: String? = nil,
+        start_timezone: String? = nil,
+        eta_timezone: String? = nil
     ) {
         self.id = id
         self.user_id = user_id
@@ -271,6 +313,10 @@ struct Trip: Codable, Identifiable, Equatable {
         self.location_text = location_text
         self.location_lat = location_lat
         self.location_lng = location_lng
+        self.start_location_text = start_location_text
+        self.start_lat = start_lat
+        self.start_lng = start_lng
+        self.has_separate_locations = has_separate_locations
         self.notes = notes
         self.status = status
         self.completed_at = completed_at
@@ -284,6 +330,9 @@ struct Trip: Codable, Identifiable, Equatable {
         self.checkin_interval_min = checkin_interval_min
         self.notify_start_hour = notify_start_hour
         self.notify_end_hour = notify_end_hour
+        self.timezone = timezone
+        self.start_timezone = start_timezone
+        self.eta_timezone = eta_timezone
     }
 }
 

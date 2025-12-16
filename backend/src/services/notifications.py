@@ -315,7 +315,13 @@ async def send_magic_link_email(email: str, code: str):
     )
 
 # Overdue --------------------------------------------------------------------------------
-async def send_overdue_notifications(trip: Any, contacts: list[Any], user_name: str = "Someone", user_timezone: str | None = None):
+async def send_overdue_notifications(
+    trip: Any,
+    contacts: list[Any],
+    user_name: str = "Someone",
+    user_timezone: str | None = None,
+    start_location: str | None = None
+):
     """Send overdue notifications to contacts via email and push."""
     from ..messaging.resend_backend import create_overdue_notification_email_html
 
@@ -331,6 +337,7 @@ async def send_overdue_notifications(trip: Any, contacts: list[Any], user_name: 
     start_formatted, _ = format_datetime_with_tz(parse_datetime(get_attr(trip, 'start')), user_timezone)
 
     display_location = trip_location_text if should_display_location(trip_location_text) else None
+    display_start_location = start_location if should_display_location(start_location) else None
 
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
@@ -345,7 +352,8 @@ async def send_overdue_notifications(trip: Any, contacts: list[Any], user_name: 
                 start_time=start_formatted,
                 expected_time=eta_formatted,
                 location=display_location,
-                notes=trip_notes
+                notes=trip_notes,
+                start_location=display_start_location
             )
             plain_body = html_to_text(html_body)
 
@@ -369,7 +377,8 @@ async def send_trip_created_emails(
     contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: str | None = None
+    user_timezone: str | None = None,
+    start_location: str | None = None
 ):
     """Send notification emails to contacts when they're added to a trip."""
     from ..messaging.resend_backend import create_trip_created_email_html
@@ -381,6 +390,8 @@ async def send_trip_created_emails(
     # Format times
     start_formatted, _ = format_datetime_with_tz(parse_datetime(get_attr(trip, 'start')), user_timezone)
     eta_formatted, _ = format_datetime_with_tz(parse_datetime(get_attr(trip, 'eta')), user_timezone)
+
+    display_start_location = start_location if should_display_location(start_location) else None
 
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
@@ -394,7 +405,8 @@ async def send_trip_created_emails(
                 activity=activity_name,
                 start_time=start_formatted,
                 expected_time=eta_formatted,
-                location=trip_location_text
+                location=trip_location_text,
+                start_location=display_start_location
             )
             plain_body = html_to_text(html_body)
 
@@ -414,7 +426,8 @@ async def send_trip_starting_now_emails(
     contacts: list[Any],
     user_name: str,
     activity_name: str,
-    user_timezone: str | None = None
+    user_timezone: str | None = None,
+    start_location: str | None = None
 ):
     """Send notification emails to contacts when a trip starts immediately."""
     from ..messaging.resend_backend import create_trip_starting_now_email_html
@@ -425,6 +438,8 @@ async def send_trip_starting_now_emails(
 
     # Format times
     eta_formatted, _ = format_datetime_with_tz(parse_datetime(get_attr(trip, 'eta')), user_timezone)
+
+    display_start_location = start_location if should_display_location(start_location) else None
 
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
@@ -437,7 +452,8 @@ async def send_trip_starting_now_emails(
                 plan_title=trip_title,
                 activity=activity_name,
                 expected_time=eta_formatted,
-                location=trip_location_text
+                location=trip_location_text,
+                start_location=display_start_location
             )
             plain_body = html_to_text(html_body)
 
@@ -458,7 +474,8 @@ async def send_checkin_update_emails(
     user_name: str,
     activity_name: str,
     user_timezone: str | None = None,
-    coordinates: str | None = None
+    coordinates: str | None = None,
+    location_name: str | None = None
 ):
     """Send check-in update emails to contacts when user checks in."""
     from ..messaging.resend_backend import create_checkin_update_email_html
@@ -486,7 +503,8 @@ async def send_checkin_update_emails(
                 checkin_time=checkin_time,
                 expected_time=expected_time,
                 coordinates=coordinates,
-                location=display_location
+                location=display_location,
+                location_name=location_name
             )
             plain_body = html_to_text(html_body)
 

@@ -42,8 +42,17 @@ struct TripMapView: View {
 
     var annotations: [TripAnnotation] {
         filteredTrips.map { trip in
-            TripAnnotation(trip: trip)
+            TripAnnotation(trip: trip, isStart: false)
         }
+    }
+
+    var startAnnotations: [TripAnnotation] {
+        filteredTrips.filter { $0.has_separate_locations }
+            .compactMap { trip -> TripAnnotation? in
+                guard let lat = trip.start_lat, let lng = trip.start_lng,
+                      lat != 0.0 && lng != 0.0 else { return nil }
+                return TripAnnotation(trip: trip, isStart: true)
+            }
     }
 
     var activityFilters: [Activity] {
@@ -137,10 +146,22 @@ struct TripMapView: View {
             }
         }
 
-        // Trip annotations
+        // Trip destination annotations
         ForEach(annotations) { annotation in
             Annotation(annotation.trip.title, coordinate: annotation.coordinate) {
                 TripMapPin(annotation: annotation, isSelected: selectedTrip?.id == annotation.trip.id)
+                    .onTapGesture {
+                        withAnimation {
+                            selectedTrip = annotation.trip
+                        }
+                    }
+            }
+        }
+
+        // Start location annotations (for trips with separate start/destination)
+        ForEach(startAnnotations) { annotation in
+            Annotation("Start: \(annotation.trip.title)", coordinate: annotation.coordinate) {
+                StartLocationPin(annotation: annotation, isSelected: selectedTrip?.id == annotation.trip.id)
                     .onTapGesture {
                         withAnimation {
                             selectedTrip = annotation.trip
@@ -323,17 +344,26 @@ struct TripMapView: View {
 
 // MARK: - Trip Annotation
 struct TripAnnotation: Identifiable {
-    let id: Int
+    let id: String
     let trip: Trip
     let coordinate: CLLocationCoordinate2D
+    let isStart: Bool
 
-    init(trip: Trip) {
-        self.id = trip.id
+    init(trip: Trip, isStart: Bool = false) {
+        self.id = isStart ? "start-\(trip.id)" : "dest-\(trip.id)"
         self.trip = trip
-        self.coordinate = CLLocationCoordinate2D(
-            latitude: trip.location_lat ?? 0,
-            longitude: trip.location_lng ?? 0
-        )
+        self.isStart = isStart
+        if isStart {
+            self.coordinate = CLLocationCoordinate2D(
+                latitude: trip.start_lat ?? 0,
+                longitude: trip.start_lng ?? 0
+            )
+        } else {
+            self.coordinate = CLLocationCoordinate2D(
+                latitude: trip.location_lat ?? 0,
+                longitude: trip.location_lng ?? 0
+            )
+        }
     }
 }
 
@@ -367,6 +397,39 @@ struct TripMapPin: View {
                 .font(.caption)
                 .foregroundStyle(activity.primaryColor)
                 .offset(y: -4)
+        }
+        .scaleEffect(isSelected ? 1.2 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)
+    }
+}
+
+// MARK: - Start Location Pin
+struct StartLocationPin: View {
+    let annotation: TripAnnotation
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Start icon (green circle with departure icon)
+            Circle()
+                .fill(Color.green)
+                .frame(width: isSelected ? 36 : 26, height: isSelected ? 36 : 26)
+                .overlay(
+                    Image(systemName: "figure.walk.departure")
+                        .font(isSelected ? .caption : .caption2)
+                        .foregroundStyle(.white)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white, lineWidth: 2)
+                )
+                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+
+            // Pin tail
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.caption2)
+                .foregroundStyle(.green)
+                .offset(y: -3)
         }
         .scaleEffect(isSelected ? 1.2 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)

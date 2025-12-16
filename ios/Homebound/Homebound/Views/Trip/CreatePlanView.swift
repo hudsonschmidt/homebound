@@ -19,6 +19,11 @@ struct CreatePlanView: View {
     @State private var location = ""
     @State private var locationCoordinates: CLLocationCoordinate2D?
     @State private var showingLocationSearch = false
+    // Start location fields (for separate start/destination mode)
+    @State private var useSeparateLocations = false
+    @State private var startLocation = ""
+    @State private var startLocationCoordinates: CLLocationCoordinate2D?
+    @State private var showingStartLocationSearch = false
     @State private var startTime = Date()
     @State private var etaTime = Date().addingTimeInterval(7200) // 2 hours from now
     @State private var isManualETA = false
@@ -33,6 +38,11 @@ struct CreatePlanView: View {
     @State private var notifyStartHour: Int = 8   // 8:00 AM default
     @State private var notifyEndHour: Int = 22    // 10:00 PM default
     @State private var showCustomInterval: Bool = false
+
+    // Timezone settings
+    @State private var showTimezoneOptions: Bool = false
+    @State private var startTimezone: TimeZone = .current
+    @State private var etaTimezone: TimeZone = .current
 
     // Contact management
     @State private var contacts: [EmergencyContact] = []
@@ -76,6 +86,10 @@ struct CreatePlanView: View {
                                 location: $location,
                                 locationCoordinates: $locationCoordinates,
                                 showingLocationSearch: $showingLocationSearch,
+                                useSeparateLocations: $useSeparateLocations,
+                                startLocation: $startLocation,
+                                startLocationCoordinates: $startLocationCoordinates,
+                                showingStartLocationSearch: $showingStartLocationSearch,
                                 activities: activities
                             )
                         case 2:
@@ -90,7 +104,10 @@ struct CreatePlanView: View {
                                 useNotificationHours: $useNotificationHours,
                                 notifyStartHour: $notifyStartHour,
                                 notifyEndHour: $notifyEndHour,
-                                showCustomInterval: $showCustomInterval
+                                showCustomInterval: $showCustomInterval,
+                                showTimezoneOptions: $showTimezoneOptions,
+                                startTimezone: $startTimezone,
+                                etaTimezone: $etaTimezone
                             )
                         case 3:
                             Step3EmergencyContacts(
@@ -169,6 +186,14 @@ struct CreatePlanView: View {
                         if let lat = trip.location_lat, let lng = trip.location_lng, lat != 0 || lng != 0 {
                             locationCoordinates = CLLocationCoordinate2D(latitude: lat, longitude: lng)
                         }
+                        // Pre-populate start location fields
+                        useSeparateLocations = trip.has_separate_locations
+                        if trip.has_separate_locations {
+                            startLocation = trip.start_location_text ?? ""
+                            if let lat = trip.start_lat, let lng = trip.start_lng, lat != 0 || lng != 0 {
+                                startLocationCoordinates = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                            }
+                        }
                         startTime = trip.start_at
                         etaTime = trip.eta_at
                         isManualETA = true  // Treat existing ETA as manually set
@@ -181,6 +206,16 @@ struct CreatePlanView: View {
                             useNotificationHours = true
                             notifyStartHour = startHour
                             notifyEndHour = endHour
+                        }
+
+                        // Pre-populate timezone settings
+                        if let startTz = trip.start_timezone, let tz = TimeZone(identifier: startTz) {
+                            showTimezoneOptions = true
+                            startTimezone = tz
+                        }
+                        if let etaTz = trip.eta_timezone, let tz = TimeZone(identifier: etaTz) {
+                            showTimezoneOptions = true
+                            etaTimezone = tz
                         }
 
                         // Pre-populate contacts from existing trip
@@ -247,8 +282,13 @@ struct CreatePlanView: View {
     private func canProceedFromCurrentStep() -> Bool {
         switch currentStep {
         case 1:
-            return !planTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                   !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let hasTitle = !planTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let hasDestination = !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if useSeparateLocations {
+                let hasStart = !startLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                return hasTitle && hasDestination && hasStart
+            }
+            return hasTitle && hasDestination
         case 2:
             // Return time must be after start time AND in the future
             let now = Date()
@@ -320,11 +360,17 @@ struct CreatePlanView: View {
                     location_text: location.trimmingCharacters(in: .whitespacesAndNewlines),
                     gen_lat: locationCoordinates?.latitude,
                     gen_lon: locationCoordinates?.longitude,
+                    start_location_text: useSeparateLocations ? startLocation.trimmingCharacters(in: .whitespacesAndNewlines) : nil,
+                    start_lat: useSeparateLocations ? startLocationCoordinates?.latitude : nil,
+                    start_lon: useSeparateLocations ? startLocationCoordinates?.longitude : nil,
+                    has_separate_locations: useSeparateLocations,
                     notes: notes.isEmpty ? nil : notes,
                     contact1: contactIds.count > 0 ? contactIds[0] : nil,
                     contact2: contactIds.count > 1 ? contactIds[1] : nil,
                     contact3: contactIds.count > 2 ? contactIds[2] : nil,
                     timezone: userTimezone,
+                    start_timezone: showTimezoneOptions ? startTimezone.identifier : nil,
+                    eta_timezone: showTimezoneOptions ? etaTimezone.identifier : nil,
                     checkin_interval_min: checkinIntervalMinutes,
                     notify_start_hour: useNotificationHours ? notifyStartHour : nil,
                     notify_end_hour: useNotificationHours ? notifyEndHour : nil
@@ -354,11 +400,17 @@ struct CreatePlanView: View {
                     location_text: location.trimmingCharacters(in: .whitespacesAndNewlines),
                     gen_lat: locationCoordinates?.latitude,
                     gen_lon: locationCoordinates?.longitude,
+                    start_location_text: useSeparateLocations ? startLocation.trimmingCharacters(in: .whitespacesAndNewlines) : nil,
+                    start_lat: useSeparateLocations ? startLocationCoordinates?.latitude : nil,
+                    start_lon: useSeparateLocations ? startLocationCoordinates?.longitude : nil,
+                    has_separate_locations: useSeparateLocations,
                     notes: notes.isEmpty ? nil : notes,
                     contact1: contactIds.count > 0 ? contactIds[0] : nil,
                     contact2: contactIds.count > 1 ? contactIds[1] : nil,
                     contact3: contactIds.count > 2 ? contactIds[2] : nil,
                     timezone: userTimezone,
+                    start_timezone: showTimezoneOptions ? startTimezone.identifier : nil,
+                    eta_timezone: showTimezoneOptions ? etaTimezone.identifier : nil,
                     checkin_interval_min: checkinIntervalMinutes,
                     notify_start_hour: useNotificationHours ? notifyStartHour : nil,
                     notify_end_hour: useNotificationHours ? notifyEndHour : nil
@@ -407,6 +459,11 @@ struct Step1TripDetails: View {
     @Binding var location: String
     @Binding var locationCoordinates: CLLocationCoordinate2D?
     @Binding var showingLocationSearch: Bool
+    // Start location bindings for separate start/destination mode
+    @Binding var useSeparateLocations: Bool
+    @Binding var startLocation: String
+    @Binding var startLocationCoordinates: CLLocationCoordinate2D?
+    @Binding var showingStartLocationSearch: Bool
     let activities: [ActivityTypeAdapter]
 
     var body: some View {
@@ -454,41 +511,136 @@ struct Step1TripDetails: View {
                     }
                 }
 
-                // Location Selection
+                // Location Mode Toggle
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Location", systemImage: "location.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Button(action: {
-                        showingLocationSearch = true
-                    }) {
+                    Toggle(isOn: $useSeparateLocations) {
                         HStack {
-                            if location.isEmpty {
-                                Text("Search for a place...")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(location)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
+                            Image(systemName: useSeparateLocations ? "arrow.triangle.swap" : "mappin.circle")
+                                .foregroundStyle(useSeparateLocations ? Color.hbAccent : .secondary)
+                            Text(useSeparateLocations ? "Start + Destination" : "Single Location")
+                                .font(.subheadline)
+                        }
+                    }
+                    .tint(.hbAccent)
+                    .padding()
+                    .background(Color(.secondarySystemFill))
+                    .cornerRadius(12)
+                }
 
-                                    if locationCoordinates != nil {
-                                        Text("Location saved")
-                                            .font(.caption2)
-                                            .foregroundStyle(.green)
+                // Location Selection(s)
+                if useSeparateLocations {
+                    // Start Location
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Start Location", systemImage: "figure.walk.departure")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button(action: {
+                            showingStartLocationSearch = true
+                        }) {
+                            HStack {
+                                if startLocation.isEmpty {
+                                    Text("Where are you starting from?")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(startLocation)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+
+                                        if startLocationCoordinates != nil {
+                                            Text("Location saved")
+                                                .font(.caption2)
+                                                .foregroundStyle(.green)
+                                        }
                                     }
                                 }
+
+                                Spacer()
+
+                                Image(systemName: startLocation.isEmpty ? "magnifyingglass" : "checkmark.circle.fill")
+                                    .foregroundStyle(startLocation.isEmpty ? Color.secondary : Color.green)
                             }
-
-                            Spacer()
-
-                            Image(systemName: location.isEmpty ? "magnifyingglass" : "checkmark.circle.fill")
-                                .foregroundStyle(location.isEmpty ? Color.secondary : Color.green)
+                            .padding()
+                            .background(Color(.secondarySystemFill))
+                            .cornerRadius(12)
                         }
-                        .padding()
-                        .background(Color(.secondarySystemFill))
-                        .cornerRadius(12)
+                    }
+
+                    // Destination Location
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Destination", systemImage: "flag.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button(action: {
+                            showingLocationSearch = true
+                        }) {
+                            HStack {
+                                if location.isEmpty {
+                                    Text("Where are you going?")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(location)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+
+                                        if locationCoordinates != nil {
+                                            Text("Location saved")
+                                                .font(.caption2)
+                                                .foregroundStyle(.green)
+                                        }
+                                    }
+                                }
+
+                                Spacer()
+
+                                Image(systemName: location.isEmpty ? "magnifyingglass" : "checkmark.circle.fill")
+                                    .foregroundStyle(location.isEmpty ? Color.secondary : Color.green)
+                            }
+                            .padding()
+                            .background(Color(.secondarySystemFill))
+                            .cornerRadius(12)
+                        }
+                    }
+                } else {
+                    // Single Location Selection
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Location", systemImage: "location.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button(action: {
+                            showingLocationSearch = true
+                        }) {
+                            HStack {
+                                if location.isEmpty {
+                                    Text("Search for a place...")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(location)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+
+                                        if locationCoordinates != nil {
+                                            Text("Location saved")
+                                                .font(.caption2)
+                                                .foregroundStyle(.green)
+                                        }
+                                    }
+                                }
+
+                                Spacer()
+
+                                Image(systemName: location.isEmpty ? "magnifyingglass" : "checkmark.circle.fill")
+                                    .foregroundStyle(location.isEmpty ? Color.secondary : Color.green)
+                            }
+                            .padding()
+                            .background(Color(.secondarySystemFill))
+                            .cornerRadius(12)
+                        }
                     }
                 }
 
@@ -506,6 +658,13 @@ struct Step1TripDetails: View {
                 selectedLocation: $location,
                 selectedCoordinates: $locationCoordinates,
                 isPresented: $showingLocationSearch
+            )
+        }
+        .sheet(isPresented: $showingStartLocationSearch) {
+            LocationSearchView(
+                selectedLocation: $startLocation,
+                selectedCoordinates: $startLocationCoordinates,
+                isPresented: $showingStartLocationSearch
             )
         }
     }
@@ -526,6 +685,11 @@ struct Step2TimeSettings: View {
     @Binding var notifyStartHour: Int
     @Binding var notifyEndHour: Int
     @Binding var showCustomInterval: Bool
+
+    // Timezone settings bindings
+    @Binding var showTimezoneOptions: Bool
+    @Binding var startTimezone: TimeZone
+    @Binding var etaTimezone: TimeZone
 
     @State private var selectedStartDate = Date()
     @State private var selectedEndDate = Date()
@@ -599,7 +763,7 @@ struct Step2TimeSettings: View {
                         .foregroundStyle(Color.hbBrand.opacity(0.7))
                 }
             }
-            Text(!showingTimeSelection ? "Select your trip dates" : "Set departure and return times")
+            Text(!showingTimeSelection ? "Select your trip dates" : "Set departure and return/arrival times")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -854,7 +1018,7 @@ struct Step2TimeSettings: View {
     private var returnTimeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Return Time", systemImage: "airplane.arrival")
+                Label("Return/Arrival Time", systemImage: "airplane.arrival")
                     .font(.headline)
                     .foregroundStyle(isReturnTimeValid ? Color.orange : Color.red)
 
@@ -878,13 +1042,13 @@ struct Step2TimeSettings: View {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
-                    Text("Return time must be in the future")
+                    Text("Return/Arrival time must be in the future")
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
             }
 
-            Text("If your trip is taking place out of service, plan your return time to be when you know you will be back in coverage, that way the grace period can be used effectively.")
+            Text("If your trip is taking place out of service, plan your return/arrival time to be when you know you will be back in coverage, that way the grace period can be used effectively.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1106,6 +1270,70 @@ struct Step2TimeSettings: View {
         return "\(hour - 12):00 PM"
     }
 
+    // MARK: - Timezone Settings Section
+    private var timezoneSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showTimezoneOptions.toggle()
+                }
+            }) {
+                HStack {
+                    Image(systemName: "globe")
+                        .foregroundStyle(showTimezoneOptions ? Color.hbBrand : .secondary)
+                    Text("Different timezone?")
+                        .font(.subheadline)
+                        .foregroundStyle(showTimezoneOptions ? Color.hbBrand : .primary)
+                    Spacer()
+                    Image(systemName: showTimezoneOptions ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(Color(.secondarySystemFill))
+                .cornerRadius(12)
+            }
+            .buttonStyle(.plain)
+
+            if showTimezoneOptions {
+                VStack(spacing: 16) {
+                    // Start time timezone
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Start time timezone")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        TimezonePicker(selectedTimezone: $startTimezone)
+                    }
+
+                    Divider()
+
+                    // Return time timezone
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Return time timezone")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        TimezonePicker(selectedTimezone: $etaTimezone)
+                    }
+
+                    // Info note
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Text("Times will be converted to UTC for storage. Your contacts will see times in their local timezone.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding()
+                .background(Color(.tertiarySystemFill))
+                .cornerRadius(12)
+            }
+        }
+    }
+
     // MARK: - Time Selection Phase
     @ViewBuilder
     private var timeSelectionPhase: some View {
@@ -1115,6 +1343,7 @@ struct Step2TimeSettings: View {
             returnTimeSection
             gracePeriodSection
             notificationSettingsSection
+            timezoneSettingsSection
         }
     }
 
@@ -2264,6 +2493,185 @@ struct LoopingAMPMPicker: View {
             }
         }
         .pickerStyle(.wheel)
+    }
+}
+
+// MARK: - Timezone Picker
+struct TimezonePicker: View {
+    @Binding var selectedTimezone: TimeZone
+    @State private var showingPicker = false
+    @State private var searchText = ""
+
+    // Common US timezones at the top
+    private let commonTimezones: [(id: String, abbrev: String, name: String)] = [
+        ("America/Los_Angeles", "PT", "Pacific Time"),
+        ("America/Denver", "MT", "Mountain Time"),
+        ("America/Chicago", "CT", "Central Time"),
+        ("America/New_York", "ET", "Eastern Time"),
+        ("America/Anchorage", "AKT", "Alaska Time"),
+        ("Pacific/Honolulu", "HT", "Hawaii Time"),
+    ]
+
+    // All available timezones
+    private var allTimezones: [TimeZone] {
+        TimeZone.knownTimeZoneIdentifiers
+            .compactMap { TimeZone(identifier: $0) }
+            .sorted { $0.identifier < $1.identifier }
+    }
+
+    private var filteredTimezones: [TimeZone] {
+        if searchText.isEmpty {
+            return allTimezones
+        }
+        return allTimezones.filter { tz in
+            tz.identifier.localizedCaseInsensitiveContains(searchText) ||
+            (tz.abbreviation() ?? "").localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    private func formatTimezone(_ tz: TimeZone) -> String {
+        let offset = tz.secondsFromGMT()
+        let hours = offset / 3600
+        let minutes = abs(offset % 3600) / 60
+        let sign = hours >= 0 ? "+" : ""
+        if minutes == 0 {
+            return "UTC\(sign)\(hours)"
+        } else {
+            return "UTC\(sign)\(hours):\(String(format: "%02d", minutes))"
+        }
+    }
+
+    private func currentTimeIn(_ tz: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.timeZone = tz
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: Date())
+    }
+
+    var body: some View {
+        Button(action: { showingPicker = true }) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    // Check if it's a common timezone
+                    if let common = commonTimezones.first(where: { $0.id == selectedTimezone.identifier }) {
+                        Text(common.name)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        Text("\(common.abbrev) (\(formatTimezone(selectedTimezone))) - \(currentTimeIn(selectedTimezone))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(selectedTimezone.identifier.replacingOccurrences(of: "_", with: " "))
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        Text("\(formatTimezone(selectedTimezone)) - \(currentTimeIn(selectedTimezone))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .background(Color(.secondarySystemFill))
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showingPicker) {
+            NavigationStack {
+                List {
+                    // Current device timezone
+                    Section("Current") {
+                        Button(action: {
+                            selectedTimezone = .current
+                            showingPicker = false
+                        }) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Device Timezone")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                    Text("\(TimeZone.current.identifier) - \(currentTimeIn(.current))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if selectedTimezone.identifier == TimeZone.current.identifier {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.hbBrand)
+                                }
+                            }
+                        }
+                    }
+
+                    // Common US timezones
+                    Section("Common") {
+                        ForEach(commonTimezones, id: \.id) { tz in
+                            if let timezone = TimeZone(identifier: tz.id) {
+                                Button(action: {
+                                    selectedTimezone = timezone
+                                    showingPicker = false
+                                }) {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(tz.name)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.primary)
+                                            Text("\(tz.abbrev) (\(formatTimezone(timezone))) - \(currentTimeIn(timezone))")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if selectedTimezone.identifier == tz.id {
+                                            Image(systemName: "checkmark")
+                                                .foregroundStyle(Color.hbBrand)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // All timezones (searchable)
+                    Section("All Timezones") {
+                        ForEach(filteredTimezones, id: \.identifier) { tz in
+                            Button(action: {
+                                selectedTimezone = tz
+                                showingPicker = false
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(tz.identifier.replacingOccurrences(of: "_", with: " "))
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                        Text("\(formatTimezone(tz)) - \(currentTimeIn(tz))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if selectedTimezone.identifier == tz.identifier {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.hbBrand)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .searchable(text: $searchText, prompt: "Search timezones")
+                .navigationTitle("Select Timezone")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingPicker = false }
+                    }
+                }
+            }
+        }
     }
 }
 

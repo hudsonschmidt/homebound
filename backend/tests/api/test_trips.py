@@ -1226,3 +1226,950 @@ def test_update_trip_notification_hours_to_overnight():
     assert updated_trip.notify_end_hour == 6
 
     cleanup_test_data(user_id)
+
+
+# ============================================================================
+# START/END LOCATION TESTS
+# ============================================================================
+
+def test_create_trip_with_single_location():
+    """Test creating a trip with single location (default behavior)"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Single Location Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id,
+        has_separate_locations=False  # Default
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.location_text == "Mountain Trail"
+    assert trip.gen_lat == 37.7749
+    assert trip.gen_lon == -122.4194
+    assert trip.has_separate_locations is False
+    assert trip.start_location_text is None
+    assert trip.start_lat is None
+    assert trip.start_lon is None
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_with_separate_start_and_destination():
+    """Test creating a trip with separate start and destination locations"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Road Trip",
+        activity="Driving",
+        start=now,
+        eta=now + timedelta(hours=5),
+        grace_min=30,
+        location_text="Los Angeles, CA",  # Destination
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="San Francisco, CA",  # Start
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Verify destination
+    assert trip.location_text == "Los Angeles, CA"
+    assert trip.gen_lat == 34.0522
+    assert trip.gen_lon == -118.2437
+
+    # Verify start location
+    assert trip.has_separate_locations is True
+    assert trip.start_location_text == "San Francisco, CA"
+    assert trip.start_lat == 37.7749
+    assert trip.start_lon == -122.4194
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_separate_locations_without_flag():
+    """Test that start location fields are ignored when has_separate_locations is False"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Should Ignore Start",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="Should Be Ignored",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=False,  # Explicitly false
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Start location should be null when flag is false
+    assert trip.has_separate_locations is False
+    assert trip.start_location_text is None
+    assert trip.start_lat is None
+    assert trip.start_lon is None
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trip_includes_start_location():
+    """Test that get_trip returns start location fields"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Get Trip Start Location",
+        activity="Biking",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=28),
+        grace_min=30,
+        location_text="End Point",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="Start Point",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    created = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Fetch the trip
+    fetched = get_trip(created.id, user_id=user_id)
+
+    assert fetched.has_separate_locations is True
+    assert fetched.start_location_text == "Start Point"
+    assert fetched.start_lat == 37.7749
+    assert fetched.start_lon == -122.4194
+    assert fetched.location_text == "End Point"
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trips_includes_start_location():
+    """Test that get_trips returns start location for all trips"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    # Create trip with separate locations
+    create_trip(
+        TripCreate(
+            title="Trip With Start",
+            activity="Driving",
+            start=now,
+            eta=now + timedelta(hours=3),
+            grace_min=30,
+            location_text="Destination A",
+            gen_lat=34.0522,
+            gen_lon=-118.2437,
+            start_location_text="Start A",
+            start_lat=37.7749,
+            start_lon=-122.4194,
+            has_separate_locations=True,
+            contact1=contact_id
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    # Create trip with single location
+    create_trip(
+        TripCreate(
+            title="Trip Without Start",
+            activity="Hiking",
+            start=now,
+            eta=now + timedelta(hours=2),
+            grace_min=30,
+            location_text="Single Location",
+            gen_lat=40.7128,
+            gen_lon=-74.0060,
+            has_separate_locations=False,
+            contact1=contact_id
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    trips = get_trips(user_id=user_id)
+
+    trip_with_start = next(t for t in trips if t.title == "Trip With Start")
+    trip_without_start = next(t for t in trips if t.title == "Trip Without Start")
+
+    assert trip_with_start.has_separate_locations is True
+    assert trip_with_start.start_location_text == "Start A"
+    assert trip_with_start.start_lat == 37.7749
+
+    assert trip_without_start.has_separate_locations is False
+    assert trip_without_start.start_location_text is None
+
+    cleanup_test_data(user_id)
+
+
+def test_get_active_trip_includes_start_location():
+    """Test that get_active_trip returns start location fields"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Active With Start",
+        activity="Running",
+        start=now,  # Starts now = active
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Finish Line",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="Starting Block",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    create_trip(trip_data, background_tasks, user_id=user_id)
+
+    active = get_active_trip(user_id=user_id)
+
+    assert active is not None
+    assert active.has_separate_locations is True
+    assert active.start_location_text == "Starting Block"
+    assert active.start_lat == 37.7749
+    assert active.start_lon == -122.4194
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_add_start_location():
+    """Test updating a trip to add a start location"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with single location (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Add Start Later",
+        activity="Driving",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=28),
+        grace_min=30,
+        location_text="Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        has_separate_locations=False,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.has_separate_locations is False
+
+    # Update to add start location
+    update_data = TripUpdate(
+        start_location_text="New Start Point",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.has_separate_locations is True
+    assert updated.start_location_text == "New Start Point"
+    assert updated.start_lat == 37.7749
+    assert updated.start_lon == -122.4194
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_change_start_location():
+    """Test updating a trip's start location"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with start location (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Change Start",
+        activity="Driving",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=28),
+        grace_min=30,
+        location_text="Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="Original Start",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Update start location
+    update_data = TripUpdate(
+        start_location_text="Updated Start",
+        start_lat=40.7128,
+        start_lon=-74.0060
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.start_location_text == "Updated Start"
+    assert updated.start_lat == 40.7128
+    assert updated.start_lon == -74.0060
+    # Destination should be unchanged
+    assert updated.location_text == "Destination"
+    assert updated.gen_lat == 34.0522
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_remove_start_location():
+    """Test updating a trip to remove the start location (switch to single location)"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with start location (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Remove Start",
+        activity="Driving",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=28),
+        grace_min=30,
+        location_text="Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="Start To Remove",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.has_separate_locations is True
+
+    # Update to switch back to single location
+    update_data = TripUpdate(
+        has_separate_locations=False
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.has_separate_locations is False
+    # Note: start location fields may still exist in DB but flag is false
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_start_location_default_false():
+    """Test that has_separate_locations defaults to False"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Default False",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Single Location",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id
+        # has_separate_locations not specified - should default to False
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.has_separate_locations is False
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_both_locations_with_coordinates():
+    """Test creating a trip with full coordinate data for both locations"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Full Coordinates",
+        activity="Driving",
+        start=now,
+        eta=now + timedelta(hours=6),
+        grace_min=45,
+        location_text="New York, NY",
+        gen_lat=40.7128,
+        gen_lon=-74.0060,
+        start_location_text="Boston, MA",
+        start_lat=42.3601,
+        start_lon=-71.0589,
+        has_separate_locations=True,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Verify all coordinates are stored correctly
+    assert trip.gen_lat == 40.7128
+    assert trip.gen_lon == -74.0060
+    assert trip.start_lat == 42.3601
+    assert trip.start_lon == -71.0589
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_both_locations():
+    """Test updating both start and destination locations simultaneously"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Update Both",
+        activity="Driving",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=30),
+        grace_min=30,
+        location_text="Original Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="Original Start",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Update both locations
+    update_data = TripUpdate(
+        location_text="New Destination",
+        gen_lat=40.7128,
+        gen_lon=-74.0060,
+        start_location_text="New Start",
+        start_lat=42.3601,
+        start_lon=-71.0589
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.location_text == "New Destination"
+    assert updated.gen_lat == 40.7128
+    assert updated.gen_lon == -74.0060
+    assert updated.start_location_text == "New Start"
+    assert updated.start_lat == 42.3601
+    assert updated.start_lon == -71.0589
+
+    cleanup_test_data(user_id)
+
+
+# ============================================================================
+# TIMEZONE TESTS
+# ============================================================================
+
+def test_create_trip_with_timezones():
+    """Test creating a trip with separate start and ETA timezones"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Cross Timezone Trip",
+        activity="Driving",
+        start=now,
+        eta=now + timedelta(hours=5),
+        grace_min=30,
+        location_text="Los Angeles, CA",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        contact1=contact_id,
+        timezone="America/New_York",  # User's device timezone
+        start_timezone="America/New_York",  # Departure timezone (Eastern)
+        eta_timezone="America/Los_Angeles"  # Arrival timezone (Pacific)
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.timezone == "America/New_York"
+    assert trip.start_timezone == "America/New_York"
+    assert trip.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_without_timezones():
+    """Test creating a trip without timezone fields (should be null)"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="No Timezone Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Local Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id
+        # No timezone fields specified
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.timezone is None
+    assert trip.start_timezone is None
+    assert trip.eta_timezone is None
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_with_only_start_timezone():
+    """Test creating a trip with only start timezone specified"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Start Timezone Only",
+        activity="Driving",
+        start=now,
+        eta=now + timedelta(hours=3),
+        grace_min=30,
+        location_text="Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        contact1=contact_id,
+        start_timezone="America/Chicago"
+        # eta_timezone not specified
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.start_timezone == "America/Chicago"
+    assert trip.eta_timezone is None
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_with_only_eta_timezone():
+    """Test creating a trip with only ETA timezone specified"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="ETA Timezone Only",
+        activity="Flying",
+        start=now,
+        eta=now + timedelta(hours=4),
+        grace_min=60,
+        location_text="Airport",
+        gen_lat=40.6413,
+        gen_lon=-73.7781,
+        contact1=contact_id,
+        eta_timezone="America/Denver"
+        # start_timezone not specified
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.start_timezone is None
+    assert trip.eta_timezone == "America/Denver"
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_same_timezone_for_both():
+    """Test creating a trip with the same timezone for start and ETA"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Same Timezone Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id,
+        timezone="America/Los_Angeles",
+        start_timezone="America/Los_Angeles",
+        eta_timezone="America/Los_Angeles"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.start_timezone == "America/Los_Angeles"
+    assert trip.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trip_includes_timezones():
+    """Test that get_trip returns timezone fields"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Get Trip Timezone Test",
+        activity="Driving",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=30),
+        grace_min=30,
+        location_text="Cross Country",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        contact1=contact_id,
+        timezone="America/New_York",
+        start_timezone="America/New_York",
+        eta_timezone="America/Los_Angeles"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    created = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Fetch the trip
+    fetched = get_trip(created.id, user_id=user_id)
+
+    assert fetched.timezone == "America/New_York"
+    assert fetched.start_timezone == "America/New_York"
+    assert fetched.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)
+
+
+def test_get_trips_includes_timezones():
+    """Test that get_trips returns timezone fields for all trips"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    # Create trip with timezones
+    create_trip(
+        TripCreate(
+            title="Trip With Timezones",
+            activity="Driving",
+            start=now,
+            eta=now + timedelta(hours=5),
+            grace_min=30,
+            location_text="Destination A",
+            gen_lat=34.0522,
+            gen_lon=-118.2437,
+            contact1=contact_id,
+            start_timezone="America/Chicago",
+            eta_timezone="America/Denver"
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    # Create trip without timezones
+    create_trip(
+        TripCreate(
+            title="Trip Without Timezones",
+            activity="Hiking",
+            start=now,
+            eta=now + timedelta(hours=2),
+            grace_min=30,
+            location_text="Local Hike",
+            gen_lat=37.7749,
+            gen_lon=-122.4194,
+            contact1=contact_id
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    trips = get_trips(user_id=user_id)
+
+    trip_with_tz = next(t for t in trips if t.title == "Trip With Timezones")
+    trip_without_tz = next(t for t in trips if t.title == "Trip Without Timezones")
+
+    assert trip_with_tz.start_timezone == "America/Chicago"
+    assert trip_with_tz.eta_timezone == "America/Denver"
+
+    assert trip_without_tz.start_timezone is None
+    assert trip_without_tz.eta_timezone is None
+
+    cleanup_test_data(user_id)
+
+
+def test_get_active_trip_includes_timezones():
+    """Test that get_active_trip returns timezone fields"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Active With Timezones",
+        activity="Flying",
+        start=now,  # Starts now = active
+        eta=now + timedelta(hours=4),
+        grace_min=60,
+        location_text="Airport",
+        gen_lat=40.6413,
+        gen_lon=-73.7781,
+        contact1=contact_id,
+        timezone="America/New_York",
+        start_timezone="America/New_York",
+        eta_timezone="America/Los_Angeles"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    create_trip(trip_data, background_tasks, user_id=user_id)
+
+    active = get_active_trip(user_id=user_id)
+
+    assert active is not None
+    assert active.timezone == "America/New_York"
+    assert active.start_timezone == "America/New_York"
+    assert active.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_add_timezones():
+    """Test updating a trip to add timezone fields"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip without timezones (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Add Timezones Later",
+        activity="Driving",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=30),
+        grace_min=30,
+        location_text="Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.start_timezone is None
+    assert trip.eta_timezone is None
+
+    # Update to add timezones
+    update_data = TripUpdate(
+        start_timezone="America/New_York",
+        eta_timezone="America/Los_Angeles"
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.start_timezone == "America/New_York"
+    assert updated.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_change_timezones():
+    """Test updating a trip's timezone fields"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with timezones (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Change Timezones",
+        activity="Driving",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=30),
+        grace_min=30,
+        location_text="Destination",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        contact1=contact_id,
+        start_timezone="America/New_York",
+        eta_timezone="America/Chicago"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Update timezones
+    update_data = TripUpdate(
+        start_timezone="America/Denver",
+        eta_timezone="America/Los_Angeles"
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.start_timezone == "America/Denver"
+    assert updated.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)
+
+
+def test_update_trip_timezone_partial():
+    """Test updating only one timezone field leaves the other unchanged"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with both timezones (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Partial Timezone Update",
+        activity="Flying",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=28),
+        grace_min=60,
+        location_text="Airport",
+        gen_lat=40.6413,
+        gen_lon=-73.7781,
+        contact1=contact_id,
+        start_timezone="America/New_York",
+        eta_timezone="America/Los_Angeles"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Update only start_timezone
+    update_data = TripUpdate(
+        start_timezone="America/Chicago"
+    )
+
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.start_timezone == "America/Chicago"
+    assert updated.eta_timezone == "America/Los_Angeles"  # Unchanged
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_with_international_timezones():
+    """Test creating a trip with international timezone identifiers"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="International Trip",
+        activity="Flying",
+        start=now,
+        eta=now + timedelta(hours=10),
+        grace_min=120,
+        location_text="Tokyo, Japan",
+        gen_lat=35.6762,
+        gen_lon=139.6503,
+        contact1=contact_id,
+        timezone="America/New_York",
+        start_timezone="America/New_York",
+        eta_timezone="Asia/Tokyo"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.start_timezone == "America/New_York"
+    assert trip.eta_timezone == "Asia/Tokyo"
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_with_utc_timezone():
+    """Test creating a trip with UTC timezone"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="UTC Trip",
+        activity="Sailing",
+        start=now,
+        eta=now + timedelta(hours=8),
+        grace_min=60,
+        location_text="Open Ocean",
+        gen_lat=0.0,
+        gen_lon=0.0,
+        contact1=contact_id,
+        timezone="UTC",
+        start_timezone="UTC",
+        eta_timezone="UTC"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.timezone == "UTC"
+    assert trip.start_timezone == "UTC"
+    assert trip.eta_timezone == "UTC"
+
+    cleanup_test_data(user_id)
+
+
+def test_create_trip_timezone_with_locations():
+    """Test creating a trip with both timezones and separate start/destination locations"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Full Featured Trip",
+        activity="Driving",
+        start=now,
+        eta=now + timedelta(hours=6),
+        grace_min=45,
+        location_text="Los Angeles, CA",
+        gen_lat=34.0522,
+        gen_lon=-118.2437,
+        start_location_text="San Francisco, CA",
+        start_lat=37.7749,
+        start_lon=-122.4194,
+        has_separate_locations=True,
+        contact1=contact_id,
+        timezone="America/Los_Angeles",
+        start_timezone="America/Los_Angeles",
+        eta_timezone="America/Los_Angeles"
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Verify locations
+    assert trip.has_separate_locations is True
+    assert trip.start_location_text == "San Francisco, CA"
+    assert trip.location_text == "Los Angeles, CA"
+
+    # Verify timezones
+    assert trip.start_timezone == "America/Los_Angeles"
+    assert trip.eta_timezone == "America/Los_Angeles"
+
+    cleanup_test_data(user_id)

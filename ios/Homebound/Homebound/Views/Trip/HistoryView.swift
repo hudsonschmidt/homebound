@@ -391,12 +391,22 @@ struct TripHistoryCard: View {
                     }
                 }
 
-                // Location (if available)
+                // Start Location (if trip has separate start/destination)
+                if plan.has_separate_locations, let startLocation = plan.start_location_text {
+                    InfoRow(
+                        icon: "figure.walk.departure",
+                        iconColor: .green,
+                        label: "Start",
+                        value: startLocation
+                    )
+                }
+
+                // Location / Destination (if available)
                 if let location = plan.location_text {
                     InfoRow(
-                        icon: "location.fill",
+                        icon: plan.has_separate_locations ? "flag.fill" : "location.fill",
                         iconColor: .red,
-                        label: "Location",
+                        label: plan.has_separate_locations ? "Destination" : "Location",
                         value: location
                     )
                 }
