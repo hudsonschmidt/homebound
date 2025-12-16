@@ -968,7 +968,7 @@ struct Step2TimeSettings: View {
             HStack {
                 Label("Departure Time", systemImage: "airplane.departure")
                     .font(.headline)
-                    .foregroundStyle(Color.hbBrand)
+                    .foregroundStyle(Color.orange)
 
                 Spacer()
 
@@ -1116,7 +1116,7 @@ struct Step2TimeSettings: View {
                 VStack(spacing: 16) {
                     // Start time timezone
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Start time timezone")
+                        Text("Starting time timezone")
                             .font(.subheadline)
                             .fontWeight(.medium)
 
@@ -1127,7 +1127,7 @@ struct Step2TimeSettings: View {
 
                     // Return time timezone
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Return time timezone")
+                        Text("Destination time timezone")
                             .font(.subheadline)
                             .fontWeight(.medium)
 
@@ -1234,7 +1234,7 @@ struct Step2TimeSettings: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Check-in Reminders", systemImage: "bell.badge")
                 .font(.headline)
-                .foregroundStyle(Color.hbBrand)
+                .foregroundStyle(Color.orange)
 
             VStack(spacing: 16) {
                 // Check-in interval picker
