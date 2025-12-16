@@ -15,10 +15,12 @@ from src.api.trips import (
     complete_trip,
     create_trip,
     delete_trip,
+    extend_trip,
     get_active_trip,
     get_trip,
     get_trip_timeline,
     get_trips,
+    start_trip,
     update_trip,
 )
 
@@ -2480,3 +2482,598 @@ def test_create_trip_notify_self_with_all_features():
     assert trip.notify_end_hour == 22
 
     cleanup_test_data(user_id)
+
+
+# =============================================================================
+# START TRIP EDGE CASE TESTS
+# =============================================================================
+
+def test_start_trip_early_updates_start_time():
+    """Starting a planned trip early should update start time to now"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip scheduled 24 hours in future
+    now = datetime.now(UTC)
+    future_start = now + timedelta(hours=24)
+    trip_data = TripCreate(
+        title="Future Trip",
+        activity="Hiking",
+        start=future_start,
+        eta=future_start + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Verify trip was created as planned (future start time)
+    assert trip.status == "planned"
+
+    # Start trip early
+    result = start_trip(trip.id, background_tasks, user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify start time was updated to approximately now (not 24 hours in future)
+    with db.engine.begin() as connection:
+        db_trip = connection.execute(
+            sqlalchemy.text("SELECT start, status FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip.id}
+        ).fetchone()
+
+        assert db_trip.status == "active"
+        # Make db_trip.start timezone-aware for comparison
+        db_start = db_trip.start.replace(tzinfo=UTC) if db_trip.start.tzinfo is None else db_trip.start
+        # Start time should be much closer to now than original (within 1 minute)
+        time_diff = abs((db_start - now).total_seconds())
+        assert time_diff < 60, f"Start time not updated: diff={time_diff}s, expected ~0s"
+        # Original was 24 hours in future, new should be now (difference should be ~24 hours)
+        diff_from_original = abs((future_start - db_start).total_seconds())
+        assert diff_from_original > 23 * 3600, "Start time should be updated from original scheduled time"
+
+    cleanup_test_data(user_id)
+
+
+def test_trip_duration_non_negative_after_early_start():
+    """Trip completed after early start should have positive duration"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip scheduled 24 hours in future
+    now = datetime.now(UTC)
+    future_start = now + timedelta(hours=24)
+    trip_data = TripCreate(
+        title="Future Trip",
+        activity="Hiking",
+        start=future_start,
+        eta=future_start + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "planned"
+
+    # Start trip early
+    start_trip(trip.id, background_tasks, user_id=user_id)
+
+    # Complete trip immediately
+    complete_trip(trip.id, background_tasks, user_id=user_id)
+
+    # Verify duration is non-negative (completed_at >= start)
+    with db.engine.begin() as connection:
+        db_trip = connection.execute(
+            sqlalchemy.text("SELECT start, completed_at FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip.id}
+        ).fetchone()
+
+        assert db_trip.completed_at is not None
+        assert db_trip.start is not None
+        # Normalize timezone awareness for comparison
+        db_start = db_trip.start.replace(tzinfo=UTC) if db_trip.start.tzinfo is None else db_trip.start
+        db_completed = db_trip.completed_at.replace(tzinfo=UTC) if db_trip.completed_at.tzinfo is None else db_trip.completed_at
+        # Duration should be non-negative
+        duration = (db_completed - db_start).total_seconds()
+        assert duration >= 0, f"Duration should be non-negative, got {duration}s"
+
+    cleanup_test_data(user_id)
+
+
+def test_start_trip_already_active_fails():
+    """Cannot start a trip that is already active"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip that starts now (will be active)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Active Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "active"
+
+    # Try to start already active trip - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        start_trip(trip.id, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+    assert "planned" in exc_info.value.detail.lower() or "status" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_start_trip_completed_fails():
+    """Cannot start a trip that is already completed"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create and complete a trip
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Completed Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    complete_trip(trip.id, background_tasks, user_id=user_id)
+
+    # Verify it's completed
+    completed_trip_data = get_trip(trip.id, user_id=user_id)
+    assert completed_trip_data.status == "completed"
+
+    # Try to start completed trip - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        start_trip(trip.id, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+
+    cleanup_test_data(user_id)
+
+
+def test_start_trip_other_users_trip_fails():
+    """Cannot start another user's trip"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create a second user
+    with db.engine.begin() as connection:
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": "other@homeboundapp.com",
+                "first_name": "Other",
+                "last_name": "User",
+                "age": 25
+            }
+        )
+        other_user_id = result.fetchone()[0]
+
+    # Create trip for first user (planned, future start)
+    now = datetime.now(UTC)
+    future_start = now + timedelta(hours=24)
+    trip_data = TripCreate(
+        title="User1 Trip",
+        activity="Hiking",
+        start=future_start,
+        eta=future_start + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "planned"
+
+    # Try to start as other user - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        start_trip(trip.id, background_tasks, user_id=other_user_id)
+
+    assert exc_info.value.status_code in [403, 404]
+
+    # Cleanup both users
+    cleanup_test_data(user_id)
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": other_user_id}
+        )
+
+
+def test_start_trip_nonexistent_fails():
+    """Cannot start a trip that doesn't exist"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    # Try to start non-existent trip
+    with pytest.raises(HTTPException) as exc_info:
+        start_trip(999999, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 404
+
+    cleanup_test_data(user_id)
+
+
+# =============================================================================
+# EXTEND TRIP EDGE CASE TESTS
+# =============================================================================
+
+def test_extend_trip_basic():
+    """Extending an active trip should update ETA and create checkin event"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create active trip (start now)
+    now = datetime.now(UTC)
+    original_eta = now + timedelta(hours=2)
+    trip_data = TripCreate(
+        title="Active Trip",
+        activity="Hiking",
+        start=now,
+        eta=original_eta,
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "active"
+
+    # Extend by 30 minutes
+    result = extend_trip(trip.id, 30, background_tasks, user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify ETA was extended
+    with db.engine.begin() as connection:
+        db_trip = connection.execute(
+            sqlalchemy.text("SELECT eta, status FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip.id}
+        ).fetchone()
+
+        assert db_trip.status == "active"
+        db_eta = db_trip.eta.replace(tzinfo=UTC) if db_trip.eta.tzinfo is None else db_trip.eta
+        # ETA should be approximately 30 minutes more than original
+        expected_eta = original_eta + timedelta(minutes=30)
+        eta_diff = abs((db_eta - expected_eta).total_seconds())
+        assert eta_diff < 60, f"ETA not extended correctly: diff={eta_diff}s"
+
+        # Verify extended event was created (extend_trip creates 'extended' event)
+        event = connection.execute(
+            sqlalchemy.text("SELECT what FROM events WHERE trip_id = :trip_id ORDER BY id DESC LIMIT 1"),
+            {"trip_id": trip.id}
+        ).fetchone()
+        assert event.what == "extended"
+
+    cleanup_test_data(user_id)
+
+
+def test_extend_trip_updates_overdue_to_active():
+    """Extending an overdue trip should change status back to active"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create active trip
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Overdue Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Manually set status to overdue for testing
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("UPDATE trips SET status = 'overdue' WHERE id = :trip_id"),
+            {"trip_id": trip.id}
+        )
+
+    # Extend trip
+    result = extend_trip(trip.id, 60, background_tasks, user_id=user_id)
+    assert result["ok"] is True
+
+    # Verify status changed to active
+    with db.engine.begin() as connection:
+        db_trip = connection.execute(
+            sqlalchemy.text("SELECT status FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip.id}
+        ).fetchone()
+        assert db_trip.status == "active"
+
+    cleanup_test_data(user_id)
+
+
+def test_extend_trip_planned_fails():
+    """Cannot extend a planned (not yet started) trip"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create planned trip (future start)
+    now = datetime.now(UTC)
+    future_start = now + timedelta(hours=24)
+    trip_data = TripCreate(
+        title="Future Trip",
+        activity="Hiking",
+        start=future_start,
+        eta=future_start + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "planned"
+
+    # Try to extend planned trip - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        extend_trip(trip.id, 30, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+
+    cleanup_test_data(user_id)
+
+
+def test_extend_trip_completed_fails():
+    """Cannot extend a completed trip"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create and complete trip
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Completed Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    complete_trip(trip.id, background_tasks, user_id=user_id)
+
+    # Try to extend completed trip - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        extend_trip(trip.id, 30, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+
+    cleanup_test_data(user_id)
+
+
+def test_extend_trip_other_users_trip_fails():
+    """Cannot extend another user's trip"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create a second user
+    with db.engine.begin() as connection:
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": "other_extend@homeboundapp.com",
+                "first_name": "Other",
+                "last_name": "User",
+                "age": 25
+            }
+        )
+        other_user_id = result.fetchone()[0]
+
+    # Create active trip for first user
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="User1 Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Try to extend as other user - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        extend_trip(trip.id, 30, background_tasks, user_id=other_user_id)
+
+    assert exc_info.value.status_code in [403, 404]
+
+    cleanup_test_data(user_id)
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": other_user_id}
+        )
+
+
+def test_extend_trip_nonexistent_fails():
+    """Cannot extend a trip that doesn't exist"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    with pytest.raises(HTTPException) as exc_info:
+        extend_trip(999999, 30, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 404
+
+    cleanup_test_data(user_id)
+
+
+def test_extend_trip_multiple_times():
+    """Multiple extensions should accumulate ETA correctly"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create active trip
+    now = datetime.now(UTC)
+    original_eta = now + timedelta(hours=2)
+    trip_data = TripCreate(
+        title="Multi-extend Trip",
+        activity="Hiking",
+        start=now,
+        eta=original_eta,
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Extend 3 times: 15 + 30 + 15 = 60 minutes total
+    extend_trip(trip.id, 15, background_tasks, user_id=user_id)
+    extend_trip(trip.id, 30, background_tasks, user_id=user_id)
+    extend_trip(trip.id, 15, background_tasks, user_id=user_id)
+
+    # Verify ETA was extended by ~60 minutes total
+    with db.engine.begin() as connection:
+        db_trip = connection.execute(
+            sqlalchemy.text("SELECT eta FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip.id}
+        ).fetchone()
+
+        db_eta = db_trip.eta.replace(tzinfo=UTC) if db_trip.eta.tzinfo is None else db_trip.eta
+        expected_eta = original_eta + timedelta(minutes=60)
+        eta_diff = abs((db_eta - expected_eta).total_seconds())
+        assert eta_diff < 60, f"ETA not extended correctly after multiple extensions: diff={eta_diff}s"
+
+        # Verify 3 extended events were created (extend_trip creates 'extended' events)
+        events = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) as cnt FROM events WHERE trip_id = :trip_id AND what = 'extended'"),
+            {"trip_id": trip.id}
+        ).fetchone()
+        assert events.cnt == 3
+
+    cleanup_test_data(user_id)
+
+
+# =============================================================================
+# COMPLETE TRIP EDGE CASE TESTS
+# =============================================================================
+
+def test_complete_trip_planned_fails():
+    """Cannot complete a trip that hasn't started yet"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create planned trip (future start)
+    now = datetime.now(UTC)
+    future_start = now + timedelta(hours=24)
+    trip_data = TripCreate(
+        title="Future Trip",
+        activity="Hiking",
+        start=future_start,
+        eta=future_start + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.status == "planned"
+
+    # Try to complete planned trip - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        complete_trip(trip.id, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+
+    cleanup_test_data(user_id)
+
+
+def test_complete_trip_already_completed_fails():
+    """Cannot complete a trip twice"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create and complete trip
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Double Complete Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    complete_trip(trip.id, background_tasks, user_id=user_id)
+
+    # Try to complete again - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        complete_trip(trip.id, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+
+    cleanup_test_data(user_id)
+
+
+# =============================================================================
+# DATA VALIDATION EDGE CASE TESTS
+# =============================================================================
+
+def test_create_trip_start_after_eta():
+    """Trip where start time is after ETA - behavior test"""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create trip with start > eta (nonsensical but may be allowed)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Backwards Trip",
+        activity="Hiking",
+        start=now + timedelta(hours=2),
+        eta=now + timedelta(hours=1),  # ETA before start!
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    # This may succeed or fail depending on validation
+    # Recording actual behavior for documentation
+    try:
+        trip = create_trip(trip_data, background_tasks, user_id=user_id)
+        # If it succeeds, document this as allowed (potential bug)
+        cleanup_test_data(user_id)
+        # Note: This test documents that start > eta is currently ALLOWED
+        # Consider adding validation to prevent this
+    except HTTPException as e:
+        # If it fails with validation error, that's the expected safe behavior
+        assert e.status_code == 400
+        cleanup_test_data(user_id)

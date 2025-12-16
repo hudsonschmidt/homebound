@@ -1092,12 +1092,13 @@ def start_trip(
             ).fetchall()
             contacts_for_email = [{"email": c.email, "name": c.name} for c in contacts]
 
-        # Update trip status to active
+        # Update trip status to active and set start time to now (for early starts)
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
-                SET status = 'active'
+                SET status = 'active',
+                    start = now()
                 WHERE id = :trip_id
                 """
             ),

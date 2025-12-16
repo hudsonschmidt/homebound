@@ -50,6 +50,7 @@ struct CreatePlanView: View {
     @State private var newContactName = ""
     @State private var newContactEmail = ""
     @State private var notifySelf = false  // Send copy of all emails to account email
+    @State private var savedContacts: [Contact] = []  // Persisted contacts from server
 
     // UI State
     @State private var isCreating = false
@@ -116,7 +117,8 @@ struct CreatePlanView: View {
                                 showAddContact: $showAddContact,
                                 newContactName: $newContactName,
                                 newContactEmail: $newContactEmail,
-                                notifySelf: $notifySelf
+                                notifySelf: $notifySelf,
+                                savedContacts: $savedContacts
                             )
                             .environmentObject(session)
                         case 4:
@@ -175,6 +177,10 @@ struct CreatePlanView: View {
             }
             .navigationTitle(isEditMode ? "Edit Trip" : "New Adventure")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                // Load saved contacts early so they're ready by step 3
+                savedContacts = await session.loadContacts()
+            }
             .onAppear {
                 // Apply default activity from preferences (only once)
                 if !hasAppliedDefaults {
@@ -252,14 +258,27 @@ struct CreatePlanView: View {
                     name: $newContactName,
                     email: $newContactEmail,
                     onAdd: {
-                        let contact = EmergencyContact(
-                            name: newContactName,
-                            email: newContactEmail
-                        )
-                        contacts.append(contact)
-                        newContactName = ""
-                        newContactEmail = ""
-                        showAddContact = false
+                        Task {
+                            // Persist to server
+                            if let serverContact = await session.addContact(name: newContactName, email: newContactEmail) {
+                                await MainActor.run {
+                                    // Add to saved contacts list so it appears in the UI
+                                    savedContacts.append(serverContact)
+
+                                    // Auto-select for this trip
+                                    let contact = EmergencyContact(
+                                        name: serverContact.name,
+                                        email: serverContact.email,
+                                        savedContactId: serverContact.id
+                                    )
+                                    contacts.append(contact)
+
+                                    newContactName = ""
+                                    newContactEmail = ""
+                                    showAddContact = false
+                                }
+                            }
+                        }
                     }
                 )
             }
@@ -1818,7 +1837,7 @@ struct Step3EmergencyContacts: View {
     @Binding var newContactEmail: String
     @Binding var notifySelf: Bool
 
-    @State private var savedContacts: [Contact] = []
+    @Binding var savedContacts: [Contact]
     @State private var isLoadingSaved = false
 
     var body: some View {
