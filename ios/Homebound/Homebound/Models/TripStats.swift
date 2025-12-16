@@ -27,26 +27,26 @@ enum StatType: String, CaseIterable, Codable {
 
     var icon: String {
         switch self {
-        case .totalTrips: return "map.fill"
-        case .adventureTime: return "clock.fill"
+        case .totalTrips: return "clock.arrow.trianglehead.counterclockwise.rotate.90"
+        case .adventureTime: return "hourglass"
         case .longestAdventure: return "trophy.fill"
-        case .activitiesTried: return "star.fill"
+        case .activitiesTried: return "chart.bar.fill"
         case .thisMonth: return "calendar"
-        case .uniqueLocations: return "location.fill"
-        case .mostAdventurousMonth: return "chart.bar.fill"
-        case .averageTripDuration: return "speedometer"
+        case .uniqueLocations: return "map.fill"
+        case .mostAdventurousMonth: return "medal.fill" 
+        case .averageTripDuration: return "stopwatch.fill"
         }
     }
 
     var color: Color {
         switch self {
-        case .totalTrips: return Color.hbBrand
+        case .totalTrips: return .red
         case .adventureTime: return .orange
         case .longestAdventure: return .yellow
-        case .activitiesTried: return Color.hbTeal
-        case .thisMonth: return .green
-        case .uniqueLocations: return .red
-        case .mostAdventurousMonth: return .blue
+        case .activitiesTried: return .green
+        case .thisMonth: return .blue
+        case .uniqueLocations: return .cyan
+        case .mostAdventurousMonth: return .purple
         case .averageTripDuration: return .pink
         }
     }

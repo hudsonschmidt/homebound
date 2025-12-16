@@ -78,6 +78,18 @@ struct TripMapView: View {
         VStack {
             Spacer()
 
+            // Selected trip card (above filter chips)
+            if let trip = selectedTrip {
+                TripDetailCard(trip: trip) {
+                    withAnimation {
+                        selectedTrip = nil
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // Activity filter chips
             if !activityFilters.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -114,17 +126,6 @@ struct TripMapView: View {
                 }
                 .padding(.vertical, 8)
                 .background(.ultraThinMaterial)
-            }
-
-            // Selected trip card
-            if let trip = selectedTrip {
-                TripDetailCard(trip: trip) {
-                    withAnimation {
-                        selectedTrip = nil
-                    }
-                }
-                .padding()
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
     }
@@ -180,6 +181,14 @@ struct TripMapView: View {
                 }
                 .mapStyle(mapStyleFromPreferences)
                 .ignoresSafeArea(edges: .top)
+                .onTapGesture {
+                    // Tap map to dismiss selected trip card
+                    if selectedTrip != nil {
+                        withAnimation {
+                            selectedTrip = nil
+                        }
+                    }
+                }
 
                 filterControls
 
@@ -199,13 +208,13 @@ struct TripMapView: View {
                         // Center on user location button
                         Button(action: centerOnUserLocation) {
                             Image(systemName: locationManager.isAuthorized ? "location.fill" : "location.slash.fill")
-                                .foregroundStyle(locationManager.isAuthorized ? Color.hbBrand : .gray)
+                                .foregroundStyle(locationManager.isAuthorized ? Color.white : .gray)
                         }
 
                         // Center on trips button
                         Button(action: centerOnTrips) {
                             Image(systemName: "scope")
-                                .foregroundStyle(Color.hbBrand)
+                                .foregroundStyle(Color.white)
                         }
                     }
                 }
@@ -430,6 +439,7 @@ struct StartLocationPin: View {
                 .font(.caption2)
                 .foregroundStyle(.green)
                 .offset(y: -3)
+
         }
         .scaleEffect(isSelected ? 1.2 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)
@@ -499,9 +509,11 @@ struct TripDetailCard: View {
                 Spacer()
 
                 Button(action: onDismiss) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(.black.opacity(0.5)))
                 }
             }
 

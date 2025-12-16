@@ -391,7 +391,7 @@ struct SettingsView: View {
                             }
                         } icon: {
                             Image(systemName: "envelope.fill")
-                                .foregroundStyle(.green)
+                                .foregroundStyle(Color.hbBrand)
                         }
                     }
                 }
@@ -411,7 +411,7 @@ struct SettingsView: View {
                             }
                         } icon: {
                             Image(systemName: "sparkles")
-                                .foregroundStyle(Color.hbBrand)
+                                .foregroundStyle(.blue)
                         }
                     }
                     .foregroundStyle(.primary)
@@ -479,7 +479,7 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         } icon: {
-                            Image(systemName: "hand.raised.fill")
+                            Image(systemName: "shield.lefthalf.filled.badge.checkmark")
                                 .foregroundStyle(.blue)
                         }
                     }
