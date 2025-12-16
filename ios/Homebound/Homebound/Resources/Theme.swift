@@ -6,13 +6,15 @@ enum HB {
 }
 
 extension Color {
-    // Brand colors
+    // Brand colors - derived from app logo
     static let hbBackground = Color(UIColor.systemBackground)
     static let hbPrimary = Color.primary
-    static let hbAccent = Color(hex: "#6366F1") ?? Color.purple  // Indigo accent matching reference
+    static let hbAccent = Color(hex: "#356B3D") ?? Color.green  // Forest green from logo
     static let hbCardBackground = Color(UIColor.secondarySystemBackground)
-    static let hbBrand = Color(hex: "#6C63FF") ?? Color.purple  // Brand purple used throughout app
-    static let hbTeal = Color(hex: "#4ECDC4") ?? Color.teal  // Teal accent for activities and highlights
+    static let hbBrand = Color(hex: "#356B3D") ?? Color.green  // Forest green from logo
+    static let hbTeal = Color(hex: "#4A7C52") ?? Color.green  // Lighter green accent
+    static let hbWarm = Color(hex: "#B87333") ?? Color.brown  // Terracotta/cabin brown from logo
+    static let hbGold = Color(hex: "#C9A227") ?? Color.yellow  // Gold stars from logo
 
     // Hex color initializer
     init?(hex: String) {

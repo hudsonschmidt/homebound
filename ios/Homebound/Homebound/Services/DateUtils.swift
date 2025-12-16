@@ -44,7 +44,7 @@ enum DateUtils {
         return nil
     }
 
-    /// Format a duration between two dates as a human-readable string (e.g., "2h 30m")
+    /// Format a duration between two dates as a human-readable string (e.g., "2h 30m" or "1d 2h")
     /// - Parameters:
     ///   - start: The start date
     ///   - end: The end date
@@ -53,10 +53,13 @@ enum DateUtils {
         let interval = end.timeIntervalSince(start)
         guard interval >= 0 else { return nil }
 
-        let hours = Int(interval) / 3600
+        let days = Int(interval) / 86400
+        let hours = (Int(interval) % 86400) / 3600
         let minutes = (Int(interval) % 3600) / 60
 
-        if hours > 0 {
+        if days > 0 {
+            return "\(days)d \(hours)h"
+        } else if hours > 0 {
             return "\(hours)h \(minutes)m"
         } else if minutes > 0 {
             return "\(minutes)m"

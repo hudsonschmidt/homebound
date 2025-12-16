@@ -145,6 +145,24 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - What's New
+    @Published var lastSeenWhatsNewVersion: String {
+        didSet {
+            UserDefaults.standard.set(lastSeenWhatsNewVersion, forKey: "lastSeenWhatsNewVersion")
+        }
+    }
+
+    var shouldShowWhatsNew: Bool {
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        // Only show if user has seen a previous version (not a fresh install) and it's different from current
+        return !lastSeenWhatsNewVersion.isEmpty && lastSeenWhatsNewVersion != currentVersion
+    }
+
+    func markWhatsNewAsSeen() {
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        lastSeenWhatsNewVersion = currentVersion
+    }
+
     init() {
         // Appearance
         let schemeRaw = UserDefaults.standard.string(forKey: "colorScheme") ?? "system"
@@ -179,6 +197,16 @@ class AppPreferences: ObservableObject {
         self.tripRemindersEnabled = UserDefaults.standard.object(forKey: "tripRemindersEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "tripRemindersEnabled")
         self.checkInAlertsEnabled = UserDefaults.standard.object(forKey: "checkInAlertsEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "checkInAlertsEnabled")
         self.emergencyNotificationsEnabled = UserDefaults.standard.object(forKey: "emergencyNotificationsEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "emergencyNotificationsEnabled")
+
+        // What's New - if empty (fresh install), set to current version to skip What's New
+        let storedVersion = UserDefaults.standard.string(forKey: "lastSeenWhatsNewVersion") ?? ""
+        if storedVersion.isEmpty {
+            let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+            self.lastSeenWhatsNewVersion = currentVersion
+            UserDefaults.standard.set(currentVersion, forKey: "lastSeenWhatsNewVersion")
+        } else {
+            self.lastSeenWhatsNewVersion = storedVersion
+        }
     }
 
     // MARK: - Formatting Helpers
@@ -222,6 +250,7 @@ struct SettingsView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
     @State private var showingClearCacheAlert = false
+    @State private var showingWhatsNew = false
 
     var body: some View {
         NavigationStack {
@@ -280,7 +309,7 @@ struct SettingsView: View {
                             Text("Customization")
                         } icon: {
                             Image(systemName: "slider.horizontal.3")
-                                .foregroundStyle(.purple)
+                                .foregroundStyle(Color.hbBrand)
                         }
                     }
 
@@ -312,7 +341,7 @@ struct SettingsView: View {
                     }
                 }
 
-                // Developer Section (only visible to developer)
+                // Developer Section
                 if session.userEmail == "hudsonschmidt08@gmail.com" {
                     Section("Developer") {
                         VStack(alignment: .leading, spacing: 8) {
@@ -320,7 +349,7 @@ struct SettingsView: View {
                                 Text("Server Environment")
                             } icon: {
                                 Image(systemName: "server.rack")
-                                    .foregroundStyle(session.serverEnvironment == .production ? .purple : session.serverEnvironment == .devRender ? .orange : .green)
+                                    .foregroundStyle(session.serverEnvironment == .production ? Color.hbBrand : session.serverEnvironment == .devRender ? .orange : .green)
                             }
 
                             Picker("Server", selection: $session.serverEnvironment) {
@@ -369,6 +398,44 @@ struct SettingsView: View {
 
                 // Resources Section
                 Section("Resources") {
+                    Button(action: {
+                        showingWhatsNew = true
+                    }) {
+                        Label {
+                            HStack {
+                                Text("What's New")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "sparkles")
+                                .foregroundStyle(Color.hbBrand)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+
+                    Button(action: {
+                        showingClearCacheAlert = true
+                    }) {
+                        Label {
+                            HStack {
+                                Text("Clear Cache")
+                                Spacer()
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "tray.fill")
+                                .foregroundStyle(Color.hbBrand)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                }
+
+                Section("Help Make Homebound Better"){
                     Link(destination: URL(string: "https://homebound.canny.io/feature-requests")!) {
                         Label {
                             HStack {
@@ -398,24 +465,6 @@ struct SettingsView: View {
                                 .foregroundStyle(.red)
                         }
                     }
-
-                    Button(action: {
-                        showingClearCacheAlert = true
-                    }) {
-                        Label {
-                            HStack {
-                                Text("Clear Cache")
-                                Spacer()
-                                Image(systemName: "trash")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "tray.fill")
-                                .foregroundStyle(.purple)
-                        }
-                    }
-                    .foregroundStyle(.primary)
                 }
 
                 // Legal Section
@@ -453,13 +502,30 @@ struct SettingsView: View {
 
                 // Version info at bottom
                 Section {
-                    HStack {
-                        Text("Version")
+                    VStack(spacing: 3) {
+                        Image("Icon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 40, height: 40)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        Text("Homebound v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                            .font(.footnote)
+                            .fontWeight(.medium)
+
+                        Text("Made with love by Hudson Schmidt")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("0.2.1")
+                        Text("in Park City & San Luis Obispo")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text("© 2025")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
                     .listRowBackground(Color.clear)
                 }
             }
@@ -481,6 +547,9 @@ struct SettingsView: View {
                 }
             } message: {
                 Text("This will clear all cached trips and activities. Data will be reloaded from the server.")
+            }
+            .fullScreenCover(isPresented: $showingWhatsNew) {
+                WhatsNewView(isFromSettings: true)
             }
         }
     }

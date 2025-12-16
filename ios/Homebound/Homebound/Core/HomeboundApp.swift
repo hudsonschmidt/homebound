@@ -8,12 +8,14 @@
 import SwiftUI
 import UserNotifications
 import BackgroundTasks
+import CoreLocation
 
 @main
 struct HomeboundApp: App {
     @StateObject private var session = Session()
     @StateObject private var preferences = AppPreferences.shared
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var showWhatsNew = false
 
     var body: some Scene {
         WindowGroup {
@@ -55,6 +57,15 @@ struct HomeboundApp: App {
                         .onOpenURL { url in
                             // Handle universal links for check-in/out
                             handleUniversalLink(url)
+                        }
+                        .onAppear {
+                            // Show What's New if user has updated from a previous version
+                            if preferences.shouldShowWhatsNew {
+                                showWhatsNew = true
+                            }
+                        }
+                        .fullScreenCover(isPresented: $showWhatsNew) {
+                            WhatsNewView()
                         }
                         .transition(.opacity)
                 }

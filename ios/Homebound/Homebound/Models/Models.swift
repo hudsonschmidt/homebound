@@ -411,7 +411,7 @@ struct ActivityTypeAdapter: Identifiable, Hashable {
     var defaultGraceMinutes: Int { activity.default_grace_minutes }
 
     var primaryColor: Color {
-        Color(hex: activity.colors.primary) ?? .purple
+        Color(hex: activity.colors.primary) ?? .hbBrand
     }
 
     var secondaryColor: Color {

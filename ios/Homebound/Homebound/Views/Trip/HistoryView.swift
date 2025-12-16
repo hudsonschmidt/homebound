@@ -256,7 +256,7 @@ struct TripHistoryCard: View {
     let plan: Trip
 
     var primaryColor: Color {
-        Color(hex: plan.activity.colors.primary) ?? .purple
+        Color(hex: plan.activity.colors.primary) ?? .hbBrand
     }
 
     var activityIcon: String {
@@ -366,7 +366,7 @@ struct TripHistoryCard: View {
                     if let duration = DateUtils.formatDuration(from: plan.start_at, to: completedAt) {
                         InfoRow(
                             icon: "timer",
-                            iconColor: .purple,
+                            iconColor: .hbBrand,
                             label: "Duration",
                             value: duration
                         )
@@ -375,7 +375,7 @@ struct TripHistoryCard: View {
                     // Completed but no completion time - show unknown
                     InfoRow(
                         icon: "timer",
-                        iconColor: .purple,
+                        iconColor: .hbBrand,
                         label: "Duration",
                         value: "(unknown)"
                     )
@@ -384,7 +384,7 @@ struct TripHistoryCard: View {
                     if let duration = DateUtils.formatDuration(from: plan.start_at, to: plan.eta_at) {
                         InfoRow(
                             icon: "timer",
-                            iconColor: .purple,
+                            iconColor: .hbBrand,
                             label: "Duration",
                             value: duration
                         )

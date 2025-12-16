@@ -1367,9 +1367,10 @@ struct Step2TimeSettings: View {
             dateRangeSummaryHeader
             departureTimeSection
             returnTimeSection
+            timezoneSettingsSection
             gracePeriodSection
             notificationSettingsSection
-            timezoneSettingsSection
+            
         }
     }
 
@@ -1456,7 +1457,7 @@ struct Step2TimeSettings: View {
         .sheet(isPresented: $showCalendarHelp) {
             HelpSheet(
                 title: "Time Settings",
-                message: "Select when you're leaving and when you expect to return. The grace period is extra time before your contacts are notified if you haven't checked in."
+                message: "1. Select dates: Tap on the day you are leaving, then select the day you are returning. For same day trips, just select one day buy tapping. \n2. Set times: First set your departure time in the future or leave as starting now. Then set your expected return/arrival time. Adjust timezone preference if needed. \n3. Set grace period: Set your grace period for how long the app will wait to send an alert to emergency contacts after you miss your return time. \n4. Set notification preferences: Choose how often you want to be reminded to check in during your trip, and optionally set specific hours for reminders."
             )
         }
     }
@@ -2035,7 +2036,7 @@ struct Step4AdditionalNotes: View {
                         .background(Color(.secondarySystemFill))
                         .cornerRadius(12)
 
-                    Text("Add any additional information that might be helpful")
+                    Text("Add any additional information that might be helpful to you planning or to your emergency contacts if needed.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -2090,7 +2091,7 @@ struct Step4AdditionalNotes: View {
         .sheet(isPresented: $showNotesHelp) {
             HelpSheet(
                 title: "Additional Notes",
-                message: "Add any extra details your contacts might need, like your planned route, who you're with, or specific locations you'll visit."
+                message: "Add any extra details your contacts might need to find you if needed, like your planned route, who you're with, what you're wearing, or specific locations you'll visit."
             )
         }
     }
@@ -2401,11 +2402,7 @@ struct HelpSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                Image(systemName: "questionmark.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(Color.hbBrand)
-
+            ScrollView {
                 Text(message)
                     .font(.body)
                     .multilineTextAlignment(.center)
@@ -2413,8 +2410,7 @@ struct HelpSheet: View {
 
                 Spacer()
             }
-            .padding()
-            .padding(.top, 20)
+            .padding(.horizontal, 20)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2422,7 +2418,9 @@ struct HelpSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.regularMaterial)
         }
     }
 }

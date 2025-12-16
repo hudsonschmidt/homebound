@@ -482,7 +482,7 @@ struct ActivePlanCardCompact: View {
         switch timeState {
         case .overdue: return .red
         case .graceWarning: return .orange
-        case .onTime: return Color(hex: plan.activity.colors.primary) ?? .purple
+        case .onTime: return Color(hex: plan.activity.colors.primary) ?? .hbBrand
         }
     }
 
