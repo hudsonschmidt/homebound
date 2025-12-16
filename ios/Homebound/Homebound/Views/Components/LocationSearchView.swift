@@ -142,6 +142,10 @@ struct LocationSearchView: View {
                                         .onTapGesture { position in
                                             if let coordinate = proxy.convert(position, from: .local) {
                                                 mapPinCoordinate = coordinate
+                                                mapCameraPosition = .region(MKCoordinateRegion(
+                                                    center: coordinate,
+                                                    span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                                                ))
                                                 Task {
                                                     await reverseGeocodeMapPin(coordinate)
                                                 }
