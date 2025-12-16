@@ -23,8 +23,8 @@ class PushResult:
 
 
 class DummyPush:
-    async def send(self, device_token: str, title: str, body: str, data: dict | None = None) -> PushResult:
-        print(f"[DUMMY PUSH] token={device_token} title={title!r} body={body!r} data={data}")
+    async def send(self, device_token: str, title: str, body: str, data: dict | None = None, category: str | None = None) -> PushResult:
+        print(f"[DUMMY PUSH] token={device_token} title={title!r} body={body!r} data={data} category={category}")
         return PushResult(ok=True, status=200, detail="dummy")
 
 
@@ -85,7 +85,7 @@ class APNsClient:
             await self._client.aclose()
             self._client = None
 
-    async def send(self, device_token: str, title: str, body: str, data: dict | None = None) -> PushResult:
+    async def send(self, device_token: str, title: str, body: str, data: dict | None = None, category: str | None = None) -> PushResult:
         c = await self._client_ctx()
         url = f"{self.base_url}/3/device/{device_token}"
         headers = {
@@ -101,6 +101,9 @@ class APNsClient:
                 "sound": "default",
             }
         }
+        # Add category for actionable notifications
+        if category:
+            payload["aps"]["category"] = category
         if data:
             payload["data"] = data
 

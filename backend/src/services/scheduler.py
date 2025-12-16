@@ -51,7 +51,8 @@ async def check_overdue_trips():
             overdue_trips = conn.execute(
                 sqlalchemy.text("""
                     SELECT t.id, t.user_id, t.title, t.eta, t.grace_min, t.location_text, t.status, t.timezone,
-                           t.start, t.notes, t.start_location_text, t.has_separate_locations, a.name as activity_name
+                           t.start, t.notes, t.start_location_text, t.has_separate_locations, t.checkout_token,
+                           a.name as activity_name
                     FROM trips t
                     JOIN activities a ON t.activity = a.id
                     WHERE t.status IN ('active', 'overdue') AND t.eta < :now
@@ -249,7 +250,7 @@ async def check_push_notifications():
             # 3. Approaching ETA - notify 15 min before ETA
             approaching_eta = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title, eta
+                    SELECT id, user_id, title, eta, checkout_token
                     FROM trips
                     WHERE status = 'active'
                     AND notified_approaching_eta = false
@@ -264,7 +265,12 @@ async def check_push_notifications():
                     trip.user_id,
                     "Almost Time",
                     f"You're expected back from '{trip.title}' in a couple minutes! Plan to check out soon, or extend your trip if you need more time!",
-                    notification_type="trip_reminder"
+                    data={
+                        "trip_id": trip.id,
+                        "checkout_token": trip.checkout_token
+                    },
+                    notification_type="trip_reminder",
+                    category="CHECKOUT_ONLY"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_approaching_eta = true WHERE id = :id"),
@@ -275,7 +281,7 @@ async def check_push_notifications():
             # 4. ETA Reached - notify when ETA passes
             eta_reached = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title, eta, grace_min
+                    SELECT id, user_id, title, eta, grace_min, checkout_token
                     FROM trips
                     WHERE status IN ('active', 'overdue')
                     AND notified_eta_reached = false
@@ -289,7 +295,12 @@ async def check_push_notifications():
                     trip.user_id,
                     "Time to Check Out",
                     f"Your expected return time has passed. Check out or extend your trip '{trip.title}'.",
-                    notification_type="checkin"
+                    data={
+                        "trip_id": trip.id,
+                        "checkout_token": trip.checkout_token
+                    },
+                    notification_type="checkin",
+                    category="CHECKOUT_ONLY"
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_eta_reached = true WHERE id = :id"),
@@ -298,12 +309,13 @@ async def check_push_notifications():
                 log.info(f"[Push] Sent 'ETA reached' notification for trip {trip.id}")
 
             # 5. Check-in Reminders - during active trips (per-trip interval)
-            # Fetch all active trips with their notification settings
+            # Fetch all active trips with their notification settings and tokens
             need_checkin_reminder = conn.execute(
                 sqlalchemy.text("""
                     SELECT id, user_id, title, last_checkin_reminder,
                            COALESCE(checkin_interval_min, :default_interval) as interval_min,
-                           notify_start_hour, notify_end_hour, timezone
+                           notify_start_hour, notify_end_hour, timezone,
+                           checkin_token, checkout_token
                     FROM trips
                     WHERE status = 'active'
                 """),
@@ -344,17 +356,24 @@ async def check_push_notifications():
                         {"now": now, "id": trip.id}
                     )
                 else:
+                    # Include tokens for actionable notification buttons
                     await send_push_to_user(
                         trip.user_id,
                         "Check-in Reminder",
                         "Hope your trip is going well! Don't forget to check in!",
-                        notification_type="checkin"
+                        data={
+                            "trip_id": trip.id,
+                            "checkin_token": trip.checkin_token,
+                            "checkout_token": trip.checkout_token
+                        },
+                        notification_type="checkin",
+                        category="CHECKIN_REMINDER"
                     )
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET last_checkin_reminder = :now WHERE id = :id"),
                         {"now": now, "id": trip.id}
                     )
-                    log.info(f"[Push] Sent check-in reminder for trip {trip.id} (interval: {interval_min}min)")
+                    log.info(f"[Push] Sent actionable check-in reminder for trip {trip.id} (interval: {interval_min}min)")
 
             # 6. Grace Period Warnings - every 5 min during grace period
             # SAFETY-CRITICAL: These warnings ALWAYS send regardless of quiet hours
@@ -362,7 +381,7 @@ async def check_push_notifications():
             # Once contacts are notified (overdue_notified), stop sending warnings to user
             in_grace_period = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title, eta, grace_min, last_grace_warning
+                    SELECT id, user_id, title, eta, grace_min, last_grace_warning, checkout_token
                     FROM trips
                     WHERE status = 'overdue'
                     AND (last_grace_warning IS NULL OR last_grace_warning <= :cutoff)
@@ -385,7 +404,12 @@ async def check_push_notifications():
                         trip.user_id,
                         "Urgent: Check In Now",
                         f"You're overdue! {int(remaining)} minutes left before contacts are notified.",
-                        notification_type="emergency"
+                        data={
+                            "trip_id": trip.id,
+                            "checkout_token": trip.checkout_token
+                        },
+                        notification_type="emergency",
+                        category="CHECKOUT_ONLY"
                     )
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET last_grace_warning = :now WHERE id = :id"),

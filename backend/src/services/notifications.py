@@ -173,7 +173,8 @@ async def send_push_to_user(
     title: str,
     body: str,
     data: dict | None = None,
-    notification_type: str = "general"
+    notification_type: str = "general",
+    category: str | None = None
 ):
     """Send push notification to all user's devices with retry logic.
 
@@ -184,6 +185,7 @@ async def send_push_to_user(
         data: Optional data payload
         notification_type: Type of notification - "trip_reminder", "checkin", "emergency", or "general"
                           Emergency notifications always send; others respect user preferences.
+        category: APNs category for actionable notifications (e.g., "CHECKIN_REMINDER")
     """
     import asyncio
     from ..messaging.apns import get_push_sender
@@ -241,7 +243,7 @@ async def send_push_to_user(
 
         for attempt in range(MAX_RETRIES):
             try:
-                result = await sender.send(device.token, title, body, data)
+                result = await sender.send(device.token, title, body, data, category)
                 if result.ok:
                     log.info(f"[APNS] Sent to user {user_id}: {title}")
                     log_notification(user_id, "push", title, body, "sent", device_token=device.token)
@@ -383,8 +385,20 @@ async def send_overdue_notifications(
 
         log.info(f"Sent overdue notification to {recipient_email} for trip '{trip_title}'")
 
+    # Send push notification to user with checkout action
+    trip_id = get_attr(trip, 'id')
+    checkout_token = get_attr(trip, 'checkout_token')
     message = f"URGENT: {trip_title} was expected by {eta_formatted} but hasn't checked in."
-    await send_push_to_user(trip_user_id, "Check-in Overdue", message)
+    await send_push_to_user(
+        trip_user_id,
+        "Check-in Overdue",
+        message,
+        data={
+            "trip_id": trip_id,
+            "checkout_token": checkout_token
+        },
+        category="CHECKOUT_ONLY"
+    )
 
 # Trip created --------------------------------------------------------------------------------
 async def send_trip_created_emails(

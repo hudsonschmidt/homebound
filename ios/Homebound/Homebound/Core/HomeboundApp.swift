@@ -100,10 +100,48 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Set ourselves as the notification center delegate
         UNUserNotificationCenter.current().delegate = self
 
+        // Register notification categories for actionable notifications
+        registerNotificationCategories()
+
         // Register background tasks
         registerBackgroundTasks()
 
         return true
+    }
+
+    private func registerNotificationCategories() {
+        // Check-in action - opens app briefly to get location
+        let checkinAction = UNNotificationAction(
+            identifier: "CHECKIN_ACTION",
+            title: "Check In",
+            options: [.foreground]
+        )
+
+        // Check-out action - completes trip (red button for emphasis)
+        let checkoutAction = UNNotificationAction(
+            identifier: "CHECKOUT_ACTION",
+            title: "Check Out",
+            options: [.destructive]
+        )
+
+        // Category for check-in reminder notifications (both actions)
+        let checkinCategory = UNNotificationCategory(
+            identifier: "CHECKIN_REMINDER",
+            actions: [checkinAction, checkoutAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
+        // Category for checkout-only notifications (ETA reached, grace period, etc.)
+        let checkoutCategory = UNNotificationCategory(
+            identifier: "CHECKOUT_ONLY",
+            actions: [checkoutAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
+        UNUserNotificationCenter.current().setNotificationCategories([checkinCategory, checkoutCategory])
+        debugLog("[AppDelegate] Registered notification categories")
     }
 
     // MARK: - Background Tasks
@@ -269,7 +307,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         completionHandler([.banner, .sound, .badge])
     }
 
-    /// Handle notification tap
+    /// Handle notification tap and action buttons
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -277,16 +315,107 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) {
         let userInfo = response.notification.request.content.userInfo
 
-        // Handle any custom data from the notification
-        if let tripId = userInfo["trip_id"] as? Int {
-            // Post notification to navigate to trip
-            NotificationCenter.default.post(
-                name: .hbNavigateToTrip,
-                object: tripId
-            )
+        switch response.actionIdentifier {
+        case "CHECKIN_ACTION":
+            handleCheckinAction(userInfo: userInfo)
+
+        case "CHECKOUT_ACTION":
+            handleCheckoutAction(userInfo: userInfo)
+
+        case UNNotificationDefaultActionIdentifier:
+            // User tapped notification banner - navigate to trip
+            if let data = userInfo["data"] as? [String: Any],
+               let tripId = data["trip_id"] as? Int {
+                NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
+            } else if let tripId = userInfo["trip_id"] as? Int {
+                NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
+            }
+
+        default:
+            break
         }
 
         completionHandler()
+    }
+
+    // MARK: - Notification Action Handlers
+
+    private func handleCheckinAction(userInfo: [AnyHashable: Any]) {
+        guard let data = userInfo["data"] as? [String: Any],
+              let checkinToken = data["checkin_token"] as? String else {
+            debugLog("[Notification Action] Check-in action missing token")
+            return
+        }
+
+        debugLog("[Notification Action] Check-in action tapped")
+
+        Task {
+            // Get location for check-in (foreground mode ensures this works)
+            let location = await LocationManager.shared.getCurrentLocation()
+
+            // Build URL with coordinates if available
+            var urlString = "\(getBaseURL())/t/\(checkinToken)/checkin"
+            if let loc = location {
+                urlString += "?lat=\(loc.latitude)&lon=\(loc.longitude)"
+            }
+
+            guard let url = URL(string: urlString) else {
+                debugLog("[Notification Action] Invalid check-in URL")
+                return
+            }
+
+            do {
+                let (_, response) = try await URLSession.shared.data(from: url)
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    debugLog("[Notification Action] Check-in successful")
+                } else {
+                    debugLog("[Notification Action] Check-in failed with response: \(response)")
+                }
+            } catch {
+                debugLog("[Notification Action] Check-in error: \(error)")
+            }
+        }
+    }
+
+    private func handleCheckoutAction(userInfo: [AnyHashable: Any]) {
+        guard let data = userInfo["data"] as? [String: Any],
+              let checkoutToken = data["checkout_token"] as? String else {
+            debugLog("[Notification Action] Check-out action missing token")
+            return
+        }
+
+        debugLog("[Notification Action] Check-out action tapped")
+
+        Task {
+            let urlString = "\(getBaseURL())/t/\(checkoutToken)/checkout"
+
+            guard let url = URL(string: urlString) else {
+                debugLog("[Notification Action] Invalid check-out URL")
+                return
+            }
+
+            do {
+                let (_, response) = try await URLSession.shared.data(from: url)
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    debugLog("[Notification Action] Check-out successful")
+                } else {
+                    debugLog("[Notification Action] Check-out failed with response: \(response)")
+                }
+            } catch {
+                debugLog("[Notification Action] Check-out error: \(error)")
+            }
+        }
+    }
+
+    /// Get the base URL based on server environment (mirrors Session.baseURL)
+    private func getBaseURL() -> URL {
+        let savedValue = UserDefaults.standard.string(forKey: "serverEnvironment") ?? "production"
+        switch savedValue {
+        case "production": return Session.productionURL
+        case "devRender": return Session.devRenderURL
+        case "local": return Session.localURL
+        default: return Session.productionURL
+        }
     }
 }
 
