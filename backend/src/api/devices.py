@@ -51,64 +51,37 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
         )
 
     with db.engine.begin() as connection:
-        # Check if device already exists
-        existing = connection.execute(
-            sqlalchemy.text(
-                """
-                SELECT id
-                FROM devices
-                WHERE token = :token
-                """
-            ),
-            {"token": body.token}
-        ).fetchone()
-
         now = datetime.now(UTC).isoformat()
 
-        if existing:
-            # Update existing device
-            connection.execute(
-                sqlalchemy.text(
-                    """
-                    UPDATE devices
-                    SET user_id = :user_id, platform = :platform, bundle_id = :bundle_id,
-                        env = :env, last_seen_at = :last_seen_at
-                    WHERE token = :token
-                    """
-                ),
-                {
-                    "user_id": user_id,
-                    "platform": body.platform,
-                    "bundle_id": body.bundle_id,
-                    "env": body.env,
-                    "last_seen_at": now,
-                    "token": body.token
-                }
-            )
-            device_id = existing.id
-        else:
-            # Insert new device
-            result = connection.execute(
-                sqlalchemy.text("""
-                    INSERT INTO devices
-                        (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
-                    VALUES
-                        (:user_id, :platform, :token, :bundle_id, :env, :created_at, :last_seen_at)
-                    RETURNING id
-                """),
-                {
-                    "user_id": user_id,
-                    "platform": body.platform,
-                    "token": body.token,
-                    "bundle_id": body.bundle_id,
-                    "env": body.env,
-                    "created_at": now,
-                    "last_seen_at": now
-                }
-            )
-            row = result.fetchone()
-            assert row is not None
-            device_id = row[0]
+        # Atomic upsert: insert new device or update existing one
+        # ON CONFLICT handles race conditions when same token is registered concurrently
+        result = connection.execute(
+            sqlalchemy.text("""
+                INSERT INTO devices
+                    (user_id, platform, token, bundle_id, env, created_at, last_seen_at)
+                VALUES
+                    (:user_id, :platform, :token, :bundle_id, :env, :created_at, :last_seen_at)
+                ON CONFLICT (token) DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    platform = EXCLUDED.platform,
+                    bundle_id = EXCLUDED.bundle_id,
+                    env = EXCLUDED.env,
+                    last_seen_at = EXCLUDED.last_seen_at
+                RETURNING id
+            """),
+            {
+                "user_id": user_id,
+                "platform": body.platform,
+                "token": body.token,
+                "bundle_id": body.bundle_id,
+                "env": body.env,
+                "created_at": now,
+                "last_seen_at": now,
+            }
+        )
+        row = result.fetchone()
+        assert row is not None
+        device_id = row[0]
 
         # Fetch device
         device = connection.execute(
