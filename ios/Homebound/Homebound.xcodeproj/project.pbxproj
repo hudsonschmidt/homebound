@@ -7,14 +7,58 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F8288F0B2EF27FA300636D9F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F8288F0A2EF27FA300636D9F /* WidgetKit.framework */; };
+		F8288F0D2EF27FA300636D9F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F8288F0C2EF27FA300636D9F /* SwiftUI.framework */; };
+		F8288F1E2EF27FA400636D9F /* HomeboundWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F85BFDFC2ECE8F9C009A47CD /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = F85BFDFB2ECE8F9C009A47CD /* GRDB */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		F8288F1C2EF27FA400636D9F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F821358E2EAB01E300237850 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F8288F082EF27FA300636D9F;
+			remoteInfo = HomeboundWidgetsExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F8288F232EF27FA400636D9F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F8288F1E2EF27FA400636D9F /* HomeboundWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		F82135962EAB01E300237850 /* Homebound.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Homebound.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HomeboundWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F8288F0A2EF27FA300636D9F /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		F8288F0C2EF27FA300636D9F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F8288F222EF27FA400636D9F /* Exceptions for "HomeboundWidgets" folder in "HomeboundWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F8288F082EF27FA300636D9F /* HomeboundWidgetsExtension */;
+		};
+		F8288F392EF299B000636D9F /* Exceptions for "HomeboundWidgets" folder in "Homebound" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				TripActivityAttributes.swift,
+			);
+			target = F82135952EAB01E300237850 /* Homebound */;
+		};
 		F8D6FEE72ED8AE1C00B62467 /* Exceptions for "Homebound" folder in "Homebound" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -35,6 +79,15 @@
 			path = Homebound;
 			sourceTree = "<group>";
 		};
+		F8288F0E2EF27FA300636D9F /* HomeboundWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F8288F392EF299B000636D9F /* Exceptions for "HomeboundWidgets" folder in "Homebound" target */,
+				F8288F222EF27FA400636D9F /* Exceptions for "HomeboundWidgets" folder in "HomeboundWidgetsExtension" target */,
+			);
+			path = HomeboundWidgets;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -46,6 +99,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F8288F062EF27FA300636D9F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F8288F0D2EF27FA300636D9F /* SwiftUI.framework in Frameworks */,
+				F8288F0B2EF27FA300636D9F /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -53,6 +115,7 @@
 			isa = PBXGroup;
 			children = (
 				F82135982EAB01E300237850 /* Homebound */,
+				F8288F0E2EF27FA300636D9F /* HomeboundWidgets */,
 				F8C54C8F2ECE9CC500959A21 /* Frameworks */,
 				F82135972EAB01E300237850 /* Products */,
 			);
@@ -62,6 +125,7 @@
 			isa = PBXGroup;
 			children = (
 				F82135962EAB01E300237850 /* Homebound.app */,
+				F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -69,6 +133,8 @@
 		F8C54C8F2ECE9CC500959A21 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				F8288F0A2EF27FA300636D9F /* WidgetKit.framework */,
+				F8288F0C2EF27FA300636D9F /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -83,10 +149,12 @@
 				F82135922EAB01E300237850 /* Sources */,
 				F82135932EAB01E300237850 /* Frameworks */,
 				F82135942EAB01E300237850 /* Resources */,
+				F8288F232EF27FA400636D9F /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				F8288F1D2EF27FA400636D9F /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				F82135982EAB01E300237850 /* Homebound */,
@@ -99,6 +167,28 @@
 			productReference = F82135962EAB01E300237850 /* Homebound.app */;
 			productType = "com.apple.product-type.application";
 		};
+		F8288F082EF27FA300636D9F /* HomeboundWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F8288F1F2EF27FA400636D9F /* Build configuration list for PBXNativeTarget "HomeboundWidgetsExtension" */;
+			buildPhases = (
+				F8288F052EF27FA300636D9F /* Sources */,
+				F8288F062EF27FA300636D9F /* Frameworks */,
+				F8288F072EF27FA300636D9F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F8288F0E2EF27FA300636D9F /* HomeboundWidgets */,
+			);
+			name = HomeboundWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = HomeboundWidgetsExtension;
+			productReference = F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -106,11 +196,14 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					F82135952EAB01E300237850 = {
 						CreatedOnToolsVersion = 26.0.1;
+					};
+					F8288F082EF27FA300636D9F = {
+						CreatedOnToolsVersion = 26.2;
 					};
 				};
 			};
@@ -132,12 +225,20 @@
 			projectRoot = "";
 			targets = (
 				F82135952EAB01E300237850 /* Homebound */,
+				F8288F082EF27FA300636D9F /* HomeboundWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		F82135942EAB01E300237850 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F8288F072EF27FA300636D9F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -154,7 +255,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F8288F052EF27FA300636D9F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F8288F1D2EF27FA400636D9F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F8288F082EF27FA300636D9F /* HomeboundWidgetsExtension */;
+			targetProxy = F8288F1C2EF27FA400636D9F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		F821359F2EAB01E400237850 /* Debug */ = {
@@ -350,6 +466,70 @@
 			};
 			name = Release;
 		};
+		F8288F202EF27FA400636D9F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = HomeboundWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HF826KS9K5;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HomeboundWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HomeboundWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hudsonschmidt.Homebound.HomeboundWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F8288F212EF27FA400636D9F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = HomeboundWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HF826KS9K5;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HomeboundWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HomeboundWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hudsonschmidt.Homebound.HomeboundWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -367,6 +547,15 @@
 			buildConfigurations = (
 				F82135A22EAB01E400237850 /* Debug */,
 				F82135A32EAB01E400237850 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F8288F1F2EF27FA400636D9F /* Build configuration list for PBXNativeTarget "HomeboundWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F8288F202EF27FA400636D9F /* Debug */,
+				F8288F212EF27FA400636D9F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

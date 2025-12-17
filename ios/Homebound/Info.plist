@@ -86,5 +86,7 @@
 		<string>com.homeboundapp.Homebound.refresh</string>
 		<string>com.homeboundapp.Homebound.processing</string>
 	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

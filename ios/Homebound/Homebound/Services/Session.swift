@@ -915,6 +915,11 @@ final class Session: ObservableObject {
                 }
             }
 
+            // Start Live Activity immediately for active trips
+            if response.status == "active" {
+                await LiveActivityManager.shared.startActivity(for: response)
+            }
+
             return response
         } catch {
             await MainActor.run {
@@ -1056,6 +1061,12 @@ final class Session: ObservableObject {
             }
         }
 
+        // Start Live Activity immediately from cache (before API call)
+        if let cachedActive = cachedActive {
+            let checkinCount = getCheckinCount(tripId: cachedActive.id)
+            await LiveActivityManager.shared.startActivity(for: cachedActive, checkinCount: checkinCount)
+        }
+
         // If offline, use cache and return immediately - don't wait for network timeout
         if !NetworkMonitor.shared.isConnected {
             await MainActor.run {
@@ -1084,6 +1095,10 @@ final class Session: ObservableObject {
                     LocalStorage.shared.cacheTrip(plan)
                 }
             }
+
+            // Update Live Activity
+            let checkinCount = response != nil ? getCheckinCount(tripId: response!.id) : 0
+            await LiveActivityManager.shared.restoreActivityIfNeeded(for: response, checkinCount: checkinCount)
         } catch {
             // Network failed - already showing cached data, just stop loading
             await MainActor.run {
@@ -1093,6 +1108,10 @@ final class Session: ObservableObject {
                 }
                 self.isLoadingTrip = false
             }
+
+            // Update Live Activity with cached data
+            let checkinCount = cachedActive != nil ? getCheckinCount(tripId: cachedActive!.id) : 0
+            await LiveActivityManager.shared.restoreActivityIfNeeded(for: cachedActive, checkinCount: checkinCount)
         }
     }
 
@@ -1537,6 +1556,9 @@ final class Session: ObservableObject {
             // Clear cached timeline for this trip
             LocalStorage.shared.clearCachedTimeline(tripId: plan.id)
 
+            // End Live Activity
+            await LiveActivityManager.shared.endActivity(for: plan)
+
             await MainActor.run {
                 self.activeTrip = nil
                 self.notice = "Welcome back! Trip completed safely."
@@ -1571,6 +1593,9 @@ final class Session: ObservableObject {
 
         // Clear cached timeline for this trip
         LocalStorage.shared.clearCachedTimeline(tripId: plan.id)
+
+        // End Live Activity
+        await LiveActivityManager.shared.endActivity(for: plan)
 
         await MainActor.run {
             self.activeTrip = nil
@@ -1696,6 +1721,34 @@ final class Session: ObservableObject {
                     body: API.Empty(),
                     bearer: bearer
                 )
+            }
+
+            // Start Live Activity immediately with known trip data
+            if let trip = self.allTrips.first(where: { $0.id == tripId }) {
+                let activeTrip = Trip(
+                    id: trip.id,
+                    user_id: trip.user_id,
+                    title: trip.title,
+                    activity: trip.activity,
+                    start_at: trip.start_at,
+                    eta_at: trip.eta_at,
+                    grace_minutes: trip.grace_minutes,
+                    location_text: trip.location_text,
+                    location_lat: trip.location_lat,
+                    location_lng: trip.location_lng,
+                    notes: trip.notes,
+                    status: "active",
+                    completed_at: trip.completed_at,
+                    last_checkin: trip.last_checkin,
+                    created_at: trip.created_at,
+                    contact1: trip.contact1,
+                    contact2: trip.contact2,
+                    contact3: trip.contact3,
+                    checkin_token: trip.checkin_token,
+                    checkout_token: trip.checkout_token
+                )
+                let checkinCount = getCheckinCount(tripId: tripId)
+                await LiveActivityManager.shared.startActivity(for: activeTrip, checkinCount: checkinCount)
             }
 
             // Reload active plan to update UI
@@ -2269,10 +2322,23 @@ final class Session: ObservableObject {
         isLoadingActivities = false
     }
 
+    // MARK: - Live Activity Helpers
+
+    /// Get check-in count from cached timeline events for a trip
+    private func getCheckinCount(tripId: Int) -> Int {
+        let cachedTimeline = LocalStorage.shared.getCachedTimeline(tripId: tripId)
+        return cachedTimeline.filter { $0.kind == "checkin" }.count
+    }
+
     // MARK: - Sign Out
     @MainActor
     func signOut() {
         debugLog("[Session] 🔒 Signing out - clearing all data")
+
+        // End all Live Activities
+        Task {
+            await LiveActivityManager.shared.endAllActivities()
+        }
 
         // Clear keychain
         keychain.clearAll()

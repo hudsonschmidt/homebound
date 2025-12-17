@@ -41,6 +41,9 @@ enum MapType: String, CaseIterable {
     }
 }
 
+// LiveActivityDisplayMode is defined in TripActivityAttributes.swift
+// (shared between main app and widget extension targets)
+
 class AppPreferences: ObservableObject {
     static let shared = AppPreferences()
 
@@ -145,6 +148,25 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - Live Activity
+    private let appGroupIdentifier = "group.com.homeboundapp.Homebound"
+
+    private var sharedDefaults: UserDefaults? {
+        UserDefaults(suiteName: appGroupIdentifier)
+    }
+
+    @Published var liveActivityEnabled: Bool {
+        didSet {
+            sharedDefaults?.set(liveActivityEnabled, forKey: "liveActivityEnabled")
+        }
+    }
+
+    @Published var liveActivityDisplayMode: LiveActivityDisplayMode {
+        didSet {
+            sharedDefaults?.set(liveActivityDisplayMode.rawValue, forKey: "liveActivityDisplayMode")
+        }
+    }
+
     // MARK: - What's New
     @Published var lastSeenWhatsNewVersion: String {
         didSet {
@@ -197,6 +219,12 @@ class AppPreferences: ObservableObject {
         self.tripRemindersEnabled = UserDefaults.standard.object(forKey: "tripRemindersEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "tripRemindersEnabled")
         self.checkInAlertsEnabled = UserDefaults.standard.object(forKey: "checkInAlertsEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "checkInAlertsEnabled")
         self.emergencyNotificationsEnabled = UserDefaults.standard.object(forKey: "emergencyNotificationsEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "emergencyNotificationsEnabled")
+
+        // Live Activity - defaults to enabled with standard display mode
+        let groupDefaults = UserDefaults(suiteName: "group.com.homeboundapp.Homebound")
+        self.liveActivityEnabled = groupDefaults?.object(forKey: "liveActivityEnabled") == nil ? true : (groupDefaults?.bool(forKey: "liveActivityEnabled") ?? true)
+        let displayModeRaw = groupDefaults?.string(forKey: "liveActivityDisplayMode") ?? "standard"
+        self.liveActivityDisplayMode = LiveActivityDisplayMode(rawValue: displayModeRaw) ?? .standard
 
         // What's New - if empty (fresh install), set to current version to skip What's New
         let storedVersion = UserDefaults.standard.string(forKey: "lastSeenWhatsNewVersion") ?? ""
@@ -909,6 +937,34 @@ struct CustomizationView: View {
                 Toggle("Show Trip Stats", isOn: $preferences.showStats)
             } header: {
                 Text("Home Screen")
+            }
+
+            // MARK: - Live Activity
+            Section {
+                Toggle(isOn: $preferences.liveActivityEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Live Activity")
+                        Text("Show trip status on Lock Screen")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if preferences.liveActivityEnabled {
+                    Picker("Display Mode", selection: $preferences.liveActivityDisplayMode) {
+                        ForEach(LiveActivityDisplayMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                }
+            } header: {
+                Text("Live Activity")
+            } footer: {
+                if preferences.liveActivityEnabled {
+                    Text(preferences.liveActivityDisplayMode.description)
+                } else {
+                    Text("Live Activities show your trip countdown on the Lock Screen and Dynamic Island during active trips.")
+                }
             }
 
             // MARK: - Sounds & Haptics
