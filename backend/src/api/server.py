@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from src.api import activities, auth_endpoints, checkin, contacts, devices, profile, trips
+from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, profile, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
@@ -35,6 +35,7 @@ tags_metadata = [
     {"name": "trips", "description": "Create and manage safety trips"},
     {"name": "activities", "description": "Activity types and configurations"},
     {"name": "contacts", "description": "Manage emergency contacts"},
+    {"name": "friends", "description": "Friend management and invites"},
     {"name": "devices", "description": "Device registration for push notifications"},
     {"name": "checkin", "description": "Check-in and check-out functionality"},
     {"name": "profile", "description": "User profile management"},
@@ -78,6 +79,7 @@ app.include_router(auth_endpoints.router)
 app.include_router(trips.router)
 app.include_router(activities.router)
 app.include_router(contacts.router)
+app.include_router(friends.router)
 app.include_router(devices.router)
 app.include_router(checkin.router)
 app.include_router(profile.router)

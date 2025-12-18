@@ -16,6 +16,104 @@ settings = get_settings()
 log = logging.getLogger(__name__)
 
 
+# ==================== Friend Push Notifications ====================
+# Friends receive push notifications instead of email
+
+async def send_friend_trip_created_push(
+    friend_user_id: int,
+    user_name: str,
+    trip_title: str
+):
+    """Send push notification to a friend when they're added as a safety contact."""
+    title = "Safety Contact Added"
+    body = f"{user_name} added you as a safety contact for their trip '{trip_title}'"
+
+    await send_push_to_user(
+        friend_user_id,
+        title,
+        body,
+        notification_type="general"
+    )
+    log.info(f"Sent friend trip created push to user {friend_user_id}")
+
+
+async def send_friend_trip_starting_push(
+    friend_user_id: int,
+    user_name: str,
+    trip_title: str
+):
+    """Send push notification to a friend when the trip they're monitoring starts."""
+    title = "Trip Started"
+    body = f"{user_name}'s trip '{trip_title}' has started. You'll be notified if they need help."
+
+    await send_push_to_user(
+        friend_user_id,
+        title,
+        body,
+        notification_type="general"
+    )
+    log.info(f"Sent friend trip starting push to user {friend_user_id}")
+
+
+async def send_friend_overdue_push(
+    friend_user_id: int,
+    user_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send URGENT push notification to a friend when a trip they're monitoring is overdue.
+
+    This is a high-priority notification that should always be delivered.
+    """
+    title = f"🚨 URGENT: {user_name} is overdue!"
+    body = f"{user_name} hasn't checked in from '{trip_title}'. They may need help!"
+
+    await send_push_to_user(
+        friend_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id, "is_overdue_alert": True},
+        notification_type="emergency"  # Emergency notifications always send
+    )
+    log.info(f"Sent friend OVERDUE push to user {friend_user_id} for trip {trip_id}")
+
+
+async def send_friend_trip_completed_push(
+    friend_user_id: int,
+    user_name: str,
+    trip_title: str
+):
+    """Send push notification to a friend when the trip owner is safe."""
+    title = f"✅ {user_name} is safe!"
+    body = f"{user_name} completed their trip '{trip_title}' safely."
+
+    await send_push_to_user(
+        friend_user_id,
+        title,
+        body,
+        notification_type="general"
+    )
+    log.info(f"Sent friend trip completed push to user {friend_user_id}")
+
+
+async def send_friend_overdue_resolved_push(
+    friend_user_id: int,
+    user_name: str,
+    trip_title: str
+):
+    """Send push notification to a friend when an overdue situation is resolved."""
+    title = f"✅ {user_name} is safe!"
+    body = f"Good news! {user_name} has checked in from '{trip_title}'."
+
+    await send_push_to_user(
+        friend_user_id,
+        title,
+        body,
+        notification_type="emergency"  # Use emergency to ensure it's delivered
+    )
+    log.info(f"Sent friend overdue resolved push to user {friend_user_id}")
+
+
 def log_notification(
     user_id: int,
     notification_type: str,

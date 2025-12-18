@@ -1,0 +1,826 @@
+"""Tests for friends API endpoints"""
+import pytest
+import sqlalchemy
+from datetime import datetime, timedelta
+from fastapi import HTTPException
+
+from src import database as db
+from src.api.friends import (
+    FriendResponse,
+    FriendInviteResponse,
+    FriendInvitePreview,
+    PendingInviteResponse,
+    create_invite,
+    get_invite_preview,
+    accept_invite,
+    get_pending_invites,
+    get_friends,
+    get_friend,
+    remove_friend,
+)
+
+
+def _create_test_user(connection, email: str, first_name: str = "Test", last_name: str = "User") -> int:
+    """Create a test user and return their ID."""
+    # Clean up existing data first
+    connection.execute(
+        sqlalchemy.text("DELETE FROM friend_invites WHERE inviter_id IN (SELECT id FROM users WHERE email = :email)"),
+        {"email": email}
+    )
+    connection.execute(
+        sqlalchemy.text(
+            """DELETE FROM friendships WHERE user_id_1 IN (SELECT id FROM users WHERE email = :email)
+               OR user_id_2 IN (SELECT id FROM users WHERE email = :email)"""
+        ),
+        {"email": email}
+    )
+    connection.execute(
+        sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+        {"email": email}
+    )
+
+    result = connection.execute(
+        sqlalchemy.text(
+            """
+            INSERT INTO users (email, first_name, last_name, age, created_at)
+            VALUES (:email, :first_name, :last_name, 30, :created_at)
+            RETURNING id
+            """
+        ),
+        {
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "created_at": datetime.utcnow()
+        }
+    )
+    return result.fetchone()[0]
+
+
+def _cleanup_user(connection, user_id: int):
+    """Clean up a test user and all related data."""
+    connection.execute(
+        sqlalchemy.text("DELETE FROM friend_invites WHERE inviter_id = :user_id OR accepted_by = :user_id"),
+        {"user_id": user_id}
+    )
+    connection.execute(
+        sqlalchemy.text("DELETE FROM friendships WHERE user_id_1 = :user_id OR user_id_2 = :user_id"),
+        {"user_id": user_id}
+    )
+    connection.execute(
+        sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+        {"user_id": user_id}
+    )
+
+
+# ==================== Invite Tests ====================
+
+def test_create_invite():
+    """Test creating a friend invite."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "inviter@test.com", "Alice", "Inviter")
+
+    try:
+        invite = create_invite(user_id=user_id)
+
+        assert isinstance(invite, FriendInviteResponse)
+        assert invite.token is not None
+        assert len(invite.token) > 20  # URL-safe tokens are reasonably long
+        assert "homeboundapp.com/f/" in invite.invite_url
+        assert invite.expires_at is not None
+
+        # Verify invite was stored in database
+        with db.engine.begin() as connection:
+            stored = connection.execute(
+                sqlalchemy.text("SELECT * FROM friend_invites WHERE token = :token"),
+                {"token": invite.token}
+            ).fetchone()
+            assert stored is not None
+            assert stored.inviter_id == user_id
+            assert stored.use_count == 0
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_get_invite_preview():
+    """Test getting invite preview (public endpoint)."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "preview@test.com", "Bob", "Preview")
+
+    try:
+        # Create invite
+        invite = create_invite(user_id=user_id)
+
+        # Get preview
+        preview = get_invite_preview(invite.token)
+
+        assert isinstance(preview, FriendInvitePreview)
+        assert preview.inviter_first_name == "Bob"
+        assert preview.is_valid is True
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_get_invite_preview_expired():
+    """Test that expired invites show is_valid=False."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "expired@test.com", "Charlie", "Expired")
+
+        # Create an expired invite directly
+        expired_time = datetime.utcnow() - timedelta(days=1)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO friend_invites (inviter_id, token, expires_at)
+                VALUES (:inviter_id, :token, :expires_at)
+                """
+            ),
+            {"inviter_id": user_id, "token": "expired_token_123", "expires_at": expired_time}
+        )
+
+    try:
+        preview = get_invite_preview("expired_token_123")
+        assert preview.is_valid is False
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_get_invite_preview_not_found():
+    """Test getting preview for nonexistent invite."""
+    with pytest.raises(HTTPException) as exc_info:
+        get_invite_preview("nonexistent_token")
+    assert exc_info.value.status_code == 404
+
+
+def test_accept_invite():
+    """Test accepting a friend invite."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "inviter2@test.com", "Dave", "Inviter")
+        accepter_id = _create_test_user(connection, "accepter@test.com", "Eve", "Accepter")
+
+    try:
+        # Create invite
+        invite = create_invite(user_id=inviter_id)
+
+        # Accept invite
+        friend = accept_invite(invite.token, user_id=accepter_id)
+
+        assert isinstance(friend, FriendResponse)
+        assert friend.user_id == inviter_id
+        assert friend.first_name == "Dave"
+        assert friend.last_name == "Inviter"
+
+        # Verify friendship was created
+        with db.engine.begin() as connection:
+            id1, id2 = min(inviter_id, accepter_id), max(inviter_id, accepter_id)
+            friendship = connection.execute(
+                sqlalchemy.text(
+                    "SELECT * FROM friendships WHERE user_id_1 = :id1 AND user_id_2 = :id2"
+                ),
+                {"id1": id1, "id2": id2}
+            ).fetchone()
+            assert friendship is not None
+
+            # Verify invite was marked as used
+            used_invite = connection.execute(
+                sqlalchemy.text("SELECT * FROM friend_invites WHERE token = :token"),
+                {"token": invite.token}
+            ).fetchone()
+            assert used_invite.use_count == 1
+            assert used_invite.accepted_by == accepter_id
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, inviter_id)
+            _cleanup_user(connection, accepter_id)
+
+
+def test_accept_own_invite_fails():
+    """Test that accepting your own invite fails."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "selfaccept@test.com", "Frank", "Self")
+
+    try:
+        invite = create_invite(user_id=user_id)
+
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invite(invite.token, user_id=user_id)
+        assert exc_info.value.status_code == 400
+        assert "own invite" in exc_info.value.detail.lower()
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_accept_expired_invite_fails():
+    """Test that accepting an expired invite fails."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "expiredinviter@test.com", "Grace", "Inviter")
+        accepter_id = _create_test_user(connection, "expiredaccepter@test.com", "Henry", "Accepter")
+
+        # Create an expired invite
+        expired_time = datetime.utcnow() - timedelta(days=1)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO friend_invites (inviter_id, token, expires_at)
+                VALUES (:inviter_id, :token, :expires_at)
+                """
+            ),
+            {"inviter_id": inviter_id, "token": "expired_accept_token", "expires_at": expired_time}
+        )
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invite("expired_accept_token", user_id=accepter_id)
+        assert exc_info.value.status_code == 410
+        assert "expired" in exc_info.value.detail.lower()
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, inviter_id)
+            _cleanup_user(connection, accepter_id)
+
+
+def test_accept_already_friends_fails():
+    """Test that accepting an invite when already friends fails."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "alreadyfriend1@test.com", "Ivy", "One")
+        accepter_id = _create_test_user(connection, "alreadyfriend2@test.com", "Jack", "Two")
+
+        # Create existing friendship
+        id1, id2 = min(inviter_id, accepter_id), max(inviter_id, accepter_id)
+        connection.execute(
+            sqlalchemy.text(
+                "INSERT INTO friendships (user_id_1, user_id_2) VALUES (:id1, :id2)"
+            ),
+            {"id1": id1, "id2": id2}
+        )
+
+    try:
+        invite = create_invite(user_id=inviter_id)
+
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invite(invite.token, user_id=accepter_id)
+        assert exc_info.value.status_code == 409
+        assert "already friends" in exc_info.value.detail.lower()
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, inviter_id)
+            _cleanup_user(connection, accepter_id)
+
+
+# ==================== Pending Invites Tests ====================
+
+def test_get_pending_invites():
+    """Test getting list of pending invites."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "pending@test.com", "Kate", "Pending")
+
+    try:
+        # Create multiple invites
+        create_invite(user_id=user_id)
+        create_invite(user_id=user_id)
+
+        pending = get_pending_invites(user_id=user_id)
+
+        assert isinstance(pending, list)
+        assert len(pending) == 2
+        assert all(isinstance(p, PendingInviteResponse) for p in pending)
+        assert all(p.status == "pending" for p in pending)
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_pending_invites_shows_accepted():
+    """Test that accepted invites show correct status."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "pendinginviter@test.com", "Leo", "Inviter")
+        accepter_id = _create_test_user(connection, "pendingaccepter@test.com", "Mia", "Accepter")
+
+    try:
+        invite = create_invite(user_id=inviter_id)
+        accept_invite(invite.token, user_id=accepter_id)
+
+        pending = get_pending_invites(user_id=inviter_id)
+
+        assert len(pending) == 1
+        assert pending[0].status == "accepted"
+        assert pending[0].accepted_by_name == "Mia Accepter"
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, inviter_id)
+            _cleanup_user(connection, accepter_id)
+
+
+# ==================== Friends List Tests ====================
+
+def test_get_friends():
+    """Test getting list of friends."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "friend1@test.com", "Noah", "Friend1")
+        user2_id = _create_test_user(connection, "friend2@test.com", "Olivia", "Friend2")
+
+    try:
+        # Create friendship via invite
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        # Both users should see each other as friends
+        friends1 = get_friends(user_id=user1_id)
+        friends2 = get_friends(user_id=user2_id)
+
+        assert len(friends1) == 1
+        assert friends1[0].user_id == user2_id
+        assert friends1[0].first_name == "Olivia"
+
+        assert len(friends2) == 1
+        assert friends2[0].user_id == user1_id
+        assert friends2[0].first_name == "Noah"
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_get_friends_empty():
+    """Test getting friends when user has none."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "nofriends@test.com", "Paul", "Lonely")
+
+    try:
+        friends = get_friends(user_id=user_id)
+        assert friends == []
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_get_friend_profile():
+    """Test getting a specific friend's profile."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "profile1@test.com", "Quinn", "Profile1")
+        user2_id = _create_test_user(connection, "profile2@test.com", "Rose", "Profile2")
+
+    try:
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        friend = get_friend(user2_id, user_id=user1_id)
+
+        assert isinstance(friend, FriendResponse)
+        assert friend.user_id == user2_id
+        assert friend.first_name == "Rose"
+        assert friend.last_name == "Profile2"
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_get_friend_not_friends():
+    """Test getting profile of non-friend fails."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "notfriend1@test.com", "Sam", "NotFriend1")
+        user2_id = _create_test_user(connection, "notfriend2@test.com", "Tina", "NotFriend2")
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            get_friend(user2_id, user_id=user1_id)
+        assert exc_info.value.status_code == 404
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+# ==================== Remove Friend Tests ====================
+
+def test_remove_friend():
+    """Test removing a friend."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "remove1@test.com", "Uma", "Remove1")
+        user2_id = _create_test_user(connection, "remove2@test.com", "Victor", "Remove2")
+
+    try:
+        # Create friendship
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        # Remove friend
+        result = remove_friend(user2_id, user_id=user1_id)
+        assert result["ok"] is True
+
+        # Verify friendship is removed
+        friends = get_friends(user_id=user1_id)
+        assert len(friends) == 0
+
+        friends2 = get_friends(user_id=user2_id)
+        assert len(friends2) == 0
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_remove_friend_not_friends():
+    """Test removing non-friend fails."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "removefail1@test.com", "Wendy", "RemoveFail1")
+        user2_id = _create_test_user(connection, "removefail2@test.com", "Xavier", "RemoveFail2")
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            remove_friend(user2_id, user_id=user1_id)
+        assert exc_info.value.status_code == 404
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_either_user_can_remove_friendship():
+    """Test that either user in a friendship can remove it."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "either1@test.com", "Yuki", "Either1")
+        user2_id = _create_test_user(connection, "either2@test.com", "Zara", "Either2")
+
+    try:
+        # Create friendship (user1 invites, user2 accepts)
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        # User2 removes the friendship (not the inviter)
+        result = remove_friend(user1_id, user_id=user2_id)
+        assert result["ok"] is True
+
+        # Verify friendship is removed for both
+        assert len(get_friends(user_id=user1_id)) == 0
+        assert len(get_friends(user_id=user2_id)) == 0
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+# ==================== Edge Cases ====================
+
+def test_multiple_friendships():
+    """Test user can have multiple friends."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "multi@test.com", "Alex", "Multi")
+        friend1_id = _create_test_user(connection, "multifriend1@test.com", "Ben", "Friend1")
+        friend2_id = _create_test_user(connection, "multifriend2@test.com", "Cara", "Friend2")
+        friend3_id = _create_test_user(connection, "multifriend3@test.com", "Dan", "Friend3")
+
+    try:
+        # Create friendships
+        for friend_id in [friend1_id, friend2_id, friend3_id]:
+            invite = create_invite(user_id=user_id)
+            accept_invite(invite.token, user_id=friend_id)
+
+        friends = get_friends(user_id=user_id)
+        assert len(friends) == 3
+        friend_names = [f.first_name for f in friends]
+        assert "Ben" in friend_names
+        assert "Cara" in friend_names
+        assert "Dan" in friend_names
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+            _cleanup_user(connection, friend1_id)
+            _cleanup_user(connection, friend2_id)
+            _cleanup_user(connection, friend3_id)
+
+
+def test_invite_max_uses_exceeded():
+    """Test that invite cannot be used more than max_uses times."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "maxuses@test.com", "Max", "Uses")
+        accepter1_id = _create_test_user(connection, "accepter1@test.com", "First", "Accepter")
+        accepter2_id = _create_test_user(connection, "accepter2@test.com", "Second", "Accepter")
+
+    try:
+        # Create invite with default max_uses=1
+        invite = create_invite(user_id=inviter_id)
+
+        # First user accepts successfully
+        accept_invite(invite.token, user_id=accepter1_id)
+
+        # Second user should fail (max uses exceeded)
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invite(invite.token, user_id=accepter2_id)
+        assert exc_info.value.status_code == 410
+        assert "already been used" in exc_info.value.detail.lower()
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, inviter_id)
+            _cleanup_user(connection, accepter1_id)
+            _cleanup_user(connection, accepter2_id)
+
+
+def test_invite_preview_used_up_shows_invalid():
+    """Test that used up invite preview shows is_valid=False."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "usedupinviter@test.com", "Used", "Inviter")
+        accepter_id = _create_test_user(connection, "usedupaccepter@test.com", "Up", "Accepter")
+
+    try:
+        invite = create_invite(user_id=inviter_id)
+
+        # Preview before acceptance should be valid
+        preview_before = get_invite_preview(invite.token)
+        assert preview_before.is_valid is True
+
+        # Accept the invite
+        accept_invite(invite.token, user_id=accepter_id)
+
+        # Preview after acceptance should be invalid
+        preview_after = get_invite_preview(invite.token)
+        assert preview_after.is_valid is False
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, inviter_id)
+            _cleanup_user(connection, accepter_id)
+
+
+def test_accept_nonexistent_invite_fails():
+    """Test accepting a nonexistent invite returns 404."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "acceptnonexist@test.com", "Accept", "Nothing")
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invite("totally_fake_token_12345", user_id=user_id)
+        assert exc_info.value.status_code == 404
+        assert "not found" in exc_info.value.detail.lower()
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_pending_invites_shows_expired():
+    """Test that expired invites show correct status in pending list."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "pendingexpired@test.com", "Pending", "Expired")
+
+        # Create an expired invite directly
+        expired_time = datetime.utcnow() - timedelta(days=1)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO friend_invites (inviter_id, token, expires_at, created_at)
+                VALUES (:inviter_id, :token, :expires_at, :created_at)
+                """
+            ),
+            {
+                "inviter_id": user_id,
+                "token": "pending_expired_token",
+                "expires_at": expired_time,
+                "created_at": datetime.utcnow() - timedelta(days=8)
+            }
+        )
+
+    try:
+        pending = get_pending_invites(user_id=user_id)
+        assert len(pending) == 1
+        assert pending[0].status == "expired"
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_friend_profile_includes_all_fields():
+    """Test that friend profile response includes all expected fields."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "fullprofile1@test.com", "Full", "Profile1")
+        user2_id = _create_test_user(connection, "fullprofile2@test.com", "Complete", "Profile2")
+
+        # Add profile photo to user2
+        connection.execute(
+            sqlalchemy.text("UPDATE users SET profile_photo_url = :url WHERE id = :id"),
+            {"url": "https://example.com/photo.jpg", "id": user2_id}
+        )
+
+    try:
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        friend = get_friend(user2_id, user_id=user1_id)
+
+        assert friend.user_id == user2_id
+        assert friend.first_name == "Complete"
+        assert friend.last_name == "Profile2"
+        assert friend.profile_photo_url == "https://example.com/photo.jpg"
+        assert friend.member_since is not None
+        assert friend.friendship_since is not None
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_create_multiple_invites():
+    """Test that a user can create multiple invites."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "multiinvite@test.com", "Multi", "Invite")
+
+    try:
+        invite1 = create_invite(user_id=user_id)
+        invite2 = create_invite(user_id=user_id)
+        invite3 = create_invite(user_id=user_id)
+
+        # Each invite should have a unique token
+        assert invite1.token != invite2.token
+        assert invite2.token != invite3.token
+        assert invite1.token != invite3.token
+
+        pending = get_pending_invites(user_id=user_id)
+        assert len(pending) == 3
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_remove_friend_idempotent():
+    """Test that removing a friend twice fails the second time."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "idempotent1@test.com", "Idem", "Potent1")
+        user2_id = _create_test_user(connection, "idempotent2@test.com", "Idem", "Potent2")
+
+    try:
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        # First removal succeeds
+        result = remove_friend(user2_id, user_id=user1_id)
+        assert result["ok"] is True
+
+        # Second removal fails (no longer friends)
+        with pytest.raises(HTTPException) as exc_info:
+            remove_friend(user2_id, user_id=user1_id)
+        assert exc_info.value.status_code == 404
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_friendship_symmetry():
+    """Test that friendships work symmetrically for both users."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "symmetry1@test.com", "Sym", "One")
+        user2_id = _create_test_user(connection, "symmetry2@test.com", "Sym", "Two")
+
+    try:
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        # Both users can see each other
+        friend1 = get_friend(user2_id, user_id=user1_id)
+        friend2 = get_friend(user1_id, user_id=user2_id)
+
+        assert friend1.user_id == user2_id
+        assert friend2.user_id == user1_id
+
+        # Both users can get their friends list
+        friends1 = get_friends(user_id=user1_id)
+        friends2 = get_friends(user_id=user2_id)
+
+        assert len(friends1) == 1
+        assert len(friends2) == 1
+        assert friends1[0].user_id == user2_id
+        assert friends2[0].user_id == user1_id
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_inviter_user_not_found():
+    """Test that invite preview handles deleted inviter gracefully."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "deletedinviter@test.com", "Deleted", "Inviter")
+
+        # Create invite
+        invite_result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO friend_invites (inviter_id, token, expires_at)
+                VALUES (:inviter_id, :token, :expires_at)
+                RETURNING token
+                """
+            ),
+            {
+                "inviter_id": inviter_id,
+                "token": "orphaned_invite_token",
+                "expires_at": datetime.utcnow() + timedelta(days=7)
+            }
+        )
+        token = invite_result.fetchone()[0]
+
+        # Delete the inviter (this should cascade delete the invite due to FK)
+        connection.execute(
+            sqlalchemy.text("DELETE FROM friend_invites WHERE inviter_id = :inviter_id"),
+            {"inviter_id": inviter_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": inviter_id}
+        )
+
+    # Preview should return 404 since invite was cascade deleted
+    with pytest.raises(HTTPException) as exc_info:
+        get_invite_preview(token)
+    assert exc_info.value.status_code == 404
+
+
+def test_friend_with_empty_name():
+    """Test friend profile handles users with empty names."""
+    with db.engine.begin() as connection:
+        user1_id = _create_test_user(connection, "emptyname1@test.com", "", "")
+        user2_id = _create_test_user(connection, "emptyname2@test.com", "Has", "Name")
+
+    try:
+        invite = create_invite(user_id=user1_id)
+        accept_invite(invite.token, user_id=user2_id)
+
+        # Getting friend with empty name should return empty strings
+        friend = get_friend(user1_id, user_id=user2_id)
+        assert friend.first_name == ""
+        assert friend.last_name == ""
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user1_id)
+            _cleanup_user(connection, user2_id)
+
+
+def test_accept_invite_same_token_twice_by_same_user():
+    """Test that same user can't accept same invite twice (already friends)."""
+    with db.engine.begin() as connection:
+        inviter_id = _create_test_user(connection, "sametwice1@test.com", "Same", "Twice1")
+        accepter_id = _create_test_user(connection, "sametwice2@test.com", "Same", "Twice2")
+
+    try:
+        invite = create_invite(user_id=inviter_id)
+        accept_invite(invite.token, user_id=accepter_id)
+
+        # Try to accept again with new invite - should fail (already friends)
+        invite2 = create_invite(user_id=inviter_id)
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invite(invite2.token, user_id=accepter_id)
+        assert exc_info.value.status_code == 409
+        assert "already friends" in exc_info.value.detail.lower()
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, inviter_id)
+            _cleanup_user(connection, accepter_id)
+
+
+def test_pending_invites_empty():
+    """Test pending invites returns empty list when no invites."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "noinvites@test.com", "No", "Invites")
+
+    try:
+        pending = get_pending_invites(user_id=user_id)
+        assert pending == []
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_friends_list_ordered_by_friendship_date():
+    """Test that friends list is ordered by friendship date (most recent first)."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "ordered@test.com", "Order", "Main")
+        friend1_id = _create_test_user(connection, "ordered1@test.com", "First", "Friend")
+        friend2_id = _create_test_user(connection, "ordered2@test.com", "Second", "Friend")
+        friend3_id = _create_test_user(connection, "ordered3@test.com", "Third", "Friend")
+
+    try:
+        # Create friendships in order
+        invite1 = create_invite(user_id=user_id)
+        accept_invite(invite1.token, user_id=friend1_id)
+
+        invite2 = create_invite(user_id=user_id)
+        accept_invite(invite2.token, user_id=friend2_id)
+
+        invite3 = create_invite(user_id=user_id)
+        accept_invite(invite3.token, user_id=friend3_id)
+
+        friends = get_friends(user_id=user_id)
+
+        # Most recently added friend should be first
+        assert len(friends) == 3
+        assert friends[0].first_name == "Third"
+        assert friends[1].first_name == "Second"
+        assert friends[2].first_name == "First"
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+            _cleanup_user(connection, friend1_id)
+            _cleanup_user(connection, friend2_id)
+            _cleanup_user(connection, friend3_id)

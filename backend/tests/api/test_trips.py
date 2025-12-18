@@ -3098,3 +3098,732 @@ def test_create_trip_start_after_eta():
         # If it fails with validation error, that's the expected safe behavior
         assert e.status_code == 400
         cleanup_test_data(user_id)
+
+
+# =============================================================================
+# FRIEND CONTACT TESTS
+# =============================================================================
+
+def setup_test_user_with_friend():
+    """Helper function to set up test user with a friend."""
+    test_email = "test_friend@homeboundapp.com"
+    friend_email = "friend@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Clean up existing data for both users
+        for email in [test_email, friend_email]:
+            # Clean up trip_safety_contacts
+            connection.execute(
+                sqlalchemy.text("""
+                    DELETE FROM trip_safety_contacts
+                    WHERE trip_id IN (SELECT id FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email))
+                """),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM friend_invites WHERE inviter_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+
+        # Clean up friendships
+        connection.execute(
+            sqlalchemy.text("""
+                DELETE FROM friendships
+                WHERE user_id_1 IN (SELECT id FROM users WHERE email IN (:email1, :email2))
+                   OR user_id_2 IN (SELECT id FROM users WHERE email IN (:email1, :email2))
+            """),
+            {"email1": test_email, "email2": friend_email}
+        )
+
+        # Delete users
+        for email in [test_email, friend_email]:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+                {"email": email}
+            )
+
+        # Create main user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Test",
+                "last_name": "User",
+                "age": 30
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create friend user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": friend_email,
+                "first_name": "Friend",
+                "last_name": "User",
+                "age": 28
+            }
+        )
+        friend_id = result.fetchone()[0]
+
+        # Create friendship (with correct ordering)
+        id1, id2 = min(user_id, friend_id), max(user_id, friend_id)
+        connection.execute(
+            sqlalchemy.text(
+                "INSERT INTO friendships (user_id_1, user_id_2) VALUES (:id1, :id2)"
+            ),
+            {"id1": id1, "id2": id2}
+        )
+
+        # Create email contact for comparison tests
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "name": "Email Contact",
+                "email": "emailcontact@test.com"
+            }
+        )
+        contact_id = result.fetchone()[0]
+
+    return user_id, friend_id, contact_id
+
+
+def cleanup_test_friend_data(user_id, friend_id):
+    """Helper function to clean up test data including friends."""
+    with db.engine.begin() as connection:
+        for uid in [user_id, friend_id]:
+            # Clean up trip_safety_contacts
+            connection.execute(
+                sqlalchemy.text("""
+                    DELETE FROM trip_safety_contacts
+                    WHERE trip_id IN (SELECT id FROM trips WHERE user_id = :user_id)
+                """),
+                {"user_id": uid}
+            )
+            connection.execute(
+                sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE user_id = :user_id"),
+                {"user_id": uid}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE user_id = :user_id"),
+                {"user_id": uid}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trips WHERE user_id = :user_id"),
+                {"user_id": uid}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+                {"user_id": uid}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM friend_invites WHERE inviter_id = :user_id"),
+                {"user_id": uid}
+            )
+
+        # Clean up friendships
+        id1, id2 = min(user_id, friend_id), max(user_id, friend_id)
+        connection.execute(
+            sqlalchemy.text("DELETE FROM friendships WHERE user_id_1 = :id1 AND user_id_2 = :id2"),
+            {"id1": id1, "id2": id2}
+        )
+
+        # Delete users
+        for uid in [user_id, friend_id]:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": uid}
+            )
+
+
+def test_create_trip_with_friend_contact():
+    """Test creating a trip with a friend as safety contact."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Trip with Friend Contact",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id,
+        friend_contact1=friend_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.contact1 == contact_id
+    assert trip.friend_contact1 == friend_id
+    assert trip.friend_contact2 is None
+    assert trip.friend_contact3 is None
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_create_trip_friend_as_primary_contact():
+    """Test creating a trip with friend as main safety contact along with email contact.
+
+    NOTE: The database has a NOT NULL constraint on contact1, so at least one
+    email contact is required. Friend contacts are additional safety contacts
+    that receive push notifications instead of email.
+    """
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Friend Primary Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
+        contact1=contact_id,
+        friend_contact1=friend_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.contact1 == contact_id
+    assert trip.friend_contact1 == friend_id
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_create_trip_with_invalid_friend_contact():
+    """Test that creating a trip with a non-friend fails."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create a user who is NOT a friend
+    with db.engine.begin() as connection:
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": "notafriend@test.com",
+                "first_name": "Not",
+                "last_name": "Friend",
+                "age": 25
+            }
+        )
+        non_friend_id = result.fetchone()[0]
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Invalid Friend Contact Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        friend_contact1=non_friend_id  # Not actually a friend!
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 404
+    assert "not in your friends list" in exc_info.value.detail.lower()
+
+    # Cleanup
+    cleanup_test_data(user_id)
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": non_friend_id}
+        )
+
+
+def test_create_trip_with_multiple_friend_contacts():
+    """Test creating a trip with multiple friend contacts."""
+    test_email = "multi_friend_test@homeboundapp.com"
+
+    with db.engine.begin() as connection:
+        # Cleanup
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trip_safety_contacts WHERE trip_id IN (SELECT id FROM trips WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'multi_friend%'))"),
+            {}
+        )
+        connection.execute(
+            sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'multi_friend%')"),
+            {}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'multi_friend%')"),
+            {}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'multi_friend%')"),
+            {}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'multi_friend%')"),
+            {}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM friendships WHERE user_id_1 IN (SELECT id FROM users WHERE email LIKE 'multi_friend%') OR user_id_2 IN (SELECT id FROM users WHERE email LIKE 'multi_friend%')"),
+            {}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email LIKE 'multi_friend%'"),
+            {}
+        )
+
+        # Create main user
+        result = connection.execute(
+            sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age) VALUES (:email, 'Main', 'User', 30) RETURNING id"),
+            {"email": test_email}
+        )
+        user_id = result.fetchone()[0]
+
+        # Create email contact (required by NOT NULL constraint on contact1)
+        result = connection.execute(
+            sqlalchemy.text("INSERT INTO contacts (user_id, name, email) VALUES (:user_id, 'Email Contact', 'email@test.com') RETURNING id"),
+            {"user_id": user_id}
+        )
+        contact_id = result.fetchone()[0]
+
+        # Create 3 friends
+        friend_ids = []
+        for i in range(3):
+            result = connection.execute(
+                sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age) VALUES (:email, :name, 'Friend', 25) RETURNING id"),
+                {"email": f"multi_friend{i}@test.com", "name": f"Friend{i}"}
+            )
+            friend_id = result.fetchone()[0]
+            friend_ids.append(friend_id)
+
+            # Create friendship
+            id1, id2 = min(user_id, friend_id), max(user_id, friend_id)
+            connection.execute(
+                sqlalchemy.text("INSERT INTO friendships (user_id_1, user_id_2) VALUES (:id1, :id2)"),
+                {"id1": id1, "id2": id2}
+            )
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Multi Friend Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,  # Required by NOT NULL constraint
+        friend_contact1=friend_ids[0],
+        friend_contact2=friend_ids[1],
+        friend_contact3=friend_ids[2]
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.contact1 == contact_id
+    assert trip.friend_contact1 == friend_ids[0]
+    assert trip.friend_contact2 == friend_ids[1]
+    assert trip.friend_contact3 == friend_ids[2]
+
+    # Cleanup
+    with db.engine.begin() as connection:
+        connection.execute(sqlalchemy.text("DELETE FROM trip_safety_contacts WHERE trip_id IN (SELECT id FROM trips WHERE user_id = :user_id)"), {"user_id": user_id})
+        connection.execute(sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE user_id = :user_id"), {"user_id": user_id})
+        connection.execute(sqlalchemy.text("DELETE FROM events WHERE user_id = :user_id"), {"user_id": user_id})
+        connection.execute(sqlalchemy.text("DELETE FROM trips WHERE user_id = :user_id"), {"user_id": user_id})
+        connection.execute(sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"), {"user_id": user_id})
+        connection.execute(sqlalchemy.text("DELETE FROM friendships WHERE user_id_1 = :user_id OR user_id_2 = :user_id"), {"user_id": user_id})
+        connection.execute(sqlalchemy.text("DELETE FROM users WHERE id = :user_id"), {"user_id": user_id})
+        for fid in friend_ids:
+            connection.execute(sqlalchemy.text("DELETE FROM users WHERE id = :user_id"), {"user_id": fid})
+
+
+def test_create_trip_with_both_email_and_friend_contacts():
+    """Test creating a trip with both email contacts and friend contacts."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Mixed Contacts Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,      # Email contact
+        friend_contact1=friend_id  # Friend contact
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.contact1 == contact_id
+    assert trip.friend_contact1 == friend_id
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_get_trip_includes_friend_contacts():
+    """Test that get_trip returns friend contact fields."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Get Trip Friend Test",
+        activity="Hiking",
+        start=now + timedelta(hours=24),  # Future = planned
+        eta=now + timedelta(hours=26),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        friend_contact1=friend_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    created = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Fetch the trip
+    fetched = get_trip(created.id, user_id=user_id)
+
+    assert fetched.contact1 == contact_id
+    assert fetched.friend_contact1 == friend_id
+    assert fetched.friend_contact2 is None
+    assert fetched.friend_contact3 is None
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_get_trips_includes_friend_contacts():
+    """Test that get_trips returns friend contact fields for all trips."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    # Create trip with friend contact
+    create_trip(
+        TripCreate(
+            title="Trip With Friend",
+            activity="Hiking",
+            start=now,
+            eta=now + timedelta(hours=2),
+            grace_min=30,
+            location_text="Trail A",
+            contact1=contact_id,
+            friend_contact1=friend_id
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    # Create trip without friend contact
+    create_trip(
+        TripCreate(
+            title="Trip Without Friend",
+            activity="Biking",
+            start=now,
+            eta=now + timedelta(hours=1),
+            grace_min=20,
+            location_text="Trail B",
+            contact1=contact_id
+        ),
+        background_tasks,
+        user_id=user_id
+    )
+
+    trips = get_trips(user_id=user_id)
+
+    trip_with_friend = next(t for t in trips if t.title == "Trip With Friend")
+    trip_without_friend = next(t for t in trips if t.title == "Trip Without Friend")
+
+    assert trip_with_friend.friend_contact1 == friend_id
+    assert trip_without_friend.friend_contact1 is None
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_get_active_trip_includes_friend_contacts():
+    """Test that get_active_trip returns friend contact fields."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Active With Friend",
+        activity="Running",
+        start=now,  # Starts now = active
+        eta=now + timedelta(hours=1),
+        grace_min=15,
+        contact1=contact_id,
+        friend_contact1=friend_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    create_trip(trip_data, background_tasks, user_id=user_id)
+
+    active = get_active_trip(user_id=user_id)
+
+    assert active is not None
+    assert active.friend_contact1 == friend_id
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_update_trip_add_friend_contact():
+    """Test updating a trip to add a friend contact."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    # Create trip without friend contact (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Add Friend Later",
+        activity="Hiking",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=26),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    assert trip.friend_contact1 is None
+
+    # Update to add friend contact
+    update_data = TripUpdate(friend_contact1=friend_id)
+    updated = update_trip(trip.id, update_data, user_id=user_id)
+
+    assert updated.friend_contact1 == friend_id
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_update_trip_invalid_friend_contact():
+    """Test that updating a trip with an invalid friend contact fails."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    # Create a non-friend user
+    with db.engine.begin() as connection:
+        result = connection.execute(
+            sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age) VALUES ('nonfriend_update@test.com', 'Non', 'Friend', 25) RETURNING id"),
+            {}
+        )
+        non_friend_id = result.fetchone()[0]
+
+    # Create trip (future start = planned)
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Update Invalid Friend",
+        activity="Hiking",
+        start=now + timedelta(hours=24),
+        eta=now + timedelta(hours=26),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Try to update with non-friend - should fail
+    update_data = TripUpdate(friend_contact1=non_friend_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_trip(trip.id, update_data, user_id=user_id)
+
+    assert exc_info.value.status_code == 404
+    assert "not in your friends list" in exc_info.value.detail.lower()
+
+    # Cleanup
+    cleanup_test_friend_data(user_id, friend_id)
+    with db.engine.begin() as connection:
+        connection.execute(sqlalchemy.text("DELETE FROM users WHERE id = :user_id"), {"user_id": non_friend_id})
+
+
+def test_create_trip_no_contacts_fails():
+    """Test that creating a trip with no contacts at all fails."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="No Contacts Trip",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail"
+        # No contact1, no friend_contact1
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert exc_info.value.status_code == 400
+    assert "emergency contact" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_trip_safety_contacts_junction_table():
+    """Test that friend contacts are properly stored in the junction table."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Junction Table Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        friend_contact1=friend_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Verify junction table has the friend contact
+    with db.engine.begin() as connection:
+        friend_entries = connection.execute(
+            sqlalchemy.text("""
+                SELECT friend_user_id, position
+                FROM trip_safety_contacts
+                WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+            """),
+            {"trip_id": trip.id}
+        ).fetchall()
+
+        assert len(friend_entries) == 1
+        assert friend_entries[0].friend_user_id == friend_id
+
+        # Also verify email contact is in junction table
+        contact_entries = connection.execute(
+            sqlalchemy.text("""
+                SELECT contact_id, position
+                FROM trip_safety_contacts
+                WHERE trip_id = :trip_id AND contact_id IS NOT NULL
+            """),
+            {"trip_id": trip.id}
+        ).fetchall()
+
+        assert len(contact_entries) == 1
+        assert contact_entries[0].contact_id == contact_id
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_trip_delete_cascades_to_safety_contacts():
+    """Test that deleting a trip also deletes entries from trip_safety_contacts."""
+    user_id, friend_id, contact_id = setup_test_user_with_friend()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Cascade Delete Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        friend_contact1=friend_id
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    trip_id = trip.id
+
+    # Verify junction table entries exist
+    with db.engine.begin() as connection:
+        count = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) as cnt FROM trip_safety_contacts WHERE trip_id = :trip_id"),
+            {"trip_id": trip_id}
+        ).fetchone()
+        assert count.cnt == 2  # One email contact + one friend contact
+
+    # Delete the trip
+    delete_trip(trip_id, user_id=user_id)
+
+    # Verify junction table entries are gone
+    with db.engine.begin() as connection:
+        count = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) as cnt FROM trip_safety_contacts WHERE trip_id = :trip_id"),
+            {"trip_id": trip_id}
+        ).fetchone()
+        assert count.cnt == 0
+
+    cleanup_test_friend_data(user_id, friend_id)
+
+
+def test_friend_contact_defaults_to_none():
+    """Test that friend_contact fields default to None when not provided."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Default Friend Contact Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+        # No friend_contact fields specified
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.friend_contact1 is None
+    assert trip.friend_contact2 is None
+    assert trip.friend_contact3 is None
+
+    cleanup_test_data(user_id)

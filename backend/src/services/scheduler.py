@@ -10,7 +10,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from .. import database as db
 from ..config import get_settings
-from .notifications import send_overdue_notifications, send_push_to_user
+from .notifications import (
+    send_overdue_notifications,
+    send_push_to_user,
+    send_friend_overdue_push,
+)
 
 settings = get_settings()
 log = logging.getLogger(__name__)
@@ -137,7 +141,33 @@ async def check_overdue_trips():
                                 await send_overdue_notifications(trip, list(contacts), user_name, user_timezone, start_location)
                                 log.info(f"[Scheduler] Overdue notifications sent for trip {trip_id}")
 
-                                # Mark as notified
+                            # Fetch friend safety contacts from junction table
+                            friend_contacts = conn.execute(
+                                sqlalchemy.text("""
+                                    SELECT tsc.friend_user_id
+                                    FROM trip_safety_contacts tsc
+                                    WHERE tsc.trip_id = :trip_id
+                                    AND tsc.friend_user_id IS NOT NULL
+                                """),
+                                {"trip_id": trip_id}
+                            ).fetchall()
+
+                            if friend_contacts:
+                                log.info(f"[Scheduler] Sending overdue push notifications to {len(friend_contacts)} friend contacts for trip {trip_id}")
+                                for friend in friend_contacts:
+                                    await send_friend_overdue_push(
+                                        friend_user_id=friend.friend_user_id,
+                                        user_name=user_name,
+                                        trip_title=trip.title,
+                                        trip_id=trip_id
+                                    )
+                                log.info(f"[Scheduler] Friend overdue notifications sent for trip {trip_id}")
+
+                            # Only warn if no contacts of any kind were found
+                            if not contacts and not friend_contacts:
+                                log.warning(f"[Scheduler] Trip {trip_id}: No contacts (email or friend) found, skipping notification")
+                            else:
+                                # Mark as notified (only if we actually sent notifications)
                                 conn.execute(
                                     sqlalchemy.text("""
                                         INSERT INTO events (user_id, trip_id, what, timestamp)
@@ -149,8 +179,6 @@ async def check_overdue_trips():
                                         "timestamp": datetime.utcnow()
                                     }
                                 )
-                            else:
-                                log.warning(f"[Scheduler] Trip {trip_id}: No contacts with email found, skipping notification")
 
                             # Update trip status
                             conn.execute(

@@ -23,6 +23,104 @@ from src.services.notifications import (
 
 log = logging.getLogger(__name__)
 
+
+def _is_friend(connection, user_id: int, friend_user_id: int) -> bool:
+    """Check if two users are friends."""
+    id1, id2 = min(user_id, friend_user_id), max(user_id, friend_user_id)
+    result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT id FROM friendships
+            WHERE user_id_1 = :id1 AND user_id_2 = :id2
+            """
+        ),
+        {"id1": id1, "id2": id2}
+    ).fetchone()
+    return result is not None
+
+
+def _save_trip_safety_contacts(
+    connection,
+    trip_id: int,
+    contact_ids: list[int | None],
+    friend_user_ids: list[int | None]
+) -> None:
+    """Save trip safety contacts to the junction table.
+
+    This stores both email contacts and friend contacts in trip_safety_contacts.
+    """
+    # Clear existing entries for this trip
+    connection.execute(
+        sqlalchemy.text("DELETE FROM trip_safety_contacts WHERE trip_id = :trip_id"),
+        {"trip_id": trip_id}
+    )
+
+    position = 1
+
+    # Add email contacts (contact1, contact2, contact3)
+    for contact_id in contact_ids:
+        if contact_id is not None:
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO trip_safety_contacts (trip_id, contact_id, position)
+                    VALUES (:trip_id, :contact_id, :position)
+                    """
+                ),
+                {"trip_id": trip_id, "contact_id": contact_id, "position": position}
+            )
+            position += 1
+
+    # Add friend contacts (friend_contact1, friend_contact2, friend_contact3)
+    for friend_user_id in friend_user_ids:
+        if friend_user_id is not None:
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO trip_safety_contacts (trip_id, friend_user_id, position)
+                    VALUES (:trip_id, :friend_user_id, :position)
+                    """
+                ),
+                {"trip_id": trip_id, "friend_user_id": friend_user_id, "position": position}
+            )
+            position += 1
+
+
+def _get_friend_contacts_for_trip(connection, trip_id: int) -> dict[str, int | None]:
+    """Get friend contacts from the junction table for a trip.
+
+    Returns a dict with friend_contact1, friend_contact2, friend_contact3.
+    """
+    result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT friend_user_id, position
+            FROM trip_safety_contacts
+            WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+            ORDER BY position
+            """
+        ),
+        {"trip_id": trip_id}
+    ).fetchall()
+
+    # Map positions to friend_contact fields
+    friend_contacts: dict[str, int | None] = {
+        "friend_contact1": None,
+        "friend_contact2": None,
+        "friend_contact3": None
+    }
+
+    for i, row in enumerate(result):
+        if i == 0:
+            friend_contacts["friend_contact1"] = row.friend_user_id
+        elif i == 1:
+            friend_contacts["friend_contact2"] = row.friend_user_id
+        elif i == 2:
+            friend_contacts["friend_contact3"] = row.friend_user_id
+
+    return friend_contacts
+
+
 router = APIRouter(
     prefix="/api/v1/trips",
     tags=["trips"],
@@ -78,9 +176,12 @@ class TripCreate(BaseModel):
     start_lon: float | None = None
     has_separate_locations: bool = False  # True if trip has separate start and destination
     notes: str | None = None
-    contact1: int | None = None  # Contact ID reference
+    contact1: int | None = None  # Contact ID reference (email contact)
     contact2: int | None = None
     contact3: int | None = None
+    friend_contact1: int | None = None  # Friend user ID reference (gets push notifications)
+    friend_contact2: int | None = None
+    friend_contact3: int | None = None
     timezone: str | None = None  # User's timezone (e.g., "America/New_York") - used for notifications
     start_timezone: str | None = None  # Timezone for start time (e.g., "America/Los_Angeles")
     eta_timezone: str | None = None  # Timezone for return time (e.g., "America/New_York")
@@ -105,9 +206,12 @@ class TripUpdate(BaseModel):
     start_lon: float | None = None
     has_separate_locations: bool | None = None
     notes: str | None = None
-    contact1: int | None = None  # Contact ID reference
+    contact1: int | None = None  # Contact ID reference (email contact)
     contact2: int | None = None
     contact3: int | None = None
+    friend_contact1: int | None = None  # Friend user ID reference (gets push notifications)
+    friend_contact2: int | None = None
+    friend_contact3: int | None = None
     timezone: str | None = None
     start_timezone: str | None = None
     eta_timezone: str | None = None
@@ -137,9 +241,12 @@ class TripResponse(BaseModel):
     completed_at: str | None
     last_checkin: str | None
     created_at: str
-    contact1: int | None
+    contact1: int | None  # Email contact ID
     contact2: int | None
     contact3: int | None
+    friend_contact1: int | None = None  # Friend user ID
+    friend_contact2: int | None = None
+    friend_contact3: int | None = None
     checkin_token: str | None
     checkout_token: str | None
     checkin_interval_min: int | None
@@ -172,14 +279,19 @@ def create_trip(
     log.info(f"[Trips] title={body.title}, activity={body.activity}")
     log.info(f"[Trips] start={body.start}, eta={body.eta}")
     log.info(f"[Trips] Contacts: {body.contact1}, {body.contact2}, {body.contact3}")
+    log.info(f"[Trips] Friend contacts: {body.friend_contact1}, {body.friend_contact2}, {body.friend_contact3}")
     log.info(f"[Trips] Location: {body.location_text}, ({body.gen_lat}, {body.gen_lon})")
 
-    # Validate that at least contact1 is provided (required by database)
-    if body.contact1 is None:
-        log.warning("[Trips] No contact1 provided")
+    # Validate that at least one safety contact is provided (email contact OR friend)
+    has_any_contact = (
+        body.contact1 is not None or
+        body.friend_contact1 is not None
+    )
+    if not has_any_contact:
+        log.warning("[Trips] No safety contact provided")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one emergency contact (contact1) is required"
+            detail="At least one emergency contact (contact1 or friend_contact1) is required"
         )
 
     with db.engine.begin() as connection:
@@ -250,6 +362,19 @@ def create_trip(
                     )
 
                 log.info(f"[Trips] Contact {contact_id} verified")
+
+        # Verify friend contacts are actually friends with the user
+        log.info("[Trips] Verifying friend contacts...")
+        for friend_id in [body.friend_contact1, body.friend_contact2, body.friend_contact3]:
+            if friend_id is not None:
+                log.info(f"[Trips] Checking friend_id={friend_id}")
+                if not _is_friend(connection, user_id, friend_id):
+                    log.warning(f"[Trips] User {friend_id} is not a friend!")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"User {friend_id} is not in your friends list"
+                    )
+                log.info(f"[Trips] Friend {friend_id} verified")
 
         # Generate unique tokens for checkin/checkout
         checkin_token = secrets.token_urlsafe(32)
@@ -362,6 +487,14 @@ def create_trip(
         assert row is not None
         trip_id = row[0]
 
+        # Save to trip_safety_contacts junction table (supports both email contacts and friends)
+        _save_trip_safety_contacts(
+            connection,
+            trip_id,
+            contact_ids=[body.contact1, body.contact2, body.contact3],
+            friend_user_ids=[body.friend_contact1, body.friend_contact2, body.friend_contact3]
+        )
+
         # Fetch created trip with full activity data
         trip = connection.execute(
             sqlalchemy.text(
@@ -469,6 +602,9 @@ def create_trip(
         num_contacts = len(contacts_for_email)
         log.info(f"[Trips] Scheduled {email_type} emails for {num_contacts} contacts")
 
+        # Get friend contacts from junction table
+        friend_contacts = _get_friend_contacts_for_trip(connection, trip_id)
+
         return TripResponse(
             id=trip["id"],
             user_id=trip["user_id"],
@@ -492,6 +628,9 @@ def create_trip(
             contact1=trip["contact1"],
             contact2=trip["contact2"],
             contact3=trip["contact3"],
+            friend_contact1=friend_contacts["friend_contact1"],
+            friend_contact2=friend_contacts["friend_contact2"],
+            friend_contact3=friend_contacts["friend_contact3"],
             checkin_token=trip["checkin_token"],
             checkout_token=trip["checkout_token"],
             checkin_interval_min=trip["checkin_interval_min"],
@@ -545,6 +684,9 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                 order=trip["activity_order"]
             )
 
+            # Get friend contacts from junction table
+            friend_contacts = _get_friend_contacts_for_trip(connection, trip["id"])
+
             result.append(
                 TripResponse(
                     id=trip["id"],
@@ -569,6 +711,9 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     contact1=trip["contact1"],
                     contact2=trip["contact2"],
                     contact3=trip["contact3"],
+                    friend_contact1=friend_contacts["friend_contact1"],
+                    friend_contact2=friend_contacts["friend_contact2"],
+                    friend_contact3=friend_contacts["friend_contact3"],
                     checkin_token=trip["checkin_token"],
                     checkout_token=trip["checkout_token"],
                     checkin_interval_min=trip["checkin_interval_min"],
@@ -630,6 +775,9 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             order=trip["activity_order"]
         )
 
+        # Get friend contacts from junction table
+        friend_contacts = _get_friend_contacts_for_trip(connection, trip["id"])
+
         return TripResponse(
             id=trip["id"],
             user_id=trip["user_id"],
@@ -653,6 +801,9 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             contact1=trip["contact1"],
             contact2=trip["contact2"],
             contact3=trip["contact3"],
+            friend_contact1=friend_contacts["friend_contact1"],
+            friend_contact2=friend_contacts["friend_contact2"],
+            friend_contact3=friend_contacts["friend_contact3"],
             checkin_token=trip["checkin_token"],
             checkout_token=trip["checkout_token"],
             checkin_interval_min=trip["checkin_interval_min"],
@@ -709,6 +860,9 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             order=trip["activity_order"]
         )
 
+        # Get friend contacts from junction table
+        friend_contacts = _get_friend_contacts_for_trip(connection, trip["id"])
+
         return TripResponse(
             id=trip["id"],
             user_id=trip["user_id"],
@@ -732,6 +886,9 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             contact1=trip["contact1"],
             contact2=trip["contact2"],
             contact3=trip["contact3"],
+            friend_contact1=friend_contacts["friend_contact1"],
+            friend_contact2=friend_contacts["friend_contact2"],
+            friend_contact3=friend_contacts["friend_contact3"],
             checkin_token=trip["checkin_token"],
             checkout_token=trip["checkout_token"],
             checkin_interval_min=trip["checkin_interval_min"],
@@ -826,6 +983,16 @@ def update_trip(
                 update_fields.append(f"{contact_field} = :{contact_field}")
                 params[contact_field] = contact_id
 
+        # Handle friend contact validation if any friend contacts are being updated
+        for friend_field in ["friend_contact1", "friend_contact2", "friend_contact3"]:
+            friend_id = getattr(body, friend_field)
+            if friend_id is not None:
+                if not _is_friend(connection, user_id, friend_id):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"User {friend_id} is not in your friends list"
+                    )
+
         # Handle simple field updates
         simple_fields = {
             "title": body.title,
@@ -871,6 +1038,41 @@ def update_trip(
             connection.execute(sqlalchemy.text(update_sql), params)
             log.info(f"[Trips] Updated trip {trip_id}: {update_fields}")
 
+        # Update trip_safety_contacts junction table if contacts changed
+        any_contact_changed = any([
+            body.contact1 is not None,
+            body.contact2 is not None,
+            body.contact3 is not None,
+            body.friend_contact1 is not None,
+            body.friend_contact2 is not None,
+            body.friend_contact3 is not None,
+        ])
+        if any_contact_changed:
+            # Get current contact values from DB (for unchanged fields)
+            current = connection.execute(
+                sqlalchemy.text("SELECT contact1, contact2, contact3 FROM trips WHERE id = :trip_id"),
+                {"trip_id": trip_id}
+            ).fetchone()
+
+            # Use new value if provided, else keep current
+            contact1 = body.contact1 if body.contact1 is not None else current.contact1
+            contact2 = body.contact2 if body.contact2 is not None else current.contact2
+            contact3 = body.contact3 if body.contact3 is not None else current.contact3
+
+            # Get current friend contacts from junction table
+            current_friends = _get_friend_contacts_for_trip(connection, trip_id)
+            friend1 = body.friend_contact1 if body.friend_contact1 is not None else current_friends["friend_contact1"]
+            friend2 = body.friend_contact2 if body.friend_contact2 is not None else current_friends["friend_contact2"]
+            friend3 = body.friend_contact3 if body.friend_contact3 is not None else current_friends["friend_contact3"]
+
+            # Save updated contacts to junction table
+            _save_trip_safety_contacts(
+                connection,
+                trip_id,
+                contact_ids=[contact1, contact2, contact3],
+                friend_user_ids=[friend1, friend2, friend3]
+            )
+
         # Fetch updated trip with full activity data
         updated_trip = connection.execute(
             sqlalchemy.text(
@@ -907,6 +1109,9 @@ def update_trip(
             order=updated_trip["activity_order"]
         )
 
+        # Get friend contacts from junction table
+        friend_contacts = _get_friend_contacts_for_trip(connection, trip_id)
+
         return TripResponse(
             id=updated_trip["id"],
             user_id=updated_trip["user_id"],
@@ -930,6 +1135,9 @@ def update_trip(
             contact1=updated_trip["contact1"],
             contact2=updated_trip["contact2"],
             contact3=updated_trip["contact3"],
+            friend_contact1=friend_contacts["friend_contact1"],
+            friend_contact2=friend_contacts["friend_contact2"],
+            friend_contact3=friend_contacts["friend_contact3"],
             checkin_token=updated_trip["checkin_token"],
             checkout_token=updated_trip["checkout_token"],
             checkin_interval_min=updated_trip["checkin_interval_min"],
