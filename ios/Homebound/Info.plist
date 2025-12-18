@@ -88,6 +88,17 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.homeboundapp.Homebound</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>homebound</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Homebound needs camera access to scan QR codes for adding friends.</string>
 </dict>

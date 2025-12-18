@@ -29,8 +29,8 @@ struct HomeboundApp: App {
                         .environmentObject(preferences)
                         .onOpenURL { url in
                             // Save friend invite token to show after login
-                            if url.pathComponents.count >= 3 && url.pathComponents[1] == "f" {
-                                pendingFriendInviteToken = url.pathComponents[2]
+                            if let token = extractFriendToken(from: url) {
+                                pendingFriendInviteToken = token
                             }
                         }
                 } else if !session.isInitialDataLoaded {
@@ -47,8 +47,8 @@ struct HomeboundApp: App {
                         .environmentObject(preferences)
                         .onOpenURL { url in
                             // Save friend invite token to show after onboarding
-                            if url.pathComponents.count >= 3 && url.pathComponents[1] == "f" {
-                                pendingFriendInviteToken = url.pathComponents[2]
+                            if let token = extractFriendToken(from: url) {
+                                pendingFriendInviteToken = token
                             }
                         }
                         .transition(.move(edge: .trailing))
@@ -112,8 +112,42 @@ struct HomeboundApp: App {
         }
     }
 
+    /// Extract friend invite token from URL, handling both custom scheme and universal link formats
+    private func extractFriendToken(from url: URL) -> String? {
+        // Custom URL scheme: homebound://f/{token}
+        if url.scheme == "homebound" && url.host == "f" {
+            if let token = url.pathComponents.last, token != "/" {
+                return token
+            }
+        }
+        // Universal link: https://api.homeboundapp.com/f/{token}
+        if url.pathComponents.count >= 3 && url.pathComponents[1] == "f" {
+            return url.pathComponents[2]
+        }
+        return nil
+    }
+
     private func handleUniversalLink(_ url: URL) {
-        // Handle /f/{token} - Friend invite links
+        // Handle custom URL scheme: homebound://f/{token}
+        // In this format, host = "f" and path = "/{token}"
+        if url.scheme == "homebound" {
+            if url.host == "f", let token = url.pathComponents.last, token != "/" {
+                pendingFriendInviteToken = token
+                showFriendInvite = true
+                return
+            }
+            if url.host == "t", url.pathComponents.count >= 2 {
+                let token = url.pathComponents[1]
+                let action = url.pathComponents.count > 2 ? url.pathComponents[2] : ""
+                Task {
+                    await session.performTokenAction(token, action: action)
+                }
+            }
+            return
+        }
+
+        // Handle universal links: https://api.homeboundapp.com/f/{token}
+        // In this format, pathComponents = ["/", "f", "{token}"]
         if url.pathComponents.count >= 3 && url.pathComponents[1] == "f" {
             let token = url.pathComponents[2]
             pendingFriendInviteToken = token

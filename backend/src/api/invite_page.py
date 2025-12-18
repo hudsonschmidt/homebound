@@ -48,6 +48,9 @@ def serve_invite_page(token: str):
     # The universal link URL (same as page URL)
     invite_url = f"https://api.homeboundapp.com/f/{token}"
 
+    # Custom URL scheme for opening app from webpage (universal links don't work from same domain)
+    app_url = f"homebound://f/{token}"
+
     # App Store URL for Homebound
     app_store_url = "https://apps.apple.com/app/homebound-safety/id6739498884"
 
@@ -146,11 +149,16 @@ def serve_invite_page(token: str):
         <h1>{og_title}</h1>
         <p>{og_description}</p>
         <a href="{app_store_url}" class="button">Get Homebound</a>
-        <a href="{invite_url}" class="secondary-link">Open in app</a>
+        <a href="{app_url}" class="secondary-link">Open in app</a>
     </div>
 
-    <!-- Universal links are handled automatically by iOS when user taps the link.
-         No JavaScript redirect needed - that would cause an infinite loop. -->
+    <script>
+        // Try to open app using custom URL scheme after a short delay
+        // This works from JavaScript (unlike universal links which only work from other apps)
+        setTimeout(function() {{
+            window.location.href = "{app_url}";
+        }}, 500);
+    </script>
 </body>
 </html>
 """
