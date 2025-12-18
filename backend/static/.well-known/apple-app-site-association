@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "HF826KS9K5.com.hudsonschmidt.Homebound",
+        "paths": ["/f/*", "/t/*"]
+      }
+    ]
+  }
+}

@@ -179,7 +179,10 @@ struct InviteRowView: View {
 
             // Share button for pending invites
             if invite.isPending {
-                ShareLink(item: "https://homeboundapp.com/f/\(invite.token)") {
+                ShareLink(
+                    item: URL(string: "https://api.homeboundapp.com/f/\(invite.token)")!,
+                    message: Text("Be my friend on Homebound!")
+                ) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.subheadline)
                         .foregroundStyle(Color.hbBrand)

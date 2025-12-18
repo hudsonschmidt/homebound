@@ -1393,18 +1393,21 @@ def start_trip(
 
         # Send push notifications to friend safety contacts
         friend_contacts = _get_friend_contacts_for_trip(connection, trip_id)
+        log.info(f"[Trips] start_trip: Retrieved friend contacts for trip {trip_id}: {friend_contacts}")
         friend_user_ids = [
             friend_contacts["friend_contact1"],
             friend_contacts["friend_contact2"],
             friend_contacts["friend_contact3"]
         ]
         friend_user_ids = [f for f in friend_user_ids if f is not None]
+        log.info(f"[Trips] start_trip: Friend user IDs to notify: {friend_user_ids}")
 
         if friend_user_ids:
             trip_title_for_push = trip.title
             user_name_for_push = user_name
             def send_friend_starting_push_sync():
                 for friend_id in friend_user_ids:
+                    log.info(f"[Trips] Sending trip starting push to friend {friend_id}")
                     asyncio.run(send_friend_trip_starting_push(
                         friend_user_id=friend_id,
                         user_name=user_name_for_push,
@@ -1413,6 +1416,8 @@ def start_trip(
 
             background_tasks.add_task(send_friend_starting_push_sync)
             log.info(f"[Trips] Scheduled starting push notifications for {len(friend_user_ids)} friend contacts")
+        else:
+            log.info(f"[Trips] start_trip: No friend contacts to notify for trip {trip_id}")
 
         return {"ok": True, "message": "Trip started successfully"}
 

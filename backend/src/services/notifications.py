@@ -114,6 +114,24 @@ async def send_friend_overdue_resolved_push(
     log.info(f"Sent friend overdue resolved push to user {friend_user_id}")
 
 
+async def send_friend_checkin_push(
+    friend_user_id: int,
+    user_name: str,
+    trip_title: str
+):
+    """Send push notification to a friend when the trip owner checks in."""
+    title = "Check-in Update"
+    body = f"{user_name} checked in on their trip '{trip_title}'"
+
+    await send_push_to_user(
+        friend_user_id,
+        title,
+        body,
+        notification_type="general"
+    )
+    log.info(f"Sent friend check-in push to user {friend_user_id}")
+
+
 def log_notification(
     user_id: int,
     notification_type: str,

@@ -39,7 +39,7 @@ struct FriendInviteView: View {
             }
             .sheet(isPresented: $showingShareSheet) {
                 if let invite = invite {
-                    ShareSheet(activityItems: [invite.invite_url])
+                    ShareSheet(activityItems: ["Be my friend on Homebound! \(invite.invite_url)"])
                 }
             }
         }

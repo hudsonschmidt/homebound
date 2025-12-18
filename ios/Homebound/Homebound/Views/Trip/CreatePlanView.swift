@@ -426,7 +426,8 @@ struct CreatePlanView: View {
             let now = Date()
             return etaTime > startTime && etaTime > now
         case 3:
-            return !contacts.isEmpty
+            // At least one safety contact required (email contact OR friend)
+            return !contacts.isEmpty || !selectedFriends.isEmpty
         case 4:
             return true
         default:

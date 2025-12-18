@@ -11,6 +11,7 @@ from src import database as db
 from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
     send_checkin_update_emails,
+    send_friend_checkin_push,
     send_friend_overdue_resolved_push,
     send_friend_trip_completed_push,
     send_overdue_resolved_emails,
@@ -156,6 +157,33 @@ def checkin_with_token(
         num_contacts = len(contacts_for_email)
         log.info(f"[Checkin] Scheduled checkin update emails for {num_contacts} contacts")
 
+        # Send push notifications to friend safety contacts
+        friend_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend_user_id FROM trip_safety_contacts
+                WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                ORDER BY position
+                """
+            ),
+            {"trip_id": trip.id}
+        ).fetchall()
+        friend_user_ids = [f.friend_user_id for f in friend_contacts]
+
+        if friend_user_ids:
+            trip_title_for_push = trip.title
+            user_name_for_push = user_name
+            def send_friend_checkin_sync():
+                for friend_id in friend_user_ids:
+                    asyncio.run(send_friend_checkin_push(
+                        friend_user_id=friend_id,
+                        user_name=user_name_for_push,
+                        trip_title=trip_title_for_push
+                    ))
+
+            background_tasks.add_task(send_friend_checkin_sync)
+            log.info(f"[Checkin] Scheduled check-in push notifications for {len(friend_user_ids)} friend contacts")
+
         return CheckinResponse(
             ok=True,
             message=f"Successfully checked in to '{trip.title}'"
@@ -281,7 +309,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                 """
                 SELECT friend_user_id FROM trip_safety_contacts
                 WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
-                ORDER BY "order"
+                ORDER BY position
                 """
             ),
             {"trip_id": trip.id}

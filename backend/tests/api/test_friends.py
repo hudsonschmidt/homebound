@@ -86,7 +86,7 @@ def test_create_invite():
         assert isinstance(invite, FriendInviteResponse)
         assert invite.token is not None
         assert len(invite.token) > 20  # URL-safe tokens are reasonably long
-        assert "homeboundapp.com/f/" in invite.invite_url
+        assert "api.homeboundapp.com/f/" in invite.invite_url
         assert invite.expires_at is not None
 
         # Verify invite was stored in database

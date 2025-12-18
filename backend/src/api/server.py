@@ -1,10 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
-from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, profile, trips
+from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, profile, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
@@ -74,6 +76,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files for Open Graph images and AASA file
+static_dir = Path(__file__).parent.parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    # Mount .well-known for Apple App Site Association file
+    well_known_dir = static_dir / ".well-known"
+    if well_known_dir.exists():
+        app.mount("/.well-known", StaticFiles(directory=well_known_dir), name="well-known")
+
 # Include routers
 app.include_router(auth_endpoints.router)
 app.include_router(trips.router)
@@ -83,6 +94,7 @@ app.include_router(friends.router)
 app.include_router(devices.router)
 app.include_router(checkin.router)
 app.include_router(profile.router)
+app.include_router(invite_page.router)
 
 
 @app.get("/")

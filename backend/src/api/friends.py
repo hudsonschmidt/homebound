@@ -112,7 +112,7 @@ def create_invite(user_id: int = Depends(auth.get_current_user_id)):
         )
 
     # Build the invite URL (will be used with universal links)
-    invite_url = f"https://homeboundapp.com/f/{token}"
+    invite_url = f"https://api.homeboundapp.com/f/{token}"
 
     return FriendInviteResponse(
         token=token,

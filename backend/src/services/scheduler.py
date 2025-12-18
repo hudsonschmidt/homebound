@@ -216,6 +216,16 @@ async def check_overdue_trips():
                         {"trip_id": trip_id}
                     )
 
+                    # Send silent push to trigger Live Activity update on iOS
+                    await send_push_to_user(
+                        trip.user_id,
+                        "",  # Empty title for silent/background push
+                        "",  # Empty body
+                        data={"sync": "trip_state_update", "trip_id": trip_id},
+                        notification_type="emergency"  # Always send, bypass preferences
+                    )
+                    log.info(f"[Scheduler] Sent silent push for Live Activity update, trip {trip_id}")
+
     except Exception as e:
         log.error(f"Error checking overdue trips: {e}", exc_info=True)
 
@@ -297,7 +307,7 @@ async def check_push_notifications():
                         "trip_id": trip.id,
                         "checkout_token": trip.checkout_token
                     },
-                    notification_type="trip_reminder",
+                    notification_type="emergency",  # Safety-critical, always send
                     category="CHECKOUT_ONLY"
                 )
                 conn.execute(
@@ -327,7 +337,7 @@ async def check_push_notifications():
                         "trip_id": trip.id,
                         "checkout_token": trip.checkout_token
                     },
-                    notification_type="checkin",
+                    notification_type="emergency",  # Safety-critical, always send
                     category="CHECKOUT_ONLY"
                 )
                 conn.execute(
@@ -405,13 +415,12 @@ async def check_push_notifications():
 
             # 6. Grace Period Warnings - every 5 min during grace period
             # SAFETY-CRITICAL: These warnings ALWAYS send regardless of quiet hours
-            # Only send warnings for trips that are overdue (not yet notified)
-            # Once contacts are notified (overdue_notified), stop sending warnings to user
+            # Continue sending warnings even after contacts are notified
             in_grace_period = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title, eta, grace_min, last_grace_warning, checkout_token
+                    SELECT id, user_id, title, eta, grace_min, last_grace_warning, checkout_token, status
                     FROM trips
-                    WHERE status = 'overdue'
+                    WHERE status IN ('overdue', 'overdue_notified')
                     AND (last_grace_warning IS NULL OR last_grace_warning <= :cutoff)
                 """),
                 {"cutoff": now - timedelta(minutes=GRACE_WARNING_INTERVAL)}
@@ -427,23 +436,30 @@ async def check_push_notifications():
                 grace_expires = eta_dt + timedelta(minutes=trip.grace_min)
                 remaining = (grace_expires - now).total_seconds() / 60
 
+                # For overdue (not yet notified), show countdown
+                # For overdue_notified, remind user their contacts have been alerted
                 if remaining > 0:
-                    await send_push_to_user(
-                        trip.user_id,
-                        "Urgent: Check In Now",
-                        f"You're overdue! {int(remaining)} minutes left before contacts are notified.",
-                        data={
-                            "trip_id": trip.id,
-                            "checkout_token": trip.checkout_token
-                        },
-                        notification_type="emergency",
-                        category="CHECKOUT_ONLY"
-                    )
-                    conn.execute(
-                        sqlalchemy.text("UPDATE trips SET last_grace_warning = :now WHERE id = :id"),
-                        {"now": now, "id": trip.id}
-                    )
-                    log.info(f"[Push] Sent grace warning for trip {trip.id}, {int(remaining)} min remaining")
+                    message = f"You're overdue! {int(remaining)} minutes left before contacts are notified."
+                else:
+                    # Grace period expired, contacts have been notified
+                    message = "Your contacts have been notified. Check out now to let them know you're safe!"
+
+                await send_push_to_user(
+                    trip.user_id,
+                    "Urgent: Check In Now",
+                    message,
+                    data={
+                        "trip_id": trip.id,
+                        "checkout_token": trip.checkout_token
+                    },
+                    notification_type="emergency",
+                    category="CHECKOUT_ONLY"
+                )
+                conn.execute(
+                    sqlalchemy.text("UPDATE trips SET last_grace_warning = :now WHERE id = :id"),
+                    {"now": now, "id": trip.id}
+                )
+                log.info(f"[Push] Sent grace warning for trip {trip.id}, status={trip.status}")
 
     except Exception as e:
         log.error(f"Error checking push notifications: {e}", exc_info=True)
