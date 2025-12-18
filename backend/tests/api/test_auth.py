@@ -219,59 +219,61 @@ def test_auto_create_account_full_flow():
     assert token_response.user["id"] == user_id
 
 
-def test_auto_create_vs_existing_user_last_login():
-    """Test that new users don't have last_login_at set, but existing users do"""
-    new_email = "newlogin@test.com"
-    existing_email = "existinglogin@test.com"
+def test_last_login_at_updated_on_verify():
+    """Test that last_login_at is updated when user verifies (logs in), not when requesting magic link"""
+    test_email = "lastlogin@test.com"
 
     # Clean up
     with db.engine.begin() as connection:
-        for email in [new_email, existing_email]:
-            connection.execute(
-                sqlalchemy.text("DELETE FROM login_tokens WHERE email = :email"),
-                {"email": email}
-            )
-            connection.execute(
-                sqlalchemy.text("DELETE FROM users WHERE email = :email"),
-                {"email": email}
-            )
-
-        # Create existing user
         connection.execute(
-            sqlalchemy.text(
-                """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'Existing', 'User', 30)
-                """
-            ),
-            {"email": existing_email}
+            sqlalchemy.text("DELETE FROM login_tokens WHERE email = :email"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
         )
 
-    # Request magic link for new user (auto-create)
-    run_async(request_magic_link(MagicLinkRequest(email=new_email)))
+    # Request magic link (auto-create user)
+    run_async(request_magic_link(MagicLinkRequest(email=test_email)))
 
-    # Request magic link for existing user
-    run_async(request_magic_link(MagicLinkRequest(email=existing_email)))
-
-    # Check both users
+    # After requesting magic link, last_login_at should still be NULL
     with db.engine.begin() as connection:
-        new_user = connection.execute(
+        user_before = connection.execute(
             sqlalchemy.text("SELECT email, last_login_at FROM users WHERE email = :email"),
-            {"email": new_email}
+            {"email": test_email}
         ).fetchone()
 
-        existing_user = connection.execute(
+        assert user_before is not None
+        assert user_before.last_login_at is None  # Not set until actual login
+
+        # Get the magic code
+        token_record = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT token FROM login_tokens
+                WHERE email = :email
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"email": test_email}
+        ).fetchone()
+        magic_code = token_record.token
+
+    # Verify the magic code (actual login)
+    verify_req = VerifyRequest(email=test_email, code=magic_code)
+    verify_magic_code(verify_req)
+
+    # After verifying, last_login_at should be set
+    with db.engine.begin() as connection:
+        user_after = connection.execute(
             sqlalchemy.text("SELECT email, last_login_at FROM users WHERE email = :email"),
-            {"email": existing_email}
+            {"email": test_email}
         ).fetchone()
 
-        # New user should exist but not have last_login_at updated yet
-        assert new_user is not None
-        assert new_user.email == new_email
-
-        # Existing user should have last_login_at updated
-        assert existing_user is not None
-        assert existing_user.last_login_at is not None
+        assert user_after is not None
+        assert user_after.last_login_at is not None  # Now set after actual login
 
 
 def test_auto_create_multiple_requests_same_email():

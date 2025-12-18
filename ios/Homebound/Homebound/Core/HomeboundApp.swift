@@ -13,7 +13,7 @@ import CoreLocation
 @main
 struct HomeboundApp: App {
     @StateObject private var session = Session()
-    @StateObject private var preferences = AppPreferences.shared
+    @ObservedObject private var preferences = AppPreferences.shared
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var showWhatsNew = false
 
@@ -74,6 +74,7 @@ struct HomeboundApp: App {
             .animation(.easeInOut(duration: 0.3), value: session.isInitialDataLoaded)
             .animation(.easeInOut(duration: 0.3), value: session.profileCompleted)
             .preferredColorScheme(preferences.colorScheme.colorScheme)
+            .id(preferences.colorScheme)
         }
     }
 
@@ -121,11 +122,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     private func registerNotificationCategories() {
-        // Check-in action - opens app briefly to get location
+        // Check-in action - runs in background without opening app
         let checkinAction = UNNotificationAction(
             identifier: "CHECKIN_ACTION",
             title: "Check In",
-            options: [.foreground]
+            options: []
         )
 
         // Check-out action - completes trip (red button for emphasis)
@@ -326,32 +327,36 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) {
         let userInfo = response.notification.request.content.userInfo
 
-        switch response.actionIdentifier {
-        case "CHECKIN_ACTION":
-            handleCheckinAction(userInfo: userInfo)
+        // Wrap in Task to await async operations before calling completionHandler
+        // This ensures background execution completes before iOS terminates the process
+        Task {
+            switch response.actionIdentifier {
+            case "CHECKIN_ACTION":
+                await handleCheckinAction(userInfo: userInfo)
 
-        case "CHECKOUT_ACTION":
-            handleCheckoutAction(userInfo: userInfo)
+            case "CHECKOUT_ACTION":
+                await handleCheckoutAction(userInfo: userInfo)
 
-        case UNNotificationDefaultActionIdentifier:
-            // User tapped notification banner - navigate to trip
-            if let data = userInfo["data"] as? [String: Any],
-               let tripId = data["trip_id"] as? Int {
-                NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
-            } else if let tripId = userInfo["trip_id"] as? Int {
-                NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
+            case UNNotificationDefaultActionIdentifier:
+                // User tapped notification banner - navigate to trip
+                if let data = userInfo["data"] as? [String: Any],
+                   let tripId = data["trip_id"] as? Int {
+                    NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
+                } else if let tripId = userInfo["trip_id"] as? Int {
+                    NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
+                }
+
+            default:
+                break
             }
 
-        default:
-            break
+            completionHandler()
         }
-
-        completionHandler()
     }
 
     // MARK: - Notification Action Handlers
 
-    private func handleCheckinAction(userInfo: [AnyHashable: Any]) {
+    private func handleCheckinAction(userInfo: [AnyHashable: Any]) async {
         guard let data = userInfo["data"] as? [String: Any],
               let checkinToken = data["checkin_token"] as? String else {
             debugLog("[Notification Action] Check-in action missing token")
@@ -360,35 +365,33 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
         debugLog("[Notification Action] Check-in action tapped")
 
-        Task {
-            // Get location for check-in (foreground mode ensures this works)
-            let location = await LocationManager.shared.getCurrentLocation()
+        // Use cached location (background mode can't reliably request fresh location)
+        let location = LocationManager.shared.currentLocation
 
-            // Build URL with coordinates if available
-            var urlString = "\(getBaseURL())/t/\(checkinToken)/checkin"
-            if let loc = location {
-                urlString += "?lat=\(loc.latitude)&lon=\(loc.longitude)"
-            }
+        // Build URL with coordinates if available
+        var urlString = "\(getBaseURL())/t/\(checkinToken)/checkin"
+        if let loc = location {
+            urlString += "?lat=\(loc.latitude)&lon=\(loc.longitude)"
+        }
 
-            guard let url = URL(string: urlString) else {
-                debugLog("[Notification Action] Invalid check-in URL")
-                return
-            }
+        guard let url = URL(string: urlString) else {
+            debugLog("[Notification Action] Invalid check-in URL")
+            return
+        }
 
-            do {
-                let (_, response) = try await URLSession.shared.data(from: url)
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    debugLog("[Notification Action] Check-in successful")
-                } else {
-                    debugLog("[Notification Action] Check-in failed with response: \(response)")
-                }
-            } catch {
-                debugLog("[Notification Action] Check-in error: \(error)")
+        do {
+            let (_, response) = try await URLSession.shared.data(from: url)
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                debugLog("[Notification Action] Check-in successful")
+            } else {
+                debugLog("[Notification Action] Check-in failed with response: \(response)")
             }
+        } catch {
+            debugLog("[Notification Action] Check-in error: \(error)")
         }
     }
 
-    private func handleCheckoutAction(userInfo: [AnyHashable: Any]) {
+    private func handleCheckoutAction(userInfo: [AnyHashable: Any]) async {
         guard let data = userInfo["data"] as? [String: Any],
               let checkoutToken = data["checkout_token"] as? String else {
             debugLog("[Notification Action] Check-out action missing token")
@@ -397,24 +400,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
         debugLog("[Notification Action] Check-out action tapped")
 
-        Task {
-            let urlString = "\(getBaseURL())/t/\(checkoutToken)/checkout"
+        let urlString = "\(getBaseURL())/t/\(checkoutToken)/checkout"
 
-            guard let url = URL(string: urlString) else {
-                debugLog("[Notification Action] Invalid check-out URL")
-                return
-            }
+        guard let url = URL(string: urlString) else {
+            debugLog("[Notification Action] Invalid check-out URL")
+            return
+        }
 
-            do {
-                let (_, response) = try await URLSession.shared.data(from: url)
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    debugLog("[Notification Action] Check-out successful")
-                } else {
-                    debugLog("[Notification Action] Check-out failed with response: \(response)")
-                }
-            } catch {
-                debugLog("[Notification Action] Check-out error: \(error)")
+        do {
+            let (_, response) = try await URLSession.shared.data(from: url)
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                debugLog("[Notification Action] Check-out successful")
+            } else {
+                debugLog("[Notification Action] Check-out failed with response: \(response)")
             }
+        } catch {
+            debugLog("[Notification Action] Check-out error: \(error)")
         }
     }
 

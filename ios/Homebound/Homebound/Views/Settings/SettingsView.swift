@@ -5,6 +5,8 @@ import CoreLocation
 import UniformTypeIdentifiers
 
 // MARK: - App Preferences
+private var preferenceCancellables = Set<AnyCancellable>()
+
 enum AppColorScheme: String, CaseIterable {
     case system = "system"
     case light = "light"
@@ -97,17 +99,8 @@ class AppPreferences: ObservableObject {
     }
 
     // MARK: - Sounds & Haptics
-    @Published var hapticFeedbackEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(hapticFeedbackEnabled, forKey: "hapticFeedbackEnabled")
-        }
-    }
-
-    @Published var checkInSoundEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(checkInSoundEnabled, forKey: "checkInSoundEnabled")
-        }
-    }
+    @Published var hapticFeedbackEnabled: Bool = true
+    @Published var checkInSoundEnabled: Bool = true
 
     // MARK: - Map
     @Published var defaultMapType: MapType {
@@ -206,6 +199,18 @@ class AppPreferences: ObservableObject {
         // Sounds & Haptics - defaults to true/enabled
         self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "hapticFeedbackEnabled")
         self.checkInSoundEnabled = UserDefaults.standard.object(forKey: "checkInSoundEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "checkInSoundEnabled")
+
+        // Set up Combine subscribers to persist Sounds & Haptics changes
+        // Using Combine instead of didSet because didSet doesn't reliably fire through SwiftUI bindings
+        $hapticFeedbackEnabled
+            .dropFirst()
+            .sink { UserDefaults.standard.set($0, forKey: "hapticFeedbackEnabled") }
+            .store(in: &preferenceCancellables)
+
+        $checkInSoundEnabled
+            .dropFirst()
+            .sink { UserDefaults.standard.set($0, forKey: "checkInSoundEnabled") }
+            .store(in: &preferenceCancellables)
 
         // Map
         let mapTypeRaw = UserDefaults.standard.string(forKey: "defaultMapType") ?? "standard"

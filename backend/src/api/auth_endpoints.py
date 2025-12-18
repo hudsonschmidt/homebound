@@ -110,18 +110,6 @@ async def request_magic_link(body: MagicLinkRequest):
             )
             user = result.fetchone()
             assert user is not None
-        else:
-            # Update last login for existing user
-            connection.execute(
-                sqlalchemy.text(
-                    """
-                    UPDATE users
-                    SET last_login_at = CURRENT_TIMESTAMP
-                    WHERE id = :user_id
-                    """
-                ),
-                {"user_id": user.id}
-            )
 
         # Generate 6-digit code
         code = f"{secrets.randbelow(1000000):06d}"
@@ -177,8 +165,8 @@ def verify_magic_code(body: VerifyRequest):
                 result = connection.execute(
                     sqlalchemy.text(
                         """
-                        INSERT INTO users (email, first_name, last_name, age)
-                        VALUES (:email, :first_name, :last_name, :age)
+                        INSERT INTO users (email, first_name, last_name, age, last_login_at)
+                        VALUES (:email, :first_name, :last_name, :age, CURRENT_TIMESTAMP)
                         RETURNING id, email, first_name, last_name, age
                         """
                     ),
@@ -190,6 +178,19 @@ def verify_magic_code(body: VerifyRequest):
                     }
                 )
                 user = result.fetchone()
+            else:
+                # Update last_login_at for existing test user
+                user = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        UPDATE users
+                        SET last_login_at = CURRENT_TIMESTAMP
+                        WHERE id = :user_id
+                        RETURNING id, email, first_name, last_name, age
+                        """
+                    ),
+                    {"user_id": user.id}
+                ).fetchone()
 
             # Create JWT pair for test user
             access, refresh = create_jwt_pair(user.id, user.email)
@@ -260,13 +261,14 @@ def verify_magic_code(body: VerifyRequest):
             {"token_id": token.id}
         )
 
-        # Get user info
+        # Get user info and update last_login_at
         user = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, email, first_name, last_name, age
-                FROM users
+                UPDATE users
+                SET last_login_at = CURRENT_TIMESTAMP
                 WHERE id = :user_id
+                RETURNING id, email, first_name, last_name, age
                 """
             ),
             {"user_id": token.user_id}
@@ -422,8 +424,21 @@ def apple_sign_in(body: AppleSignInRequest):
         ).fetchone()
 
         if existing_user:
-            # User exists with this Apple ID - sign them in
+            # User exists with this Apple ID - sign them in and update last_login_at
             print(f"[AppleAuth] ✅ Existing Apple user found: user_id={existing_user.id}")
+
+            # Update last_login_at
+            existing_user = connection.execute(
+                sqlalchemy.text(
+                    """
+                    UPDATE users
+                    SET last_login_at = CURRENT_TIMESTAMP
+                    WHERE id = :user_id
+                    RETURNING id, email, first_name, last_name, age
+                    """
+                ),
+                {"user_id": existing_user.id}
+            ).fetchone()
 
             access, refresh = create_jwt_pair(existing_user.id, existing_user.email)
 
@@ -478,8 +493,8 @@ def apple_sign_in(body: AppleSignInRequest):
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age, apple_user_id)
-                VALUES (:email, :first_name, :last_name, :age, :apple_user_id)
+                INSERT INTO users (email, first_name, last_name, age, apple_user_id, last_login_at)
+                VALUES (:email, :first_name, :last_name, :age, :apple_user_id, CURRENT_TIMESTAMP)
                 RETURNING id, email, first_name, last_name, age
                 """
             ),
@@ -563,17 +578,18 @@ def link_apple_account(body: AppleLinkRequest):
                 detail="This account is already linked to an Apple ID"
             )
 
-        # Link the Apple ID to this account
-        connection.execute(
+        # Link the Apple ID to this account and update last_login_at
+        user = connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE users
-                SET apple_user_id = :apple_user_id
+                SET apple_user_id = :apple_user_id, last_login_at = CURRENT_TIMESTAMP
                 WHERE id = :user_id
+                RETURNING id, email, first_name, last_name, age
                 """
             ),
             {"apple_user_id": body.user_id, "user_id": user.id}
-        )
+        ).fetchone()
 
         print(f"[AppleAuth] 🔗 Linked Apple ID to user_id={user.id}, email={user.email}")
 

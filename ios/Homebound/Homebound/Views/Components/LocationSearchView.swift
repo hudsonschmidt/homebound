@@ -368,7 +368,7 @@ struct LocationSearchView: View {
             if let mapItem = response.mapItems.first {
                 await MainActor.run {
                     selectedLocation = result.title + (result.subtitle.isEmpty ? "" : ", \(result.subtitle)")
-                    selectedCoordinates = mapItem.location.coordinate
+                    selectedCoordinates = mapItem.placemark.coordinate
                     isPresented = false
                 }
             }
