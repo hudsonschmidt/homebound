@@ -410,7 +410,7 @@ struct SettingsView: View {
                 }
 
                 // Developer Section
-                if session.userEmail == "hudsonschmidt08@gmail.com" {
+                if session.userEmail == "hudsonschmidt08@gmail.com" || session.userEmail == "parkcityht@gmail.com" {
                     Section("Developer") {
                         VStack(alignment: .leading, spacing: 8) {
                             Label {

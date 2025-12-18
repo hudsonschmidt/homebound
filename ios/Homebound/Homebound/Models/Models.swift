@@ -66,6 +66,129 @@ struct ContactCreateRequest: Codable {
     var email: String
 }
 
+// MARK: - Friend Models
+
+/// A friend (another Homebound user)
+struct Friend: Codable, Identifiable, Hashable {
+    let user_id: Int
+    let first_name: String
+    let last_name: String
+    let profile_photo_url: String?
+    let member_since: String
+    let friendship_since: String
+
+    var id: Int { user_id }
+
+    var fullName: String {
+        if last_name.isEmpty {
+            return first_name
+        }
+        return "\(first_name) \(last_name)"
+    }
+
+    var memberSinceDate: Date? {
+        parseISO8601Date(member_since)
+    }
+
+    var friendshipSinceDate: Date? {
+        parseISO8601Date(friendship_since)
+    }
+}
+
+/// Response when creating a friend invite
+struct FriendInvite: Codable {
+    let token: String
+    let invite_url: String
+    let expires_at: String
+
+    var expiresAtDate: Date? {
+        parseISO8601Date(expires_at)
+    }
+}
+
+/// Preview of a friend invite (for accepting)
+struct FriendInvitePreview: Codable {
+    let inviter_first_name: String
+    let inviter_profile_photo_url: String?
+    let inviter_member_since: String
+    let expires_at: String
+    let is_valid: Bool
+
+    var inviterMemberSinceDate: Date? {
+        parseISO8601Date(inviter_member_since)
+    }
+
+    var expiresAtDate: Date? {
+        parseISO8601Date(expires_at)
+    }
+}
+
+/// A pending invite the user has sent
+struct PendingInvite: Codable, Identifiable {
+    let id: Int
+    let token: String
+    let created_at: String
+    let expires_at: String
+    let status: String  // "pending", "accepted", "expired"
+    let accepted_by_name: String?
+
+    var createdAtDate: Date? {
+        parseISO8601Date(created_at)
+    }
+
+    var expiresAtDate: Date? {
+        parseISO8601Date(expires_at)
+    }
+
+    var isPending: Bool { status == "pending" }
+    var isAccepted: Bool { status == "accepted" }
+    var isExpired: Bool { status == "expired" }
+}
+
+/// Unified safety contact - can be either an email contact or a friend
+enum SafetyContact: Identifiable, Hashable {
+    case emailContact(Contact)
+    case friend(Friend)
+
+    var id: String {
+        switch self {
+        case .emailContact(let contact):
+            return "contact-\(contact.id)"
+        case .friend(let friend):
+            return "friend-\(friend.user_id)"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .emailContact(let contact):
+            return contact.name
+        case .friend(let friend):
+            return friend.fullName
+        }
+    }
+
+    var isEmailContact: Bool {
+        if case .emailContact = self { return true }
+        return false
+    }
+
+    var isFriend: Bool {
+        if case .friend = self { return true }
+        return false
+    }
+
+    /// Icon name for this contact type
+    var iconName: String {
+        switch self {
+        case .emailContact:
+            return "envelope.fill"  // Email contacts get email notifications
+        case .friend:
+            return "bell.fill"  // Friends get push notifications
+        }
+    }
+}
+
 struct TripCreateRequest: Codable {
     var title: String
     var activity: String = "other"
@@ -83,6 +206,9 @@ struct TripCreateRequest: Codable {
     var contact1: Int?
     var contact2: Int?
     var contact3: Int?
+    var friend_contact1: Int?  // Friend user ID for push notifications
+    var friend_contact2: Int?
+    var friend_contact3: Int?
     var timezone: String?  // User's timezone (e.g., "America/New_York") - used for notifications
     var start_timezone: String?  // Timezone for start time (e.g., "America/Los_Angeles")
     var eta_timezone: String?    // Timezone for return time (e.g., "America/New_York")
@@ -109,6 +235,9 @@ struct TripUpdateRequest: Codable {
     var contact1: Int?
     var contact2: Int?
     var contact3: Int?
+    var friend_contact1: Int?  // Friend user ID for push notifications
+    var friend_contact2: Int?
+    var friend_contact3: Int?
     var timezone: String?
     var start_timezone: String?
     var eta_timezone: String?
@@ -141,6 +270,9 @@ struct Trip: Codable, Identifiable, Equatable {
     var contact1: Int?
     var contact2: Int?
     var contact3: Int?
+    var friend_contact1: Int?  // Friend user ID for push notifications
+    var friend_contact2: Int?
+    var friend_contact3: Int?
     var checkin_token: String?
     var checkout_token: String?
     var checkin_interval_min: Int?  // Minutes between check-in reminders (nil = default 30)
@@ -163,6 +295,7 @@ struct Trip: Codable, Identifiable, Equatable {
         case start_location_text, start_lat, start_lon, has_separate_locations
         case completed_at, last_checkin, created_at
         case contact1, contact2, contact3
+        case friend_contact1, friend_contact2, friend_contact3
         case checkin_token, checkout_token
         case checkin_interval_min, notify_start_hour, notify_end_hour
         case timezone, start_timezone, eta_timezone, notify_self
@@ -226,6 +359,9 @@ struct Trip: Codable, Identifiable, Equatable {
         contact1 = try container.decodeIfPresent(Int.self, forKey: .contact1)
         contact2 = try container.decodeIfPresent(Int.self, forKey: .contact2)
         contact3 = try container.decodeIfPresent(Int.self, forKey: .contact3)
+        friend_contact1 = try container.decodeIfPresent(Int.self, forKey: .friend_contact1)
+        friend_contact2 = try container.decodeIfPresent(Int.self, forKey: .friend_contact2)
+        friend_contact3 = try container.decodeIfPresent(Int.self, forKey: .friend_contact3)
         checkin_token = try container.decodeIfPresent(String.self, forKey: .checkin_token)
         checkout_token = try container.decodeIfPresent(String.self, forKey: .checkout_token)
         checkin_interval_min = try container.decodeIfPresent(Int.self, forKey: .checkin_interval_min)
@@ -264,6 +400,9 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(contact1, forKey: .contact1)
         try container.encodeIfPresent(contact2, forKey: .contact2)
         try container.encodeIfPresent(contact3, forKey: .contact3)
+        try container.encodeIfPresent(friend_contact1, forKey: .friend_contact1)
+        try container.encodeIfPresent(friend_contact2, forKey: .friend_contact2)
+        try container.encodeIfPresent(friend_contact3, forKey: .friend_contact3)
         try container.encodeIfPresent(checkin_token, forKey: .checkin_token)
         try container.encodeIfPresent(checkout_token, forKey: .checkout_token)
         try container.encodeIfPresent(checkin_interval_min, forKey: .checkin_interval_min)
@@ -299,6 +438,9 @@ struct Trip: Codable, Identifiable, Equatable {
         contact1: Int?,
         contact2: Int?,
         contact3: Int?,
+        friend_contact1: Int? = nil,
+        friend_contact2: Int? = nil,
+        friend_contact3: Int? = nil,
         checkin_token: String?,
         checkout_token: String?,
         checkin_interval_min: Int? = nil,
@@ -331,6 +473,9 @@ struct Trip: Codable, Identifiable, Equatable {
         self.contact1 = contact1
         self.contact2 = contact2
         self.contact3 = contact3
+        self.friend_contact1 = friend_contact1
+        self.friend_contact2 = friend_contact2
+        self.friend_contact3 = friend_contact3
         self.checkin_token = checkin_token
         self.checkout_token = checkout_token
         self.checkin_interval_min = checkin_interval_min

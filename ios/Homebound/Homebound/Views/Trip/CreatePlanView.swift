@@ -54,6 +54,7 @@ struct CreatePlanView: View {
     @State private var newContactEmail = ""
     @State private var notifySelf = false  // Send copy of all emails to account email
     @State private var savedContacts: [Contact] = []  // Persisted contacts from server
+    @State private var selectedFriends: [Friend] = []  // Friends as safety contacts (push notifications)
 
     // UI State
     @State private var isCreating = false
@@ -121,6 +122,7 @@ struct CreatePlanView: View {
                         case 3:
                             Step3EmergencyContacts(
                                 contacts: $contacts,
+                                selectedFriends: $selectedFriends,
                                 showAddContact: $showAddContact,
                                 newContactName: $newContactName,
                                 newContactEmail: $newContactEmail,
@@ -186,8 +188,9 @@ struct CreatePlanView: View {
             .navigationTitle(isEditMode ? "Edit Trip" : "New Adventure")
             .navigationBarTitleDisplayMode(.inline)
             .task {
-                // Load saved contacts early so they're ready by step 3
+                // Load saved contacts and friends early so they're ready by step 3
                 savedContacts = await session.loadContacts()
+                _ = await session.loadFriends()
             }
             .onAppear {
                 // Apply default activity from preferences (only once)
@@ -243,6 +246,14 @@ struct CreatePlanView: View {
                                     email: savedContact.email,
                                     savedContactId: savedContact.id
                                 ))
+                            }
+                        }
+
+                        // Pre-populate friend contacts from existing trip
+                        let friendContactIds = [trip.friend_contact1, trip.friend_contact2, trip.friend_contact3].compactMap { $0 }
+                        for friendId in friendContactIds {
+                            if let friend = session.friends.first(where: { $0.user_id == friendId }) {
+                                selectedFriends.append(friend)
                             }
                         }
 
@@ -467,6 +478,9 @@ struct CreatePlanView: View {
                 }
             }
 
+            // Get friend user IDs for push notification contacts
+            let friendContactIds = selectedFriends.map { $0.user_id }
+
             // Get user's timezone identifier (e.g., "America/New_York")
             let userTimezone = TimeZone.current.identifier
 
@@ -489,6 +503,9 @@ struct CreatePlanView: View {
                     contact1: contactIds.count > 0 ? contactIds[0] : nil,
                     contact2: contactIds.count > 1 ? contactIds[1] : nil,
                     contact3: contactIds.count > 2 ? contactIds[2] : nil,
+                    friend_contact1: friendContactIds.count > 0 ? friendContactIds[0] : nil,
+                    friend_contact2: friendContactIds.count > 1 ? friendContactIds[1] : nil,
+                    friend_contact3: friendContactIds.count > 2 ? friendContactIds[2] : nil,
                     timezone: userTimezone,
                     start_timezone: showTimezoneOptions ? startTimezone.identifier : nil,
                     eta_timezone: showTimezoneOptions ? etaTimezone.identifier : nil,
@@ -530,6 +547,9 @@ struct CreatePlanView: View {
                     contact1: contactIds.count > 0 ? contactIds[0] : nil,
                     contact2: contactIds.count > 1 ? contactIds[1] : nil,
                     contact3: contactIds.count > 2 ? contactIds[2] : nil,
+                    friend_contact1: friendContactIds.count > 0 ? friendContactIds[0] : nil,
+                    friend_contact2: friendContactIds.count > 1 ? friendContactIds[1] : nil,
+                    friend_contact3: friendContactIds.count > 2 ? friendContactIds[2] : nil,
                     timezone: userTimezone,
                     start_timezone: showTimezoneOptions ? startTimezone.identifier : nil,
                     eta_timezone: showTimezoneOptions ? etaTimezone.identifier : nil,
@@ -1962,6 +1982,7 @@ struct RoundedCorner: Shape {
 struct Step3EmergencyContacts: View {
     @EnvironmentObject var session: Session
     @Binding var contacts: [EmergencyContact]
+    @Binding var selectedFriends: [Friend]
     @Binding var showAddContact: Bool
     @Binding var newContactName: String
     @Binding var newContactEmail: String
@@ -1969,6 +1990,15 @@ struct Step3EmergencyContacts: View {
 
     @Binding var savedContacts: [Contact]
     @State private var isLoadingSaved = false
+
+    // Total selected count (contacts + friends, max 3)
+    var totalSelectedCount: Int {
+        contacts.count + selectedFriends.count
+    }
+
+    var canSelectMore: Bool {
+        totalSelectedCount < 3
+    }
 
     var body: some View {
         ScrollView {
@@ -2001,33 +2031,70 @@ struct Step3EmergencyContacts: View {
                 .background(Color(.secondarySystemGroupedBackground))
                 .cornerRadius(12)
 
-                // Your Contacts Section
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack{
-                        Text("Your Contacts (\(contacts.count)/3 selected)")
+                // Selection count and status
+                HStack {
+                    Text("\(totalSelectedCount)/3 contacts selected")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                        // Required contact message when none selected
-                        if contacts.isEmpty && !savedContacts.isEmpty {
-                            HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(Color.orange)
-                                Text("≥1 contact required")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                    Spacer()
+
+                    if totalSelectedCount == 0 && (!savedContacts.isEmpty || !session.friends.isEmpty) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Color.orange)
+                            Text("≥1 contact required")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if totalSelectedCount >= 3 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(Color.orange)
+                            Text("Max contacts added")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                // Friends Section (Push Notifications)
+                if !session.friends.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "bell.badge.fill")
+                                .foregroundStyle(.green)
+                            Text("Friends")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text("• Push Notifications")
+                                .font(.caption)
+                                .foregroundStyle(.green)
                         }
 
-                        if contacts.count >= 3 {
-                            HStack {
-                                Image(systemName: "info.circle.fill")
-                                    .foregroundStyle(Color.orange)
-                                Text("Max contacts added")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        ForEach(session.friends) { friend in
+                            FriendSelectionRow(
+                                friend: friend,
+                                isSelected: isFriendSelected(friend),
+                                canSelect: canSelectMore || isFriendSelected(friend)
+                            ) { selected in
+                                toggleFriend(friend, selected: selected)
                             }
                         }
+                    }
+                }
+
+                // Email Contacts Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "envelope.fill")
+                            .foregroundStyle(.blue)
+                        Text("Email Contacts")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("• Email Notifications")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
                     }
 
                     if isLoadingSaved {
@@ -2055,7 +2122,7 @@ struct Step3EmergencyContacts: View {
                             ContactSelectionRow(
                                 contact: contact,
                                 isSelected: isContactSelected(contact),
-                                canSelect: contacts.count < 3 || isContactSelected(contact)
+                                canSelect: canSelectMore || isContactSelected(contact)
                             ) { selected in
                                 toggleContact(contact, selected: selected)
                             }
@@ -2088,16 +2155,20 @@ struct Step3EmergencyContacts: View {
         .scrollIndicators(.hidden)
         .task {
             isLoadingSaved = true
-            await loadContacts()
+            await loadData()
         }
     }
 
-    private func loadContacts() async {
-        let loaded = await session.loadContacts()
+    private func loadData() async {
+        async let contactsTask = session.loadContacts()
+        async let friendsTask = session.loadFriends()
+
+        let (loadedContacts, _) = await (contactsTask, friendsTask)
+
         await MainActor.run {
-            self.savedContacts = loaded
+            self.savedContacts = loadedContacts
             self.isLoadingSaved = false
-            debugLog("DEBUG: Loaded \(loaded.count) saved contacts")
+            debugLog("DEBUG: Loaded \(loadedContacts.count) saved contacts, \(session.friends.count) friends")
         }
     }
 
@@ -2107,8 +2178,7 @@ struct Step3EmergencyContacts: View {
 
     private func toggleContact(_ contact: Contact, selected: Bool) {
         if selected {
-            // Add contact if under limit
-            if contacts.count < 3 {
+            if canSelectMore {
                 contacts.append(EmergencyContact(
                     name: contact.name,
                     email: contact.email,
@@ -2116,9 +2186,102 @@ struct Step3EmergencyContacts: View {
                 ))
             }
         } else {
-            // Remove contact
             contacts.removeAll { $0.savedContactId == contact.id }
         }
+    }
+
+    private func isFriendSelected(_ friend: Friend) -> Bool {
+        selectedFriends.contains { $0.user_id == friend.user_id }
+    }
+
+    private func toggleFriend(_ friend: Friend, selected: Bool) {
+        if selected {
+            if canSelectMore {
+                selectedFriends.append(friend)
+            }
+        } else {
+            selectedFriends.removeAll { $0.user_id == friend.user_id }
+        }
+    }
+}
+
+// MARK: - Friend Selection Row
+struct FriendSelectionRow: View {
+    let friend: Friend
+    let isSelected: Bool
+    let canSelect: Bool
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        Button(action: {
+            if canSelect || isSelected {
+                onToggle(!isSelected)
+            }
+        }) {
+            HStack {
+                // Profile photo or initial
+                if let photoUrl = friend.profile_photo_url, let url = URL(string: photoUrl) {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } placeholder: {
+                        initialCircle
+                    }
+                    .frame(width: 40, height: 40)
+                    .clipShape(Circle())
+                } else {
+                    initialCircle
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(friend.fullName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "bell.fill")
+                            .font(.caption2)
+                        Text("Push notification")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.green)
+                }
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isSelected ? Color.green : Color(.tertiaryLabel))
+                    .opacity(canSelect ? 1.0 : 0.5)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.green.opacity(0.1) : Color(.secondarySystemFill))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    var initialCircle: some View {
+        Circle()
+            .fill(
+                LinearGradient(
+                    colors: [Color.hbBrand, Color.hbTeal],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: 40, height: 40)
+            .overlay(
+                Text(friend.first_name.prefix(1).uppercased())
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            )
     }
 }
 

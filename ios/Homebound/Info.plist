@@ -88,5 +88,7 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Homebound needs camera access to scan QR codes for adding friends.</string>
 </dict>
 </plist>

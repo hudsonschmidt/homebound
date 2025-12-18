@@ -211,8 +211,15 @@ def accept_invite(token: str, user_id: int = Depends(auth.get_current_user_id)):
                 detail="Already friends with this user"
             )
 
-        # Create the friendship
-        _create_friendship(connection, user_id, inviter_id)
+        # Create the friendship (handle race condition where friendship was created between check and insert)
+        try:
+            _create_friendship(connection, user_id, inviter_id)
+        except sqlalchemy.exc.IntegrityError:
+            # Friendship already exists (race condition)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Already friends with this user"
+            )
 
         # Update invite usage
         connection.execute(

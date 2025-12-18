@@ -205,6 +205,10 @@ final class Session: ObservableObject {
     // Contacts
     @Published var contacts: [Contact] = []
 
+    // Friends
+    @Published var friends: [Friend] = []
+    @Published var pendingInvites: [PendingInvite] = []
+
     // Saved trip templates (local-only)
     @Published var savedTemplates: [SavedTripTemplate] = []
 
@@ -1051,7 +1055,8 @@ final class Session: ObservableObject {
             async let profileTask: Void = loadUserProfile()
             async let contactsTask: [Contact] = loadContacts()
             async let tripsTask: [Trip] = loadAllTrips()  // Cache all trips for offline access
-            _ = await (activitiesTask, activePlanTask, profileTask, contactsTask, tripsTask)
+            async let friendsTask: [Friend] = loadFriends()  // Load friends for offline access
+            _ = await (activitiesTask, activePlanTask, profileTask, contactsTask, tripsTask, friendsTask)
 
             // Sync pending actions after data loads
             await syncPendingActions()
@@ -2322,6 +2327,196 @@ final class Session: ObservableObject {
         }
     }
 
+    // MARK: - Friends Management
+
+    /// Load all friends for the current user
+    func loadFriends() async -> [Friend] {
+        // Try cache first for immediate display
+        let cachedFriends = LocalStorage.shared.getCachedFriends()
+        if !cachedFriends.isEmpty {
+            await MainActor.run {
+                self.friends = cachedFriends
+            }
+        }
+
+        // If offline, return cached data
+        if !NetworkMonitor.shared.isConnected {
+            debugLog("[Session] 📦 Offline - returning \(cachedFriends.count) cached friends")
+            return cachedFriends
+        }
+
+        do {
+            let loadedFriends: [Friend] = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/friends/"),
+                    bearer: bearer
+                )
+            }
+
+            // Cache friends for offline access
+            LocalStorage.shared.cacheFriends(loadedFriends)
+
+            await MainActor.run {
+                self.friends = loadedFriends
+            }
+            debugLog("[Session] ✅ Loaded \(loadedFriends.count) friends")
+            return loadedFriends
+        } catch {
+            debugLog("[Session] ❌ Failed to load friends: \(error.localizedDescription)")
+            return cachedFriends
+        }
+    }
+
+    /// Load pending invites sent by the current user
+    func loadPendingInvites() async -> [PendingInvite] {
+        do {
+            let invites: [PendingInvite] = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/friends/invites/pending"),
+                    bearer: bearer
+                )
+            }
+
+            await MainActor.run {
+                self.pendingInvites = invites
+            }
+            debugLog("[Session] ✅ Loaded \(invites.count) pending invites")
+            return invites
+        } catch {
+            debugLog("[Session] ❌ Failed to load pending invites: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Create a new friend invite link
+    func createFriendInvite() async -> FriendInvite? {
+        do {
+            let invite: FriendInvite = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/friends/invite"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Created friend invite: \(invite.invite_url)")
+            return invite
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to create invite: \(error.localizedDescription)"
+            }
+            return nil
+        }
+    }
+
+    /// Get preview of a friend invite (public - no auth required)
+    func getFriendInvitePreview(token: String) async -> FriendInvitePreview? {
+        do {
+            let preview: FriendInvitePreview = try await api.get(
+                url("/api/v1/friends/invite/\(token)"),
+                bearer: nil  // Public endpoint
+            )
+            debugLog("[Session] ✅ Got invite preview for token: \(token.prefix(8))...")
+            return preview
+        } catch {
+            debugLog("[Session] ❌ Failed to get invite preview: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Accept a friend invite and create the friendship
+    func acceptFriendInvite(token: String) async -> Friend? {
+        do {
+            let friend: Friend = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/friends/invite/\(token)/accept"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+
+            // Add to local friends list
+            await MainActor.run {
+                self.friends.insert(friend, at: 0)  // Most recent first
+                self.notice = "You're now friends with \(friend.fullName)!"
+            }
+
+            // Update cache
+            LocalStorage.shared.cacheFriend(friend)
+
+            debugLog("[Session] ✅ Accepted invite, now friends with \(friend.fullName)")
+            return friend
+        } catch let API.APIError.httpError(statusCode, message) {
+            await MainActor.run {
+                switch statusCode {
+                case 404:
+                    self.lastError = "Invite not found"
+                case 409:
+                    self.lastError = "You're already friends!"
+                case 410:
+                    self.lastError = "This invite has expired"
+                default:
+                    self.lastError = message
+                }
+            }
+            return nil
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to accept invite: \(error.localizedDescription)"
+            }
+            return nil
+        }
+    }
+
+    /// Remove a friend
+    func removeFriend(userId: Int) async -> Bool {
+        do {
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.delete(
+                    self.url("/api/v1/friends/\(userId)"),
+                    bearer: bearer
+                )
+            }
+
+            // Remove from local list
+            await MainActor.run {
+                self.friends.removeAll { $0.user_id == userId }
+                self.notice = "Friend removed"
+            }
+
+            // Remove from cache
+            LocalStorage.shared.removeCachedFriend(userId: userId)
+
+            debugLog("[Session] ✅ Removed friend \(userId)")
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to remove friend: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    /// Get a specific friend's profile
+    func getFriend(userId: Int) async -> Friend? {
+        // Check cache first
+        if let cached = friends.first(where: { $0.user_id == userId }) {
+            return cached
+        }
+
+        do {
+            let friend: Friend = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/friends/\(userId)"),
+                    bearer: bearer
+                )
+            }
+            return friend
+        } catch {
+            debugLog("[Session] ❌ Failed to get friend: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Activities Management
     @MainActor
     func loadActivities() async {
@@ -2512,6 +2707,8 @@ final class Session: ObservableObject {
         activeTrip = nil
         activities = []
         contacts = []
+        friends = []
+        pendingInvites = []
         isInitialDataLoaded = false
 
         debugLog("[Session] ✅ Sign out complete")

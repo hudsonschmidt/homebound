@@ -328,6 +328,19 @@ final class LocalStorage {
                 )
             """)
 
+            // Create cached_friends table
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS cached_friends (
+                    user_id INTEGER PRIMARY KEY,
+                    first_name TEXT NOT NULL,
+                    last_name TEXT NOT NULL,
+                    profile_photo_url TEXT,
+                    member_since TEXT NOT NULL,
+                    friendship_since TEXT NOT NULL,
+                    cached_at TEXT NOT NULL
+                )
+            """)
+
             // Create cached_timeline table for offline check-in display
             try db.execute(sql: """
                 CREATE TABLE IF NOT EXISTS cached_timeline (
@@ -1372,6 +1385,137 @@ final class LocalStorage {
         }
     }
 
+    // MARK: - Friend Caching
+
+    /// Cache a single friend
+    func cacheFriend(_ friend: Friend) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO cached_friends
+                    (user_id, first_name, last_name, profile_photo_url, member_since, friendship_since, cached_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [
+                    friend.user_id,
+                    friend.first_name,
+                    friend.last_name,
+                    friend.profile_photo_url,
+                    friend.member_since,
+                    friend.friendship_since,
+                    ISO8601DateFormatter().string(from: Date())
+                ])
+            }
+            debugLog("[LocalStorage] Cached friend: \(friend.fullName)")
+        } catch {
+            debugLog("[LocalStorage] Failed to cache friend: \(error)")
+        }
+    }
+
+    /// Cache multiple friends from the server
+    /// Uses savepoint for atomic operation - if any insert fails, entire operation rolls back
+    func cacheFriends(_ friends: [Friend]) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                // Use savepoint for rollback capability
+                try db.inSavepoint {
+                    // Clear existing cache
+                    try db.execute(sql: "DELETE FROM cached_friends")
+
+                    // Insert friends
+                    for friend in friends {
+                        try db.execute(sql: """
+                            INSERT INTO cached_friends
+                            (user_id, first_name, last_name, profile_photo_url, member_since, friendship_since, cached_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, arguments: [
+                            friend.user_id,
+                            friend.first_name,
+                            friend.last_name,
+                            friend.profile_photo_url,
+                            friend.member_since,
+                            friend.friendship_since,
+                            ISO8601DateFormatter().string(from: Date())
+                        ])
+                    }
+                    return .commit
+                }
+            }
+            debugLog("[LocalStorage] Cached \(friends.count) friends")
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to cache friends (rolled back): \(error)")
+        }
+    }
+
+    /// Get cached friends for offline access
+    func getCachedFriends() -> [Friend] {
+        guard let dbQueue = dbQueue else { return [] }
+
+        do {
+            return try dbQueue.read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT * FROM cached_friends ORDER BY friendship_since DESC
+                """)
+
+                return rows.compactMap { row -> Friend? in
+                    // Handle Int64 -> Int conversion (SQLite uses 64-bit integers)
+                    guard let userId = (row["user_id"] as? Int64).map({ Int($0) }) ?? (row["user_id"] as? Int),
+                          let firstName = row["first_name"] as? String,
+                          let lastName = row["last_name"] as? String,
+                          let memberSince = row["member_since"] as? String,
+                          let friendshipSince = row["friendship_since"] as? String
+                    else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse cached friend data")
+                        return nil
+                    }
+
+                    return Friend(
+                        user_id: userId,
+                        first_name: firstName,
+                        last_name: lastName,
+                        profile_photo_url: row["profile_photo_url"] as? String,
+                        member_since: memberSince,
+                        friendship_since: friendshipSince
+                    )
+                }
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get cached friends: \(error)")
+            return []
+        }
+    }
+
+    /// Remove a cached friend
+    func removeCachedFriend(userId: Int) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM cached_friends WHERE user_id = ?", arguments: [userId])
+            }
+            debugLog("[LocalStorage] ✅ Removed cached friend #\(userId)")
+        } catch {
+            debugLog("[LocalStorage] Failed to remove cached friend: \(error)")
+        }
+    }
+
+    /// Get count of cached friends
+    func getCachedFriendsCount() -> Int {
+        guard let dbQueue = dbQueue else { return 0 }
+
+        do {
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cached_friends") ?? 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get cached friends count: \(error)")
+            return 0
+        }
+    }
+
     // MARK: - Timeline Caching
 
     /// Cache timeline events for a trip
@@ -1673,6 +1817,7 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM auth_tokens")
                 try db.execute(sql: "DELETE FROM cached_activities")
                 try db.execute(sql: "DELETE FROM cached_contacts")
+                try db.execute(sql: "DELETE FROM cached_friends")
                 try db.execute(sql: "DELETE FROM cached_timeline")
                 try db.execute(sql: "DELETE FROM failed_actions")
                 // Note: saved_templates are NOT cleared on logout - they are user preferences

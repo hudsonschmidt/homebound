@@ -11,6 +11,8 @@ from src import database as db
 from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
     send_checkin_update_emails,
+    send_friend_overdue_resolved_push,
+    send_friend_trip_completed_push,
     send_overdue_resolved_emails,
     send_push_to_user,
     send_trip_completed_emails,
@@ -272,6 +274,42 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             background_tasks.add_task(send_notifications_sync)
         email_type = "overdue resolved" if was_overdue else "completion"
         log.info(f"[Checkout] Scheduled {email_type} emails for {len(contacts_for_email)} contacts")
+
+        # Send push notifications to friend safety contacts
+        friend_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend_user_id FROM trip_safety_contacts
+                WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                ORDER BY "order"
+                """
+            ),
+            {"trip_id": trip.id}
+        ).fetchall()
+        friend_user_ids = [f.friend_user_id for f in friend_contacts]
+
+        if friend_user_ids:
+            trip_title_for_push = trip.title
+            user_name_for_push = user_name
+            was_overdue_for_push = was_overdue
+            def send_friend_push_sync():
+                for friend_id in friend_user_ids:
+                    if was_overdue_for_push:
+                        asyncio.run(send_friend_overdue_resolved_push(
+                            friend_user_id=friend_id,
+                            user_name=user_name_for_push,
+                            trip_title=trip_title_for_push
+                        ))
+                    else:
+                        asyncio.run(send_friend_trip_completed_push(
+                            friend_user_id=friend_id,
+                            user_name=user_name_for_push,
+                            trip_title=trip_title_for_push
+                        ))
+
+            background_tasks.add_task(send_friend_push_sync)
+            push_type = "overdue resolved" if was_overdue else "completed"
+            log.info(f"[Checkout] Scheduled {push_type} push notifications for {len(friend_user_ids)} friend contacts")
 
         return CheckinResponse(
             ok=True,

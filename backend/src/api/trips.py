@@ -15,6 +15,9 @@ from src.api import auth
 from src.api.activities import Activity
 from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
+    send_friend_trip_completed_push,
+    send_friend_trip_created_push,
+    send_friend_trip_starting_push,
     send_trip_completed_emails,
     send_trip_created_emails,
     send_trip_extended_emails,
@@ -604,6 +607,34 @@ def create_trip(
 
         # Get friend contacts from junction table
         friend_contacts = _get_friend_contacts_for_trip(connection, trip_id)
+
+        # Send push notifications to friend safety contacts
+        friend_user_ids = [
+            friend_contacts["friend_contact1"],
+            friend_contacts["friend_contact2"],
+            friend_contacts["friend_contact3"]
+        ]
+        friend_user_ids = [f for f in friend_user_ids if f is not None]
+
+        if friend_user_ids:
+            trip_title_for_push = trip["title"]
+            def send_friend_push_sync():
+                for friend_id in friend_user_ids:
+                    if is_starting_now:
+                        asyncio.run(send_friend_trip_starting_push(
+                            friend_user_id=friend_id,
+                            user_name=user_name,
+                            trip_title=trip_title_for_push
+                        ))
+                    else:
+                        asyncio.run(send_friend_trip_created_push(
+                            friend_user_id=friend_id,
+                            user_name=user_name,
+                            trip_title=trip_title_for_push
+                        ))
+
+            background_tasks.add_task(send_friend_push_sync)
+            log.info(f"[Trips] Scheduled {email_type} push notifications for {len(friend_user_ids)} friend contacts")
 
         return TripResponse(
             id=trip["id"],
@@ -1241,6 +1272,29 @@ def complete_trip(
         if contacts_for_email or owner_email:
             background_tasks.add_task(send_emails_sync)
 
+        # Send push notifications to friend safety contacts
+        friend_contacts = _get_friend_contacts_for_trip(connection, trip_id)
+        friend_user_ids = [
+            friend_contacts["friend_contact1"],
+            friend_contacts["friend_contact2"],
+            friend_contacts["friend_contact3"]
+        ]
+        friend_user_ids = [f for f in friend_user_ids if f is not None]
+
+        if friend_user_ids:
+            trip_title_for_push = trip.title
+            user_name_for_push = user_name
+            def send_friend_completed_push_sync():
+                for friend_id in friend_user_ids:
+                    asyncio.run(send_friend_trip_completed_push(
+                        friend_user_id=friend_id,
+                        user_name=user_name_for_push,
+                        trip_title=trip_title_for_push
+                    ))
+
+            background_tasks.add_task(send_friend_completed_push_sync)
+            log.info(f"[Trips] Scheduled completed push notifications for {len(friend_user_ids)} friend contacts")
+
         return {"ok": True, "message": "Trip completed successfully"}
 
 
@@ -1336,6 +1390,29 @@ def start_trip(
 
         if contacts_for_email:
             background_tasks.add_task(send_emails_sync)
+
+        # Send push notifications to friend safety contacts
+        friend_contacts = _get_friend_contacts_for_trip(connection, trip_id)
+        friend_user_ids = [
+            friend_contacts["friend_contact1"],
+            friend_contacts["friend_contact2"],
+            friend_contacts["friend_contact3"]
+        ]
+        friend_user_ids = [f for f in friend_user_ids if f is not None]
+
+        if friend_user_ids:
+            trip_title_for_push = trip.title
+            user_name_for_push = user_name
+            def send_friend_starting_push_sync():
+                for friend_id in friend_user_ids:
+                    asyncio.run(send_friend_trip_starting_push(
+                        friend_user_id=friend_id,
+                        user_name=user_name_for_push,
+                        trip_title=trip_title_for_push
+                    ))
+
+            background_tasks.add_task(send_friend_starting_push_sync)
+            log.info(f"[Trips] Scheduled starting push notifications for {len(friend_user_ids)} friend contacts")
 
         return {"ok": True, "message": "Trip started successfully"}
 

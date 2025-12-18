@@ -22,12 +22,19 @@ struct MainTabView: View {
                 }
                 .tag(1)
 
+            // Friends Tab
+            FriendsTabView()
+                .tabItem {
+                    Label("Friends", systemImage: "person.2.fill")
+                }
+                .tag(2)
+
             // Map Tab
             TripMapView()
                 .tabItem {
                     Label("Map", systemImage: "map.fill")
                 }
-                .tag(2)
+                .tag(3)
         }
         .accentColor(Color.hbBrand)
     }

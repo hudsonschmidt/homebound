@@ -16,6 +16,8 @@ struct HomeboundApp: App {
     @ObservedObject private var preferences = AppPreferences.shared
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var showWhatsNew = false
+    @State private var pendingFriendInviteToken: String?
+    @State private var showFriendInvite = false
 
     var body: some Scene {
         WindowGroup {
@@ -25,6 +27,12 @@ struct HomeboundApp: App {
                     AuthenticationView()
                         .environmentObject(session)
                         .environmentObject(preferences)
+                        .onOpenURL { url in
+                            // Save friend invite token to show after login
+                            if url.pathComponents.count >= 3 && url.pathComponents[1] == "f" {
+                                pendingFriendInviteToken = url.pathComponents[2]
+                            }
+                        }
                 } else if !session.isInitialDataLoaded {
                     // Authenticated but data not yet loaded - show loading screen
                     LoadingScreen()
@@ -37,6 +45,12 @@ struct HomeboundApp: App {
                     OnboardingView()
                         .environmentObject(session)
                         .environmentObject(preferences)
+                        .onOpenURL { url in
+                            // Save friend invite token to show after onboarding
+                            if url.pathComponents.count >= 3 && url.pathComponents[1] == "f" {
+                                pendingFriendInviteToken = url.pathComponents[2]
+                            }
+                        }
                         .transition(.move(edge: .trailing))
                 } else {
                     // Authenticated with complete profile - show main tab view
@@ -55,7 +69,7 @@ struct HomeboundApp: App {
                             }
                         }
                         .onOpenURL { url in
-                            // Handle universal links for check-in/out
+                            // Handle universal links for check-in/out and friend invites
                             handleUniversalLink(url)
                         }
                         .onAppear {
@@ -63,9 +77,21 @@ struct HomeboundApp: App {
                             if preferences.shouldShowWhatsNew {
                                 showWhatsNew = true
                             }
+                            // Check for pending friend invite from before login
+                            if let token = pendingFriendInviteToken {
+                                showFriendInvite = true
+                            }
                         }
                         .fullScreenCover(isPresented: $showWhatsNew) {
                             WhatsNewView()
+                        }
+                        .sheet(isPresented: $showFriendInvite) {
+                            if let token = pendingFriendInviteToken {
+                                InviteAcceptView(token: token) {
+                                    pendingFriendInviteToken = nil
+                                }
+                                .environmentObject(session)
+                            }
                         }
                         .transition(.opacity)
                 }
@@ -87,6 +113,14 @@ struct HomeboundApp: App {
     }
 
     private func handleUniversalLink(_ url: URL) {
+        // Handle /f/{token} - Friend invite links
+        if url.pathComponents.count >= 3 && url.pathComponents[1] == "f" {
+            let token = url.pathComponents[2]
+            pendingFriendInviteToken = token
+            showFriendInvite = true
+            return
+        }
+
         // Handle /t/{token}/checkin or /t/{token}/checkout
         if url.pathComponents.count >= 3 && url.pathComponents[1] == "t" {
             let token = url.pathComponents[2]
