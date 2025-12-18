@@ -149,19 +149,8 @@ def serve_invite_page(token: str):
         <a href="{invite_url}" class="secondary-link">Open in app</a>
     </div>
 
-    <script>
-        // Try to open the app via universal link after a short delay
-        // If app is installed, it will open. If not, user sees this page.
-        setTimeout(function() {{
-            // Universal link attempt - will be intercepted by iOS if app is installed
-            window.location.href = "{invite_url}";
-        }}, 100);
-
-        // Fallback: if still on this page after 2 seconds, user probably doesn't have the app
-        setTimeout(function() {{
-            // Show the page content (it's already visible, but this confirms we're staying)
-        }}, 2000);
-    </script>
+    <!-- Universal links are handled automatically by iOS when user taps the link.
+         No JavaScript redirect needed - that would cause an infinite loop. -->
 </body>
 </html>
 """
