@@ -403,33 +403,57 @@ struct LocationSearchView: View {
 
     /// Formats a placemark into a readable address string
     private func formatAddress(from placemark: CLPlacemark) -> String {
-        var components: [String] = []
+        // For locations with a street address, use traditional format
+        if let thoroughfare = placemark.thoroughfare {
+            var components: [String] = []
 
-        // Street address (number + street name)
-        if let subThoroughfare = placemark.subThoroughfare,
-           let thoroughfare = placemark.thoroughfare {
-            components.append("\(subThoroughfare) \(thoroughfare)")
-        } else if let thoroughfare = placemark.thoroughfare {
-            components.append(thoroughfare)
+            if let subThoroughfare = placemark.subThoroughfare {
+                components.append("\(subThoroughfare) \(thoroughfare)")
+            } else {
+                components.append(thoroughfare)
+            }
+
+            if let locality = placemark.locality {
+                components.append(locality)
+            }
+
+            if let administrativeArea = placemark.administrativeArea {
+                components.append(administrativeArea)
+            }
+
+            return components.joined(separator: ", ")
         }
 
-        // City
+        // For POIs/natural features without street addresses, prefer the name
+        if let name = placemark.name, !name.isEmpty {
+            var result = name
+
+            // Add locality for context if different from name
+            if let locality = placemark.locality, !name.contains(locality) {
+                result += ", \(locality)"
+            }
+
+            // Add state for context
+            if let administrativeArea = placemark.administrativeArea {
+                result += ", \(administrativeArea)"
+            }
+
+            return result
+        }
+
+        // Fallback: build from whatever we have
+        var components: [String] = []
+
         if let locality = placemark.locality {
             components.append(locality)
         }
 
-        // State
         if let administrativeArea = placemark.administrativeArea {
             components.append(administrativeArea)
         }
 
-        // Return formatted address or fallback
         if components.isEmpty {
-            // Try name as last resort (e.g., "Golden Gate Bridge")
-            if let name = placemark.name, !name.isEmpty {
-                return name
-            }
-            return "Current Location"
+            return "Selected Location"
         }
 
         return components.joined(separator: ", ")
