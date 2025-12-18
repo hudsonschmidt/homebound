@@ -9,6 +9,9 @@ struct CreatePlanView: View {
     var existingTrip: Trip? = nil
     var isEditMode: Bool { existingTrip != nil }
 
+    // Template prefill support
+    var prefillTemplate: SavedTripTemplate? = nil
+
     // Current step tracking
     @State private var currentStep = 1
     let totalSteps = 4
@@ -56,6 +59,10 @@ struct CreatePlanView: View {
     @State private var isCreating = false
     @State private var showError = false
     @State private var errorMessage = ""
+
+    // Template saving
+    @State private var showSaveTemplateSheet = false
+    @State private var templateName = ""
 
     // Activities from session (dynamic from database)
     var activities: [ActivityTypeAdapter] {
@@ -126,7 +133,8 @@ struct CreatePlanView: View {
                                 notes: $notes,
                                 isCreating: $isCreating,
                                 isEditMode: isEditMode,
-                                onSubmit: createPlan
+                                onSubmit: createPlan,
+                                onSaveAsTemplate: { showSaveTemplateSheet = true }
                             )
                         default:
                             EmptyView()
@@ -240,6 +248,52 @@ struct CreatePlanView: View {
 
                         // Pre-populate notify self setting
                         notifySelf = trip.notify_self
+                    } else if let template = prefillTemplate {
+                        // Pre-populate fields from template
+                        planTitle = template.title
+
+                        // Find activity by ID
+                        if let activity = session.activities.first(where: { $0.id == template.activityId }) {
+                            selectedActivity = activity.name.lowercased().replacingOccurrences(of: " ", with: "_")
+                        }
+
+                        location = template.locationText ?? ""
+                        if let lat = template.locationLat, let lng = template.locationLng {
+                            locationCoordinates = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                        }
+
+                        useSeparateLocations = template.hasSeparateLocations
+                        if template.hasSeparateLocations {
+                            startLocation = template.startLocationText ?? ""
+                            if let lat = template.startLat, let lng = template.startLng {
+                                startLocationCoordinates = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                            }
+                        }
+
+                        graceMinutes = Double(template.graceMinutes)
+                        notes = template.notes ?? ""
+                        checkinIntervalMinutes = template.checkinIntervalMinutes
+                        useNotificationHours = template.useNotificationHours
+                        if template.useNotificationHours {
+                            notifyStartHour = template.notifyStartHour ?? 8
+                            notifyEndHour = template.notifyEndHour ?? 22
+                        }
+                        notifySelf = template.notifySelf
+
+                        // Pre-populate contacts from template
+                        let contactIds = [template.contact1Id, template.contact2Id, template.contact3Id].compactMap { $0 }
+                        for contactId in contactIds {
+                            if let savedContact = session.contacts.first(where: { $0.id == contactId }) {
+                                contacts.append(EmergencyContact(
+                                    name: savedContact.name,
+                                    email: savedContact.email,
+                                    savedContactId: savedContact.id
+                                ))
+                            }
+                        }
+
+                        // Mark template as used
+                        session.markTemplateUsed(template)
                     } else if let defaultActivityId = AppPreferences.shared.defaultActivityId,
                        let activity = session.activities.first(where: { $0.id == defaultActivityId }) {
                         selectedActivity = activity.name.lowercased().replacingOccurrences(of: " ", with: "_")
@@ -300,7 +354,50 @@ struct CreatePlanView: View {
             } message: {
                 Text("Setting a zero grace period means your emergency contacts will be notified immediately if you don't check out on time. Are you sure?")
             }
+            .sheet(isPresented: $showSaveTemplateSheet) {
+                SaveTemplateSheet(
+                    templateName: $templateName,
+                    defaultName: planTitle,
+                    onSave: saveAsTemplate
+                )
+            }
         }
+    }
+
+    // MARK: - Save as Template
+
+    private func saveAsTemplate() {
+        // Get activity ID
+        let activityId = session.activities.first {
+            $0.name.lowercased().replacingOccurrences(of: " ", with: "_") == selectedActivity
+        }?.id ?? 1
+
+        let template = SavedTripTemplate(
+            name: templateName.isEmpty ? planTitle : templateName,
+            title: planTitle,
+            activityId: activityId,
+            locationText: location.isEmpty ? nil : location,
+            locationLat: locationCoordinates?.latitude,
+            locationLng: locationCoordinates?.longitude,
+            startLocationText: useSeparateLocations ? (startLocation.isEmpty ? nil : startLocation) : nil,
+            startLat: useSeparateLocations ? startLocationCoordinates?.latitude : nil,
+            startLng: useSeparateLocations ? startLocationCoordinates?.longitude : nil,
+            hasSeparateLocations: useSeparateLocations,
+            graceMinutes: Int(graceMinutes),
+            notes: notes.isEmpty ? nil : notes,
+            contact1Id: contacts.count > 0 ? contacts[0].savedContactId : nil,
+            contact2Id: contacts.count > 1 ? contacts[1].savedContactId : nil,
+            contact3Id: contacts.count > 2 ? contacts[2].savedContactId : nil,
+            checkinIntervalMinutes: checkinIntervalMinutes,
+            useNotificationHours: useNotificationHours,
+            notifyStartHour: useNotificationHours ? notifyStartHour : nil,
+            notifyEndHour: useNotificationHours ? notifyEndHour : nil,
+            notifySelf: notifySelf
+        )
+
+        session.saveTemplate(template)
+        showSaveTemplateSheet = false
+        templateName = ""
     }
 
     private func canProceedFromCurrentStep() -> Bool {
@@ -1999,6 +2096,7 @@ struct Step4AdditionalNotes: View {
     @Binding var isCreating: Bool
     var isEditMode: Bool = false
     let onSubmit: () -> Void
+    var onSaveAsTemplate: (() -> Void)? = nil
     @State private var showNotesHelp = false
 
     var body: some View {
@@ -2078,6 +2176,21 @@ struct Step4AdditionalNotes: View {
                     .cornerRadius(16)
                 }
                 .disabled(isCreating)
+
+                // Save as Template Button (only show in create mode, not edit mode)
+                if !isEditMode, let onSaveAsTemplate = onSaveAsTemplate {
+                    Button(action: onSaveAsTemplate) {
+                        HStack {
+                            Image(systemName: "bookmark.fill")
+                            Text("Save as Template")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color(.tertiarySystemFill))
+                        .foregroundStyle(.primary)
+                        .cornerRadius(12)
+                    }
+                }
 
                 Spacer(minLength: 100)
             }
@@ -2689,6 +2802,52 @@ struct TimezonePicker: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Save Template Sheet
+struct SaveTemplateSheet: View {
+    @Environment(\.dismiss) var dismiss
+    @Binding var templateName: String
+    let defaultName: String
+    let onSave: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Template Name", text: $templateName)
+                        .onAppear {
+                            if templateName.isEmpty {
+                                templateName = defaultName
+                            }
+                        }
+                } header: {
+                    Text("Give your template a name")
+                } footer: {
+                    Text("This name will appear in your saved templates list for quick access later.")
+                }
+            }
+            .navigationTitle("Save Template")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        templateName = ""
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        onSave()
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

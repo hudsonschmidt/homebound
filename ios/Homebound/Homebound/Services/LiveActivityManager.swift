@@ -68,10 +68,15 @@ final class LiveActivityManager: ObservableObject {
     func handlePendingActions() async {
         guard let defaults = sharedDefaults else { return }
 
+        // Small delay to ensure UserDefaults is synced from widget extension
+        try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+
         // Handle pending checkout (takes priority - ends the activity)
         if defaults.double(forKey: LiveActivityConstants.pendingCheckoutKey) > 0 {
             defaults.removeObject(forKey: LiveActivityConstants.pendingCheckoutKey)
             debugLog("[LiveActivity] Handling pending checkout action")
+            // Refresh from server to get final state, then end
+            await refreshTripDataFromServer()
             await endAllActivities()
             return
         }
@@ -80,22 +85,17 @@ final class LiveActivityManager: ObservableObject {
         if defaults.double(forKey: LiveActivityConstants.pendingCheckinKey) > 0 {
             defaults.removeObject(forKey: LiveActivityConstants.pendingCheckinKey)
             debugLog("[LiveActivity] Handling pending checkin action")
-            await updateAllActivitiesWithCheckin()
+            // Refresh from server - this updates both widget data and Live Activity with authoritative state
+            await refreshTripDataFromServer()
         }
     }
 
-    private func updateAllActivitiesWithCheckin() async {
-        guard #available(iOS 16.1, *) else { return }
-
-        let activities = ActivityKit.Activity<TripLiveActivityAttributes>.activities
-        for activity in activities {
-            var state = activity.content.state
-            state.lastCheckinTime = Date()
-            state.checkinCount += 1  // Increment check-in count
-            let content = ActivityKit.ActivityContent(state: state, staleDate: nil)
-            await activity.update(content)
-        }
-        debugLog("[LiveActivity] Updated activities with check-in time")
+    /// Refresh trip data from server and update Live Activity
+    /// This ensures we have authoritative state from the backend
+    private func refreshTripDataFromServer() async {
+        debugLog("[LiveActivity] Refreshing trip data from server")
+        // Session.loadActivePlan() will fetch fresh data and call updateActivity()
+        await Session.shared.loadActivePlan()
     }
 
     // MARK: - Settings

@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import CoreLocation
+import WidgetKit
 
 // MARK: - Server Environment
 enum ServerEnvironment: String, CaseIterable {
@@ -82,6 +83,10 @@ private struct RefreshResponse: Decodable {
     }
 }
 final class Session: ObservableObject {
+
+    // MARK: - Shared Instance
+    /// Shared singleton instance for use in non-SwiftUI contexts (widgets, background tasks, etc.)
+    static let shared = Session()
 
     // MARK: API & Base URL
 
@@ -200,6 +205,9 @@ final class Session: ObservableObject {
     // Contacts
     @Published var contacts: [Contact] = []
 
+    // Saved trip templates (local-only)
+    @Published var savedTemplates: [SavedTripTemplate] = []
+
     // Initial data loading state
     @Published var isInitialDataLoaded: Bool = false
 
@@ -214,7 +222,11 @@ final class Session: ObservableObject {
         let tripCount = LocalStorage.shared.getCachedTripsCount()
         let activityCount = LocalStorage.shared.getCachedActivitiesCount()
         let contactCount = LocalStorage.shared.getCachedContactsCount()
-        debugLog("[Session] 📊 Cache stats: \(tripCount) trips, \(activityCount) activities, \(contactCount) contacts")
+        let templateCount = LocalStorage.shared.getSavedTemplatesCount()
+        debugLog("[Session] 📊 Cache stats: \(tripCount) trips, \(activityCount) activities, \(contactCount) contacts, \(templateCount) templates")
+
+        // Load saved templates (not auth-dependent, stored locally)
+        savedTemplates = LocalStorage.shared.getTemplates()
 
         // Load cached data immediately for instant offline support
         if accessToken != nil {
@@ -912,6 +924,8 @@ final class Session: ObservableObject {
             await MainActor.run {
                 if response.status == "active" {
                     self.activeTrip = response
+                    // Update widget data with new active trip
+                    self.updateWidgetData()
                 }
             }
 
@@ -1094,6 +1108,9 @@ final class Session: ObservableObject {
                 if let plan = response {
                     LocalStorage.shared.cacheTrip(plan)
                 }
+
+                // Update widget data
+                self.updateWidgetData()
             }
 
             // Update Live Activity
@@ -1498,13 +1515,45 @@ final class Session: ObservableObject {
                 bearer: nil
             )
 
+            // Update local activeTrip with new last_checkin timestamp immediately
+            let checkinTimestamp = ISO8601DateFormatter().string(from: Date())
+
             await MainActor.run {
+                // Update local activeTrip state so UI reflects the check-in
+                if var updatedTrip = self.activeTrip {
+                    updatedTrip.last_checkin = checkinTimestamp
+                    self.activeTrip = updatedTrip
+                }
                 self.notice = "Checked in successfully!"
+                // Update widget data with new check-in
+                self.updateWidgetData()
             }
+
+            // Also update local cache for consistency
+            LocalStorage.shared.updateCachedTripFields(
+                tripId: plan.id,
+                updates: ["last_checkin": checkinTimestamp]
+            )
+
+            debugLog("[Session] ✅ Check-in successful, local state updated")
             return true
-        } catch {
-            // Network failed - queue for later sync
+        } catch let error as URLError where error.code == .notConnectedToInternet ||
+                                            error.code == .networkConnectionLost {
+            // Only queue for actual network connectivity issues
+            debugLog("[Session] ⚠️ Check-in network error - queueing offline: \(error.code)")
             return await queueOfflineCheckIn(plan: plan, token: token, location: location)
+        } catch let error as URLError where error.code == .timedOut {
+            // Timeout is tricky - server may have processed. Queue but log warning.
+            debugLog("[Session] ⚠️ Check-in timed out - server may have processed, queueing anyway")
+            return await queueOfflineCheckIn(plan: plan, token: token, location: location)
+        } catch {
+            // Other errors (server errors, decode errors) - don't queue, show error
+            // The server may have processed the request, so queueing could cause duplicates
+            debugLog("[Session] ❌ Check-in failed with non-network error: \(error)")
+            await MainActor.run {
+                self.lastError = "Check-in failed. Please try again."
+            }
+            return false
         }
     }
 
@@ -1562,6 +1611,8 @@ final class Session: ObservableObject {
             await MainActor.run {
                 self.activeTrip = nil
                 self.notice = "Welcome back! Trip completed safely."
+                // Update widget data (clears it since no active trip)
+                self.updateWidgetData()
             }
 
             // Reload to check for any other active plans
@@ -1651,6 +1702,8 @@ final class Session: ObservableObject {
 
             await MainActor.run {
                 self.notice = "Trip extended by \(minutes) minutes"
+                // Update widget data with new ETA
+                self.updateWidgetData()
             }
             return true
         } catch {
@@ -1756,6 +1809,8 @@ final class Session: ObservableObject {
 
             await MainActor.run {
                 self.notice = "Trip started!"
+                // Update widget data with new active trip
+                self.updateWidgetData()
             }
             return true
         } catch {
@@ -2322,12 +2377,107 @@ final class Session: ObservableObject {
         isLoadingActivities = false
     }
 
+    // MARK: - Trip Templates
+
+    /// Load templates from local storage
+    func loadTemplates() {
+        savedTemplates = LocalStorage.shared.getTemplates()
+        debugLog("[Session] 📋 Loaded \(savedTemplates.count) saved templates")
+    }
+
+    /// Save a new template
+    func saveTemplate(_ template: SavedTripTemplate) {
+        LocalStorage.shared.saveTemplate(template)
+        loadTemplates()
+        debugLog("[Session] ✅ Saved template: \(template.name)")
+    }
+
+    /// Delete a template
+    func deleteTemplate(_ template: SavedTripTemplate) {
+        LocalStorage.shared.deleteTemplate(id: template.id)
+        loadTemplates()
+        debugLog("[Session] 🗑️ Deleted template: \(template.name)")
+    }
+
+    /// Mark template as used (updates lastUsedAt for sorting)
+    func markTemplateUsed(_ template: SavedTripTemplate) {
+        LocalStorage.shared.updateTemplateLastUsed(id: template.id)
+        loadTemplates()
+        debugLog("[Session] 📝 Marked template as used: \(template.name)")
+    }
+
     // MARK: - Live Activity Helpers
 
     /// Get check-in count from cached timeline events for a trip
     private func getCheckinCount(tripId: Int) -> Int {
         let cachedTimeline = LocalStorage.shared.getCachedTimeline(tripId: tripId)
         return cachedTimeline.filter { $0.kind == "checkin" }.count
+    }
+
+    // MARK: - Widget Data Sharing
+
+    /// Update shared widget data with current active trip
+    /// Call this whenever activeTrip changes to keep widgets in sync
+    @MainActor
+    func updateWidgetData() {
+        guard let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier) else {
+            debugLog("[Session] ⚠️ Failed to access app group defaults for widget")
+            return
+        }
+
+        guard let trip = activeTrip else {
+            // Clear widget data when no active trip
+            defaults.removeObject(forKey: LiveActivityConstants.widgetTripDataKey)
+            defaults.synchronize()
+            WidgetCenter.shared.reloadAllTimelines()
+            debugLog("[Session] 📱 Cleared widget data (no active trip)")
+            return
+        }
+
+        // Get check-in count from timeline
+        let checkinCount = getCheckinCount(tripId: trip.id)
+
+        // Parse last check-in time if available
+        var lastCheckinTime: Date? = nil
+        if let lastCheckin = trip.last_checkin {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            lastCheckinTime = formatter.date(from: lastCheckin)
+            if lastCheckinTime == nil {
+                // Try without fractional seconds
+                formatter.formatOptions = [.withInternetDateTime]
+                lastCheckinTime = formatter.date(from: lastCheckin)
+            }
+        }
+
+        // Create widget data structure
+        let widgetData = [
+            "id": trip.id,
+            "title": trip.title,
+            "status": trip.status,
+            "activityName": trip.activity.name,
+            "activityIcon": trip.activity.icon,
+            "primaryColor": trip.activity.colors.primary,
+            "secondaryColor": trip.activity.colors.secondary,
+            "startAt": trip.start_at.timeIntervalSince1970,
+            "etaAt": trip.eta_at.timeIntervalSince1970,
+            "graceMinutes": trip.grace_minutes,
+            "locationText": trip.location_text as Any,
+            "checkinToken": trip.checkin_token as Any,
+            "checkoutToken": trip.checkout_token as Any,
+            "lastCheckinTime": lastCheckinTime?.timeIntervalSince1970 as Any,
+            "checkinCount": checkinCount
+        ] as [String: Any]
+
+        // Encode as JSON data for reliable cross-process sharing
+        if let jsonData = try? JSONSerialization.data(withJSONObject: widgetData) {
+            defaults.set(jsonData, forKey: LiveActivityConstants.widgetTripDataKey)
+            defaults.synchronize()
+            WidgetCenter.shared.reloadAllTimelines()
+            debugLog("[Session] 📱 Updated widget data for trip: \(trip.title)")
+        } else {
+            debugLog("[Session] ⚠️ Failed to encode widget data")
+        }
     }
 
     // MARK: - Sign Out

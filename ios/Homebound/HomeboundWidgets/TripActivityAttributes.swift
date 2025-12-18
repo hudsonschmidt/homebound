@@ -116,6 +116,12 @@ struct LiveActivityConstants {
     static let pendingCheckoutKey = "pendingCheckoutAction"
     static let darwinNotificationName = "com.homeboundapp.liveactivity.action"
 
+    // Widget data sharing
+    static let widgetTripDataKey = "widgetTripData"
+
+    // Check-in confirmation feedback (timestamp when check-in button was pressed)
+    static let checkinConfirmationKey = "checkinConfirmationTimestamp"
+
     /// Base URL for deep links
     static let baseURL = "https://api.homeboundapp.com"
 

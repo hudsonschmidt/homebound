@@ -27,7 +27,42 @@ final class NetworkMonitor: ObservableObject {
     }
 
     private init() {
+        // Do synchronous initial check to avoid race condition on app launch
+        // When user taps check-in immediately after opening app, we need to know
+        // the actual network status, not the default "false" value
+        performInitialNetworkCheck()
         startMonitoring()
+    }
+
+    private func performInitialNetworkCheck() {
+        let initialMonitor = NWPathMonitor()
+        let semaphore = DispatchSemaphore(value: 0)
+        var initialPath: NWPath?
+
+        initialMonitor.pathUpdateHandler = { path in
+            initialPath = path
+            semaphore.signal()
+        }
+
+        let tempQueue = DispatchQueue(label: "NetworkMonitor.initial")
+        initialMonitor.start(queue: tempQueue)
+
+        // Wait up to 500ms for initial network status
+        let result = semaphore.wait(timeout: .now() + 0.5)
+        initialMonitor.cancel()
+
+        if result == .success, let path = initialPath {
+            isConnected = path.status == .satisfied
+            connectionType = getConnectionType(path)
+            wasDisconnected = !isConnected
+            debugLog("[NetworkMonitor] Initial check: \(isConnected ? "connected" : "disconnected") via \(connectionType)")
+        } else {
+            // Timeout - default to connected to avoid false offline queueing
+            // The async monitor will correct this quickly if wrong
+            isConnected = true
+            wasDisconnected = false
+            debugLog("[NetworkMonitor] Initial check timed out - assuming connected")
+        }
     }
 
     private func startMonitoring() {

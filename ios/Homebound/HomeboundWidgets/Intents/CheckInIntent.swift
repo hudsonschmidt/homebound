@@ -8,6 +8,7 @@
 import ActivityKit
 import AppIntents
 import SwiftUI
+import WidgetKit
 
 @available(iOS 17.0, *)
 struct CheckInIntent: LiveActivityIntent {
@@ -31,23 +32,38 @@ struct CheckInIntent: LiveActivityIntent {
     }
 
     func perform() async throws -> some IntentResult {
-        // Perform the API call
-        _ = try await LiveActivityAPI.shared.checkIn(token: checkinToken)
+        let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier)
 
-        // Update the Live Activity to show success
-        await updateLiveActivityWithSuccess()
+        do {
+            // Perform API call FIRST - only show success if it actually succeeds
+            _ = try await LiveActivityAPI.shared.checkIn(token: checkinToken)
+
+            // API succeeded - now set confirmation timestamp for visual feedback
+            defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.checkinConfirmationKey)
+            defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckinKey)
+            defaults?.synchronize()
+
+            // Small delay to ensure UserDefaults syncs across processes
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+            // Post Darwin notification to wake main app
+            postDarwinNotification()
+
+            // Refresh widgets to show updated state
+            WidgetCenter.shared.reloadAllTimelines()
+
+        } catch {
+            // API failed - don't show success indicators
+            // The error will propagate and the button won't show false success
+            throw error
+        }
 
         return .result()
     }
 
-    private func updateLiveActivityWithSuccess() async {
-        // Signal the main app to update the Live Activity
+    private func postDarwinNotification() {
+        // Signal the main app to refresh trip data and update Live Activity
         // (Widget extensions cannot access activities created by the main app)
-        let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier)
-        defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckinKey)
-        defaults?.synchronize()
-
-        // Post Darwin notification to wake main app immediately
         let name = LiveActivityConstants.darwinNotificationName as CFString
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),

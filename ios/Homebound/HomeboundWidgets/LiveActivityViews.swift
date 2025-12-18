@@ -373,7 +373,7 @@ struct LockScreenView: View {
                         .background(Color.green)
                         .cornerRadius(10)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LiveActivityButtonStyle())
                 }
             }
 
@@ -392,7 +392,7 @@ struct LockScreenView: View {
                     .background(isOverdue ? statusColor : brandGreen)
                     .cornerRadius(10)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LiveActivityButtonStyle())
             }
         }
     }
@@ -470,7 +470,7 @@ struct LockScreenView: View {
                         .background(Color.green)
                         .cornerRadius(12)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LiveActivityButtonStyle())
                 }
             }
 
@@ -532,7 +532,7 @@ struct LockScreenView: View {
                     .background(isOverdue ? statusColor : brandGreen)
                     .cornerRadius(12)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LiveActivityButtonStyle())
             }
         }
     }
@@ -801,7 +801,7 @@ struct ExpandedBottomView: View {
                         .background(Color.green)
                         .cornerRadius(12)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LiveActivityButtonStyle())
                 }
             }
 
@@ -819,7 +819,7 @@ struct ExpandedBottomView: View {
                     .background(isOverdue ? statusColor : brandGreen)
                     .cornerRadius(12)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LiveActivityButtonStyle())
             }
         }
     }
@@ -862,6 +862,17 @@ struct ExpandedBottomView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Live Activity Button Style
+
+private struct LiveActivityButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

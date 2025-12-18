@@ -176,7 +176,7 @@ struct NewHomeView: View {
             }
             .navigationBarHidden(true)
             .sheet(isPresented: $showingCreatePlan) {
-                CreatePlanView()
+                TripStartView()
                     .environmentObject(session)
             }
             .sheet(isPresented: $showingSettings) {
@@ -629,25 +629,29 @@ struct ActivePlanCardCompact: View {
                     Task {
                         isPerformingAction = true
                         let success = await session.checkIn()
+
                         if success {
                             // Reload timeline to show updated check-in count
                             if let tripId = session.activeTrip?.id {
                                 let events = await session.loadTimeline(planId: tripId)
-                                // Batch state updates in single MainActor block to reduce re-renders
                                 await MainActor.run {
                                     self.timeline = events
-                                    self.isPerformingAction = false
                                 }
-                                if preferences.hapticFeedbackEnabled {
-                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                }
-                                return
+                            }
+                            if preferences.hapticFeedbackEnabled {
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            }
+                        } else {
+                            // Show error haptic on failure
+                            if preferences.hapticFeedbackEnabled {
+                                UINotificationFeedbackGenerator().notificationOccurred(.error)
                             }
                         }
-                        if preferences.hapticFeedbackEnabled {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+                        // Always reset action state
+                        await MainActor.run {
+                            isPerformingAction = false
                         }
-                        isPerformingAction = false
                     }
                 }) {
                     Label("Check In", systemImage: "checkmark.circle.fill")

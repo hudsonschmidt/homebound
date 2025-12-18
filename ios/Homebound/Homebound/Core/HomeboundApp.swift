@@ -12,7 +12,7 @@ import CoreLocation
 
 @main
 struct HomeboundApp: App {
-    @StateObject private var session = Session()
+    @ObservedObject private var session = Session.shared
     @ObservedObject private var preferences = AppPreferences.shared
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var showWhatsNew = false

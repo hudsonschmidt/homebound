@@ -200,18 +200,6 @@ class AppPreferences: ObservableObject {
         self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: "hapticFeedbackEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "hapticFeedbackEnabled")
         self.checkInSoundEnabled = UserDefaults.standard.object(forKey: "checkInSoundEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "checkInSoundEnabled")
 
-        // Set up Combine subscribers to persist Sounds & Haptics changes
-        // Using Combine instead of didSet because didSet doesn't reliably fire through SwiftUI bindings
-        $hapticFeedbackEnabled
-            .dropFirst()
-            .sink { UserDefaults.standard.set($0, forKey: "hapticFeedbackEnabled") }
-            .store(in: &preferenceCancellables)
-
-        $checkInSoundEnabled
-            .dropFirst()
-            .sink { UserDefaults.standard.set($0, forKey: "checkInSoundEnabled") }
-            .store(in: &preferenceCancellables)
-
         // Map
         let mapTypeRaw = UserDefaults.standard.string(forKey: "defaultMapType") ?? "standard"
         self.defaultMapType = MapType(rawValue: mapTypeRaw) ?? .standard
@@ -240,6 +228,19 @@ class AppPreferences: ObservableObject {
         } else {
             self.lastSeenWhatsNewVersion = storedVersion
         }
+
+        // Set up Combine subscribers to persist Sounds & Haptics changes
+        // Using Combine instead of didSet because didSet doesn't reliably fire through SwiftUI bindings
+        // Note: Must be done after all stored properties are initialized
+        $hapticFeedbackEnabled
+            .dropFirst()
+            .sink { UserDefaults.standard.set($0, forKey: "hapticFeedbackEnabled") }
+            .store(in: &preferenceCancellables)
+
+        $checkInSoundEnabled
+            .dropFirst()
+            .sink { UserDefaults.standard.set($0, forKey: "checkInSoundEnabled") }
+            .store(in: &preferenceCancellables)
     }
 
     // MARK: - Formatting Helpers

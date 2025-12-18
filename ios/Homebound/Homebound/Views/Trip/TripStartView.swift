@@ -1,0 +1,211 @@
+import SwiftUI
+
+/// Pre-step view shown before CreatePlanView
+/// Allows users to choose between creating a new trip or using a saved template
+struct TripStartView: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.dismiss) var dismiss
+
+    @State private var showingCreatePlan = false
+    @State private var selectedTemplate: SavedTripTemplate? = nil
+    @State private var templateToDelete: SavedTripTemplate? = nil
+    @State private var showDeleteConfirmation = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Start a Trip")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                        Text("Create a new trip or use a saved template")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 20)
+
+                    // New Trip Button
+                    Button(action: {
+                        selectedTemplate = nil
+                        showingCreatePlan = true
+                    }) {
+                        NewTripOptionCard()
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Saved Templates Section
+                    if !session.savedTemplates.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Saved Templates")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+
+                            ForEach(session.savedTemplates) { template in
+                                Button(action: {
+                                    selectedTemplate = template
+                                    showingCreatePlan = true
+                                }) {
+                                    TemplateCard(template: template, onDelete: {
+                                        templateToDelete = template
+                                        showDeleteConfirmation = true
+                                    })
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 100)
+            }
+            .scrollIndicators(.hidden)
+            .navigationTitle("New Adventure")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showingCreatePlan) {
+                CreatePlanView(prefillTemplate: selectedTemplate)
+                    .environmentObject(session)
+            }
+            .alert("Delete Template?", isPresented: $showDeleteConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    templateToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    if let template = templateToDelete {
+                        session.deleteTemplate(template)
+                    }
+                    templateToDelete = nil
+                }
+            } message: {
+                if let template = templateToDelete {
+                    Text("Are you sure you want to delete \"\(template.name)\"? This cannot be undone.")
+                }
+            }
+            .task {
+                session.loadTemplates()
+            }
+        }
+    }
+}
+
+// MARK: - New Trip Option Card
+struct NewTripOptionCard: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.hbBrand, Color.hbTeal],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 50, height: 50)
+
+                Image(systemName: "plus")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("New Trip")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text("Start from scratch")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Template Card
+struct TemplateCard: View {
+    let template: SavedTripTemplate
+    var onDelete: (() -> Void)? = nil
+    @EnvironmentObject var session: Session
+
+    var activity: Activity? {
+        session.activities.first { $0.id == template.activityId }
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Color(hex: activity?.colors.primary ?? "#666666") ?? .gray)
+                    .frame(width: 50, height: 50)
+
+                Text(activity?.icon ?? "figure.walk")
+                    .font(.title3)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(template.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                if let location = template.locationText, !location.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                            .font(.caption2)
+                        Text(location)
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+
+                // Show contact count if contacts are saved
+                let contactCount = [template.contact1Id, template.contact2Id, template.contact3Id].compactMap { $0 }.count
+                if contactCount > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.2.fill")
+                            .font(.caption2)
+                        Text("\(contactCount) contact\(contactCount == 1 ? "" : "s")")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            // Delete button
+            if let onDelete = onDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.subheadline)
+                        .foregroundStyle(.red.opacity(0.7))
+                        .padding(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+    }
+}
+
+#Preview {
+    TripStartView()
+        .environmentObject(Session())
+}

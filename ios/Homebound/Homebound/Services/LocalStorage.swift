@@ -9,7 +9,7 @@ final class LocalStorage {
     private let maxCachedTrips = 25
 
     // Schema versioning
-    private let currentSchemaVersion = 2
+    private let currentSchemaVersion = 3
     private let userDefaultsSchemaKey = "LocalStorageSchemaVersion"
 
     private init() {
@@ -77,6 +77,13 @@ final class LocalStorage {
                 description: "Clear orphaned trips from v1 migration",
                 execute: { db in
                     try self.clearOrphanedTrips(db)
+                }
+            ),
+            Migration(
+                version: 3,
+                description: "Add saved_templates table",
+                execute: { db in
+                    try self.addSavedTemplatesTable(db)
                 }
             )
         ]
@@ -189,6 +196,47 @@ final class LocalStorage {
 
         let remainingCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cached_trips") ?? 0
         debugLog("[LocalStorage] ✅ Cleared \(orphanedCount) orphaned trips, \(remainingCount) trips remaining")
+    }
+
+    /// Migration v3: Add saved_templates table for trip templates
+    private func addSavedTemplatesTable(_ db: Database) throws {
+        // Check if table already exists
+        if try db.tableExists("saved_templates") {
+            debugLog("[LocalStorage] ✅ saved_templates table already exists, skipping migration")
+            return
+        }
+
+        debugLog("[LocalStorage] 🔄 Creating saved_templates table...")
+
+        try db.execute(sql: """
+            CREATE TABLE saved_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                activity_id INTEGER NOT NULL,
+                location_text TEXT,
+                location_lat REAL,
+                location_lng REAL,
+                start_location_text TEXT,
+                start_lat REAL,
+                start_lng REAL,
+                has_separate_locations INTEGER NOT NULL DEFAULT 0,
+                grace_minutes INTEGER NOT NULL DEFAULT 30,
+                notes TEXT,
+                contact1_id INTEGER,
+                contact2_id INTEGER,
+                contact3_id INTEGER,
+                checkin_interval_minutes INTEGER NOT NULL DEFAULT 30,
+                use_notification_hours INTEGER NOT NULL DEFAULT 0,
+                notify_start_hour INTEGER,
+                notify_end_hour INTEGER,
+                notify_self INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT
+            )
+        """)
+
+        debugLog("[LocalStorage] ✅ saved_templates table created successfully")
     }
 
     // MARK: - Database Setup
@@ -1445,6 +1493,173 @@ final class LocalStorage {
         }
     }
 
+    // MARK: - Saved Templates
+
+    /// Save a trip template
+    func saveTemplate(_ template: SavedTripTemplate) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO saved_templates (
+                        id, name, title, activity_id,
+                        location_text, location_lat, location_lng,
+                        start_location_text, start_lat, start_lng,
+                        has_separate_locations, grace_minutes, notes,
+                        contact1_id, contact2_id, contact3_id,
+                        checkin_interval_minutes, use_notification_hours,
+                        notify_start_hour, notify_end_hour, notify_self,
+                        created_at, last_used_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [
+                    template.id.uuidString,
+                    template.name,
+                    template.title,
+                    template.activityId,
+                    template.locationText,
+                    template.locationLat,
+                    template.locationLng,
+                    template.startLocationText,
+                    template.startLat,
+                    template.startLng,
+                    template.hasSeparateLocations ? 1 : 0,
+                    template.graceMinutes,
+                    template.notes,
+                    template.contact1Id,
+                    template.contact2Id,
+                    template.contact3Id,
+                    template.checkinIntervalMinutes,
+                    template.useNotificationHours ? 1 : 0,
+                    template.notifyStartHour,
+                    template.notifyEndHour,
+                    template.notifySelf ? 1 : 0,
+                    ISO8601DateFormatter().string(from: template.createdAt),
+                    template.lastUsedAt.map { ISO8601DateFormatter().string(from: $0) }
+                ])
+            }
+            debugLog("[LocalStorage] ✅ Saved template: \(template.name)")
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to save template: \(error)")
+        }
+    }
+
+    /// Get all saved templates
+    func getTemplates() -> [SavedTripTemplate] {
+        guard let dbQueue = dbQueue else { return [] }
+
+        do {
+            return try dbQueue.read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT * FROM saved_templates ORDER BY last_used_at DESC, created_at DESC
+                """)
+
+                return rows.compactMap { row -> SavedTripTemplate? in
+                    guard let idString = row["id"] as? String,
+                          let id = UUID(uuidString: idString),
+                          let name = row["name"] as? String,
+                          let title = row["title"] as? String,
+                          let activityId = (row["activity_id"] as? Int64).map({ Int($0) }) ?? (row["activity_id"] as? Int),
+                          let graceMinutes = (row["grace_minutes"] as? Int64).map({ Int($0) }) ?? (row["grace_minutes"] as? Int),
+                          let checkinIntervalMinutes = (row["checkin_interval_minutes"] as? Int64).map({ Int($0) }) ?? (row["checkin_interval_minutes"] as? Int),
+                          let createdAtStr = row["created_at"] as? String,
+                          let createdAt = ISO8601DateFormatter().date(from: createdAtStr)
+                    else {
+                        debugLog("[LocalStorage] ⚠️ Failed to parse template row")
+                        return nil
+                    }
+
+                    let hasSeparateLocations = ((row["has_separate_locations"] as? Int64) ?? 0) == 1
+                    let useNotificationHours = ((row["use_notification_hours"] as? Int64) ?? 0) == 1
+                    let notifySelf = ((row["notify_self"] as? Int64) ?? 0) == 1
+
+                    let lastUsedAt: Date? = {
+                        if let lastUsedAtStr = row["last_used_at"] as? String {
+                            return ISO8601DateFormatter().date(from: lastUsedAtStr)
+                        }
+                        return nil
+                    }()
+
+                    return SavedTripTemplate(
+                        id: id,
+                        name: name,
+                        title: title,
+                        activityId: activityId,
+                        locationText: row["location_text"] as? String,
+                        locationLat: row["location_lat"] as? Double,
+                        locationLng: row["location_lng"] as? Double,
+                        startLocationText: row["start_location_text"] as? String,
+                        startLat: row["start_lat"] as? Double,
+                        startLng: row["start_lng"] as? Double,
+                        hasSeparateLocations: hasSeparateLocations,
+                        graceMinutes: graceMinutes,
+                        notes: row["notes"] as? String,
+                        contact1Id: (row["contact1_id"] as? Int64).map({ Int($0) }) ?? (row["contact1_id"] as? Int),
+                        contact2Id: (row["contact2_id"] as? Int64).map({ Int($0) }) ?? (row["contact2_id"] as? Int),
+                        contact3Id: (row["contact3_id"] as? Int64).map({ Int($0) }) ?? (row["contact3_id"] as? Int),
+                        checkinIntervalMinutes: checkinIntervalMinutes,
+                        useNotificationHours: useNotificationHours,
+                        notifyStartHour: (row["notify_start_hour"] as? Int64).map({ Int($0) }) ?? (row["notify_start_hour"] as? Int),
+                        notifyEndHour: (row["notify_end_hour"] as? Int64).map({ Int($0) }) ?? (row["notify_end_hour"] as? Int),
+                        notifySelf: notifySelf,
+                        createdAt: createdAt,
+                        lastUsedAt: lastUsedAt
+                    )
+                }
+            }
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to get templates: \(error)")
+            return []
+        }
+    }
+
+    /// Delete a saved template
+    func deleteTemplate(id: UUID) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM saved_templates WHERE id = ?", arguments: [id.uuidString])
+            }
+            debugLog("[LocalStorage] ✅ Deleted template: \(id)")
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to delete template: \(error)")
+        }
+    }
+
+    /// Update last used timestamp for a template
+    func updateTemplateLastUsed(id: UUID) {
+        guard let dbQueue = dbQueue else { return }
+
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: """
+                    UPDATE saved_templates SET last_used_at = ? WHERE id = ?
+                """, arguments: [
+                    ISO8601DateFormatter().string(from: Date()),
+                    id.uuidString
+                ])
+            }
+            debugLog("[LocalStorage] ✅ Updated template last used: \(id)")
+        } catch {
+            debugLog("[LocalStorage] ❌ Failed to update template last used: \(error)")
+        }
+    }
+
+    /// Get count of saved templates
+    func getSavedTemplatesCount() -> Int {
+        guard let dbQueue = dbQueue else { return 0 }
+
+        do {
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM saved_templates") ?? 0
+            }
+        } catch {
+            debugLog("[LocalStorage] Failed to get saved templates count: \(error)")
+            return 0
+        }
+    }
+
     // MARK: - Clear All Data
 
     /// Clear all local storage (for logout)
@@ -1460,6 +1675,7 @@ final class LocalStorage {
                 try db.execute(sql: "DELETE FROM cached_contacts")
                 try db.execute(sql: "DELETE FROM cached_timeline")
                 try db.execute(sql: "DELETE FROM failed_actions")
+                // Note: saved_templates are NOT cleared on logout - they are user preferences
             }
             debugLog("[LocalStorage] Cleared all data")
         } catch {
@@ -1580,7 +1796,7 @@ final class LocalStorage {
                 debugLog("Target Version: \(currentSchemaVersion)")
                 debugLog("")
 
-                let tables = ["cached_trips", "cached_activities", "pending_actions", "auth_tokens"]
+                let tables = ["cached_trips", "cached_activities", "pending_actions", "auth_tokens", "saved_templates"]
 
                 for tableName in tables {
                     if try db.tableExists(tableName) {

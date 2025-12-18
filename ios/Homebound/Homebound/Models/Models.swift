@@ -371,6 +371,86 @@ struct TimelineEvent: Codable, Identifiable {
     }
 }
 
+// MARK: - Saved Trip Template (local-only)
+
+/// A saved trip template for quick trip creation
+/// Stores all trip data EXCEPT times/dates
+struct SavedTripTemplate: Codable, Identifiable {
+    let id: UUID
+    var name: String                    // Template display name (can differ from title)
+    var title: String                   // Pre-filled trip title
+    var activityId: Int                 // Activity ID (references Activity.id)
+    var locationText: String?           // Destination location text
+    var locationLat: Double?
+    var locationLng: Double?
+    var startLocationText: String?      // Start location for separate start/destination
+    var startLat: Double?
+    var startLng: Double?
+    var hasSeparateLocations: Bool
+    var graceMinutes: Int
+    var notes: String?
+    var contact1Id: Int?                // Saved contact IDs
+    var contact2Id: Int?
+    var contact3Id: Int?
+    var checkinIntervalMinutes: Int
+    var useNotificationHours: Bool
+    var notifyStartHour: Int?
+    var notifyEndHour: Int?
+    var notifySelf: Bool
+    var createdAt: Date
+    var lastUsedAt: Date?
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        title: String,
+        activityId: Int,
+        locationText: String? = nil,
+        locationLat: Double? = nil,
+        locationLng: Double? = nil,
+        startLocationText: String? = nil,
+        startLat: Double? = nil,
+        startLng: Double? = nil,
+        hasSeparateLocations: Bool = false,
+        graceMinutes: Int = 30,
+        notes: String? = nil,
+        contact1Id: Int? = nil,
+        contact2Id: Int? = nil,
+        contact3Id: Int? = nil,
+        checkinIntervalMinutes: Int = 30,
+        useNotificationHours: Bool = false,
+        notifyStartHour: Int? = nil,
+        notifyEndHour: Int? = nil,
+        notifySelf: Bool = false,
+        createdAt: Date = Date(),
+        lastUsedAt: Date? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.title = title
+        self.activityId = activityId
+        self.locationText = locationText
+        self.locationLat = locationLat
+        self.locationLng = locationLng
+        self.startLocationText = startLocationText
+        self.startLat = startLat
+        self.startLng = startLng
+        self.hasSeparateLocations = hasSeparateLocations
+        self.graceMinutes = graceMinutes
+        self.notes = notes
+        self.contact1Id = contact1Id
+        self.contact2Id = contact2Id
+        self.contact3Id = contact3Id
+        self.checkinIntervalMinutes = checkinIntervalMinutes
+        self.useNotificationHours = useNotificationHours
+        self.notifyStartHour = notifyStartHour
+        self.notifyEndHour = notifyEndHour
+        self.notifySelf = notifySelf
+        self.createdAt = createdAt
+        self.lastUsedAt = lastUsedAt
+    }
+}
+
 // MARK: - Activity Models (from database)
 
 struct Activity: Codable, Identifiable, Equatable {
