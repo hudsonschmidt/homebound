@@ -589,6 +589,14 @@ struct Step1TripDetails: View {
     @Binding var showingStartLocationSearch: Bool
     let activities: [ActivityTypeAdapter]
 
+    @EnvironmentObject var preferences: AppPreferences
+
+    var pinnedActivities: [ActivityTypeAdapter] {
+        preferences.pinnedActivityIds.compactMap { pinnedId in
+            activities.first { $0.id == pinnedId }
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -623,6 +631,30 @@ struct Step1TripDetails: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    // Favorites Section
+                    if !pinnedActivities.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Favorites")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+
+                            HStack(spacing: 12) {
+                                ForEach(pinnedActivities, id: \.id) { activity in
+                                    ActivityTypeButton(
+                                        activity: activity,
+                                        isSelected: selectedActivity == activity.rawValue,
+                                        action: { selectedActivity = activity.rawValue }
+                                    )
+                                }
+                            }
+                        }
+
+                        Divider()
+                            .padding(.vertical, 4)
+                    }
+
+                    // All Activities
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 12) {
                         ForEach(activities, id: \.id) { activity in
                             ActivityTypeButton(

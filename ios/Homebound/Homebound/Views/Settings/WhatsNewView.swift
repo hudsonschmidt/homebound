@@ -21,55 +21,37 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 0.3.0",
+        title: "Update 0.4.0",
         features: [
             WhatsNewFeature(
-                icon: "bell.badge",
+                icon: "livephoto",
                 iconColor: .white,
-                title: "Check-in from Notifications",
-                description: "Quickly check in or check out directly from push notifications without opening the app."
+                title: "Live Activity",
+                description: "Three versions of live activity available."
             ),
             WhatsNewFeature(
-                icon: "play",
+                icon: "widget.small.badge.plus",
                 iconColor: .white,
-                title: "Start Upcoming Trips Early",
-                description: "Slide upcoming trips left on the home screen to start them early. End time will stay the same."
+                title: "Widgets",
+                description: "Widgets for both home and lock screen."
             ),
             WhatsNewFeature(
-                icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath",
+                icon: "pin",
                 iconColor: .white,
-                title: "Separate Starting + Ending Location Support",
-                description: "When planning a trip, you can now set different starting and ending locations."
+                title: "Pin Three Activities",
+                description: "Pin your top 3 favorite activities for easier selection."
             ),
             WhatsNewFeature(
-                icon: "app.badge",
+                icon: "square.and.arrow.down",
                 iconColor: .white,
-                title: "Notification Customization",
-                description: "When planning a trip, you can now set how often and when to receive check-in notifications."
-            ),
-            WhatsNewFeature(
-                icon: "globe.badge.clock",
-                iconColor: .white,
-                title: "Timezone Support",
-                description: "Trips can now start and end in different timezones."
-            ),
-            WhatsNewFeature(
-                icon: "envelope.badge",
-                iconColor: .white,
-                title: "Option to Receive Copy of Emails",
-                description: "On contact selection, you can now choose to receive a copy of all emails sent to your contacts."
-            ),
-            WhatsNewFeature(
-                icon: "questionmark.circle",
-                iconColor: .white,
-                title: "Incorportated Help Buttons",
-                description: "Added help buttons throughout the plan creation process."
+                title: "Trip Saving",
+                description: "Trip templates can be created and selected for easier trip creation."
             ),
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .white,
                 title: "Bug Fixes",
-                description: "Deleted items no longer reappear, notification silence works, buggy ui/keyboard issues fixed, upcoming trips no longer start when editing, and more!"
+                description: "Contact delete fix, theme switching fix, map coordinate fix, checkin via notification rework, improved location description when selecting via map."
             )
         ]
     )

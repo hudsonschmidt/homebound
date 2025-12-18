@@ -79,6 +79,18 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    @Published var pinnedActivityIds: [Int] {
+        didSet {
+            let limited = Array(pinnedActivityIds.prefix(3))
+            if pinnedActivityIds != limited {
+                pinnedActivityIds = limited
+            }
+            if let data = try? JSONEncoder().encode(pinnedActivityIds) {
+                UserDefaults.standard.set(data, forKey: "pinnedActivityIds")
+            }
+        }
+    }
+
     // MARK: - Home Screen
     @Published var showUpcomingTrips: Bool {
         didSet {
@@ -190,6 +202,14 @@ class AppPreferences: ObservableObject {
         let savedActivityId = UserDefaults.standard.integer(forKey: "defaultActivityId")
         self.defaultActivityId = savedActivityId > 0 ? savedActivityId : nil
 
+        // Pinned Activities
+        if let data = UserDefaults.standard.data(forKey: "pinnedActivityIds"),
+           let ids = try? JSONDecoder().decode([Int].self, from: data) {
+            self.pinnedActivityIds = Array(ids.prefix(3))
+        } else {
+            self.pinnedActivityIds = []
+        }
+
         // Home Screen - defaults to true/shown
         self.showUpcomingTrips = UserDefaults.standard.object(forKey: "showUpcomingTrips") == nil ? true : UserDefaults.standard.bool(forKey: "showUpcomingTrips")
         self.showStats = UserDefaults.standard.object(forKey: "showStats") == nil ? true : UserDefaults.standard.bool(forKey: "showStats")
@@ -241,6 +261,20 @@ class AppPreferences: ObservableObject {
             .dropFirst()
             .sink { UserDefaults.standard.set($0, forKey: "checkInSoundEnabled") }
             .store(in: &preferenceCancellables)
+    }
+
+    // MARK: - Pinned Activities Helpers
+    func pinActivity(_ activityId: Int) {
+        guard !pinnedActivityIds.contains(activityId), pinnedActivityIds.count < 3 else { return }
+        pinnedActivityIds.append(activityId)
+    }
+
+    func unpinActivity(_ activityId: Int) {
+        pinnedActivityIds.removeAll { $0 == activityId }
+    }
+
+    func isActivityPinned(_ activityId: Int) -> Bool {
+        pinnedActivityIds.contains(activityId)
     }
 
     // MARK: - Formatting Helpers
@@ -887,8 +921,19 @@ struct AccountView: View {
 struct CustomizationView: View {
     @EnvironmentObject var session: Session
     @EnvironmentObject var preferences: AppPreferences
+    @State private var selectedActivityToPin: Int? = nil
 
     let graceOptions = [15, 30, 45, 60, 90]
+
+    var pinnedActivities: [Activity] {
+        preferences.pinnedActivityIds.compactMap { pinnedId in
+            session.activities.first { $0.id == pinnedId }
+        }
+    }
+
+    var unpinnedActivities: [Activity] {
+        session.activities.filter { !preferences.isActivityPinned($0.id) }
+    }
 
     var body: some View {
         List {
@@ -930,6 +975,48 @@ struct CustomizationView: View {
                 Text("Trips")
             } footer: {
                 Text("These defaults will be used when creating new trips.")
+            }
+
+            // MARK: - Favorite Activities
+            Section {
+                if preferences.pinnedActivityIds.isEmpty {
+                    Text("No favorite activities")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                } else {
+                    ForEach(pinnedActivities, id: \.id) { activity in
+                        HStack {
+                            Text(activity.icon)
+                            Text(activity.name)
+                            Spacer()
+                            Button {
+                                preferences.unpinActivity(activity.id)
+                            } label: {
+                                Image(systemName: "star.slash")
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+
+                if preferences.pinnedActivityIds.count < 3 {
+                    Picker("Add Favorite", selection: $selectedActivityToPin) {
+                        Text("Select activity...").tag(nil as Int?)
+                        ForEach(unpinnedActivities, id: \.id) { activity in
+                            Text("\(activity.icon) \(activity.name)").tag(activity.id as Int?)
+                        }
+                    }
+                    .onChange(of: selectedActivityToPin) { _, newValue in
+                        if let activityId = newValue {
+                            preferences.pinActivity(activityId)
+                            selectedActivityToPin = nil
+                        }
+                    }
+                }
+            } header: {
+                Text("Favorite Activities")
+            } footer: {
+                Text("Pin up to 3 activities for quick access when creating trips.")
             }
 
             // MARK: - Home Screen
