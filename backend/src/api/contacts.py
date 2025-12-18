@@ -215,15 +215,39 @@ def delete_contact(contact_id: int, user_id: int = Depends(auth.get_current_user
                 detail=f"Cannot delete contact. Used by trip: {trip_title}"
             )
 
-        # NULL out contact references in completed trips (they no longer need the reference)
+        # Replace contact references in completed trips with the DELETED placeholder (id=1)
+        # contact1 is NOT NULL, so we replace with DELETED placeholder
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
-                SET contact1 = CASE WHEN contact1 = :contact_id THEN NULL ELSE contact1 END,
-                    contact2 = CASE WHEN contact2 = :contact_id THEN NULL ELSE contact2 END,
-                    contact3 = CASE WHEN contact3 = :contact_id THEN NULL ELSE contact3 END
-                WHERE (contact1 = :contact_id OR contact2 = :contact_id OR contact3 = :contact_id)
+                SET contact1 = 1
+                WHERE contact1 = :contact_id
+                AND status = 'completed'
+                """
+            ),
+            {"contact_id": contact_id}
+        )
+
+        # contact2 and contact3 are nullable, so we set them to NULL
+        connection.execute(
+            sqlalchemy.text(
+                """
+                UPDATE trips
+                SET contact2 = NULL
+                WHERE contact2 = :contact_id
+                AND status = 'completed'
+                """
+            ),
+            {"contact_id": contact_id}
+        )
+
+        connection.execute(
+            sqlalchemy.text(
+                """
+                UPDATE trips
+                SET contact3 = NULL
+                WHERE contact3 = :contact_id
                 AND status = 'completed'
                 """
             ),
