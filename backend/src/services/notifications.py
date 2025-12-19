@@ -132,6 +132,23 @@ async def send_friend_checkin_push(
     log.info(f"Sent friend check-in push to user {friend_user_id}")
 
 
+async def send_friend_request_accepted_push(
+    inviter_user_id: int,
+    accepter_name: str
+):
+    """Send push notification to the inviter when someone accepts their friend request."""
+    title = "Friend Request Accepted"
+    body = f"{accepter_name} is now your friend on Homebound!"
+
+    await send_push_to_user(
+        inviter_user_id,
+        title,
+        body,
+        notification_type="general"
+    )
+    log.info(f"Sent friend request accepted push to user {inviter_user_id}")
+
+
 def log_notification(
     user_id: int,
     notification_type: str,

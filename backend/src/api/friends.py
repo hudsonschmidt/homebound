@@ -1,14 +1,16 @@
 """Friend management endpoints"""
 
+import asyncio
 import secrets
 from datetime import datetime, timedelta
 
 import sqlalchemy
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from src import database as db
 from src.api import auth
+from src.services.notifications import send_friend_request_accepted_push
 
 router = APIRouter(
     prefix="/api/v1/friends",
@@ -159,7 +161,11 @@ def get_invite_preview(token: str):
 
 
 @router.post("/invite/{token}/accept", response_model=FriendResponse)
-def accept_invite(token: str, user_id: int = Depends(auth.get_current_user_id)):
+def accept_invite(
+    token: str,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
     """Accept a friend invite and create the friendship."""
     with db.engine.begin() as connection:
         # Get the invite
@@ -259,6 +265,31 @@ def accept_invite(token: str, user_id: int = Depends(auth.get_current_user_id)):
 
         # Get friendship created_at
         friendship = _get_friendship(connection, user_id, inviter_id)
+
+        # Get the accepter's name for the notification
+        accepter = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT first_name, last_name
+                FROM users
+                WHERE id = :user_id
+                """
+            ),
+            {"user_id": user_id}
+        ).fetchone()
+
+        accepter_name = "Someone"
+        if accepter:
+            accepter_name = f"{accepter.first_name or ''} {accepter.last_name or ''}".strip() or "Someone"
+
+        # Send push notification to inviter in background
+        def send_push_sync():
+            asyncio.run(send_friend_request_accepted_push(
+                inviter_user_id=inviter_id,
+                accepter_name=accepter_name
+            ))
+
+        background_tasks.add_task(send_push_sync)
 
         return FriendResponse(
             user_id=inviter.id,
