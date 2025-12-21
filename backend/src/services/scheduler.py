@@ -465,6 +465,95 @@ async def check_push_notifications():
         log.error(f"Error checking push notifications: {e}", exc_info=True)
 
 
+async def check_live_activity_transitions():
+    """Check for Live Activity countdown transitions and send update pushes.
+
+    Sends silent pushes to update Live Activity state at:
+    1. ~15 seconds before ETA -> "Check In Now" warning state
+    2. ~15 seconds before grace period ends -> "Overdue" state
+    """
+    try:
+        now = datetime.utcnow()
+
+        with db.engine.begin() as conn:
+            # Find active trips approaching ETA (within 15 seconds)
+            approaching_eta = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, eta, grace_min
+                    FROM trips
+                    WHERE status = 'active'
+                    AND notified_eta_transition = false
+                    AND eta <= :soon
+                    AND eta > :now
+                """),
+                {
+                    "now": now,
+                    "soon": now + timedelta(seconds=15)
+                }
+            ).fetchall()
+
+            for trip in approaching_eta:
+                # Send silent push to trigger Live Activity update
+                await send_push_to_user(
+                    trip.user_id,
+                    "",  # Empty for silent push
+                    "",
+                    data={
+                        "sync": "live_activity_eta_warning",
+                        "trip_id": trip.id,
+                        "transition": "eta_warning"
+                    },
+                    notification_type="emergency"
+                )
+                conn.execute(
+                    sqlalchemy.text("UPDATE trips SET notified_eta_transition = true WHERE id = :id"),
+                    {"id": trip.id}
+                )
+                log.info(f"[LiveActivity] Sent ETA warning transition push for trip {trip.id}")
+
+            # Find overdue trips approaching grace period end (within 15 seconds)
+            overdue_trips = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, eta, grace_min
+                    FROM trips
+                    WHERE status = 'overdue'
+                    AND notified_grace_transition = false
+                """)
+            ).fetchall()
+
+            for trip in overdue_trips:
+                # Parse eta
+                if isinstance(trip.eta, str):
+                    eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
+                else:
+                    eta_dt = trip.eta.replace(tzinfo=None) if trip.eta.tzinfo else trip.eta
+
+                grace_end = eta_dt + timedelta(minutes=trip.grace_min)
+                seconds_until_grace_end = (grace_end - now).total_seconds()
+
+                # Send push if within 15 seconds of grace ending
+                if 0 < seconds_until_grace_end <= 15:
+                    await send_push_to_user(
+                        trip.user_id,
+                        "",
+                        "",
+                        data={
+                            "sync": "live_activity_overdue",
+                            "trip_id": trip.id,
+                            "transition": "overdue"
+                        },
+                        notification_type="emergency"
+                    )
+                    conn.execute(
+                        sqlalchemy.text("UPDATE trips SET notified_grace_transition = true WHERE id = :id"),
+                        {"id": trip.id}
+                    )
+                    log.info(f"[LiveActivity] Sent overdue transition push for trip {trip.id}")
+
+    except Exception as e:
+        log.error(f"Error checking Live Activity transitions: {e}", exc_info=True)
+
+
 async def clean_expired_tokens():
     """Clean up expired login tokens."""
     try:
@@ -522,6 +611,16 @@ def init_scheduler() -> AsyncIOScheduler:
         IntervalTrigger(minutes=0.2),
         id="check_push_notifications",
         name="Check for push notifications",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    # Check for Live Activity countdown transitions every 12 seconds
+    scheduler.add_job(
+        check_live_activity_transitions,
+        IntervalTrigger(minutes=0.2),
+        id="check_live_activity_transitions",
+        name="Check Live Activity countdown transitions",
         replace_existing=True,
         max_instances=1,
     )

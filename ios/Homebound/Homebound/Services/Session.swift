@@ -208,6 +208,7 @@ final class Session: ObservableObject {
     // Friends
     @Published var friends: [Friend] = []
     @Published var pendingInvites: [PendingInvite] = []
+    @Published var friendActiveTrips: [FriendActiveTrip] = []
 
     // Saved trip templates (local-only)
     @Published var savedTemplates: [SavedTripTemplate] = []
@@ -2384,6 +2385,27 @@ final class Session: ObservableObject {
             return invites
         } catch {
             debugLog("[Session] ❌ Failed to load pending invites: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Load active trips where the current user is a friend safety contact
+    func loadFriendActiveTrips() async -> [FriendActiveTrip] {
+        do {
+            let trips: [FriendActiveTrip] = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/friends/active-trips"),
+                    bearer: bearer
+                )
+            }
+
+            await MainActor.run {
+                self.friendActiveTrips = trips
+            }
+            debugLog("[Session] ✅ Loaded \(trips.count) friend active trips")
+            return trips
+        } catch {
+            debugLog("[Session] ❌ Failed to load friend active trips: \(error.localizedDescription)")
             return []
         }
     }

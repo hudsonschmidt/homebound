@@ -360,15 +360,29 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         debugLog("[AppDelegate] 📬 Received remote notification")
 
         // Check if this is a sync notification
-        if let sync = userInfo["sync"] as? String, sync == "pending_actions" {
-            debugLog("[AppDelegate] 🔄 Silent push: syncing pending actions")
+        if let sync = userInfo["sync"] as? String {
+            switch sync {
+            case "pending_actions":
+                debugLog("[AppDelegate] 🔄 Silent push: syncing pending actions")
+                NotificationCenter.default.post(name: .backgroundSyncRequested, object: nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    completionHandler(.newData)
+                }
 
-            // Post notification to trigger sync in Session
-            NotificationCenter.default.post(name: .backgroundSyncRequested, object: nil)
+            case "live_activity_eta_warning", "live_activity_overdue", "trip_state_update":
+                debugLog("[AppDelegate] 🔄 Silent push: updating Live Activity (\(sync))")
+                // Refresh trip data and update Live Activity
+                Task {
+                    await Session.shared.loadActivePlan()
+                    if let trip = Session.shared.activeTrip {
+                        await LiveActivityManager.shared.restoreActivityIfNeeded(from: trip)
+                    }
+                    completionHandler(.newData)
+                }
 
-            // Give some time for sync to complete
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                completionHandler(.newData)
+            default:
+                debugLog("[AppDelegate] ⚠️ Unknown sync type: \(sync)")
+                completionHandler(.noData)
             }
         } else {
             completionHandler(.noData)

@@ -132,6 +132,25 @@ async def send_friend_checkin_push(
     log.info(f"Sent friend check-in push to user {friend_user_id}")
 
 
+async def send_friend_trip_extended_push(
+    friend_user_id: int,
+    user_name: str,
+    trip_title: str,
+    extended_by_minutes: int
+):
+    """Send push notification to a friend when the trip they're monitoring is extended."""
+    title = "Trip Extended"
+    body = f"{user_name} extended their trip '{trip_title}' by {extended_by_minutes} minutes"
+
+    await send_push_to_user(
+        friend_user_id,
+        title,
+        body,
+        notification_type="general"
+    )
+    log.info(f"Sent friend trip extended push to user {friend_user_id}")
+
+
 async def send_friend_request_accepted_push(
     inviter_user_id: int,
     accepter_name: str

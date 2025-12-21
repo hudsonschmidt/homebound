@@ -132,15 +132,20 @@ struct FriendsTabView: View {
                 // Empty state
                 emptyStateView
             } else {
-                // Friends list
+                // Friends list with expandable trip cards
                 ForEach(session.friends) { friend in
-                    FriendRowView(friend: friend)
-                        .onTapGesture {
-                            selectedFriend = friend
-                        }
+                    FriendRowWithTripsView(
+                        friend: friend,
+                        trips: tripsForFriend(friend),
+                        onTap: { selectedFriend = friend }
+                    )
                 }
             }
         }
+    }
+
+    private func tripsForFriend(_ friend: Friend) -> [FriendActiveTrip] {
+        session.friendActiveTrips.filter { $0.owner.user_id == friend.user_id }
     }
 
     // MARK: - Empty State
@@ -178,7 +183,9 @@ struct FriendsTabView: View {
 
     func loadData() async {
         isLoading = true
-        _ = await session.loadFriends()
+        async let friends = session.loadFriends()
+        async let activeTrips = session.loadFriendActiveTrips()
+        _ = await (friends, activeTrips)
         isLoading = false
     }
 
@@ -271,6 +278,140 @@ struct FriendRowView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(.white)
             )
+    }
+}
+
+// MARK: - Friend Row With Trips View
+
+struct FriendRowWithTripsView: View {
+    let friend: Friend
+    let trips: [FriendActiveTrip]
+    let onTap: () -> Void
+
+    @State private var isExpanded: Bool = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Friend row (tap to view profile)
+            FriendRowView(friend: friend)
+                .onTapGesture { onTap() }
+
+            // Active trips indicator + expandable section
+            if !trips.isEmpty {
+                Button(action: { isExpanded.toggle() }) {
+                    HStack {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                        Text("\(trips.count) active trip\(trips.count == 1 ? "" : "s")")
+                            .font(.caption)
+                        Spacer()
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color(.tertiarySystemBackground))
+                }
+
+                if isExpanded {
+                    VStack(spacing: 8) {
+                        ForEach(trips) { trip in
+                            FriendTripCardView(trip: trip)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+                    .background(Color(.tertiarySystemBackground))
+                }
+            }
+        }
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Friend Trip Card View
+
+struct FriendTripCardView: View {
+    let trip: FriendActiveTrip
+
+    private var statusColor: Color {
+        if trip.contactsNotified { return .red }
+        if trip.isOverdue { return .orange }
+        return .green
+    }
+
+    private var statusText: String {
+        if trip.contactsNotified { return "OVERDUE" }
+        if trip.isOverdue { return "CHECK IN" }
+        if trip.isPlanned { return "PLANNED" }
+        return "ACTIVE"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Header: Icon + Title + Status
+            HStack {
+                Text(trip.activity_icon)
+                    .font(.title3)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(trip.title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+
+                    Text(trip.activity_name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Status badge
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    Text(statusText)
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(statusColor)
+                }
+            }
+
+            // Location
+            if let location = trip.location_text, !location.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "location.fill")
+                        .font(.caption2)
+                    Text(location)
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+            }
+
+            // ETA
+            if let etaDate = trip.etaDate {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock")
+                        .font(.caption2)
+                    Text("Expected by \(etaDate.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+            }
+
+            // Notes (if any)
+            if let notes = trip.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding()
+        .background(trip.primaryColor.opacity(0.1))
+        .cornerRadius(8)
     }
 }
 

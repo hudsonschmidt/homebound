@@ -145,6 +145,59 @@ struct PendingInvite: Codable, Identifiable {
     var isExpired: Bool { status == "expired" }
 }
 
+// MARK: - Friend Active Trips
+
+/// Activity colors for friend trips
+struct FriendTripActivityColors: Codable {
+    let primary: String
+    let secondary: String
+    let accent: String
+}
+
+/// Owner info for a friend's active trip
+struct FriendActiveTripOwner: Codable {
+    let user_id: Int
+    let first_name: String
+    let last_name: String
+    let profile_photo_url: String?
+
+    var fullName: String {
+        if last_name.isEmpty { return first_name }
+        return "\(first_name) \(last_name)"
+    }
+}
+
+/// A trip where the current user is a friend safety contact
+struct FriendActiveTrip: Codable, Identifiable {
+    let id: Int
+    let owner: FriendActiveTripOwner
+    let title: String
+    let activity_name: String
+    let activity_icon: String
+    let activity_colors: FriendTripActivityColors
+    let status: String
+    let start: String
+    let eta: String
+    let grace_min: Int
+    let location_text: String?
+    let start_location_text: String?
+    let notes: String?
+    let timezone: String?
+
+    var startDate: Date? { parseISO8601Date(start) }
+    var etaDate: Date? { parseISO8601Date(eta) }
+
+    var isActive: Bool { status == "active" }
+    var isPlanned: Bool { status == "planned" }
+    var isOverdue: Bool { status == "overdue" || status == "overdue_notified" }
+    var contactsNotified: Bool { status == "overdue_notified" }
+
+    /// Primary color from activity
+    var primaryColor: Color {
+        Color(hex: activity_colors.primary) ?? .hbBrand
+    }
+}
+
 /// Unified safety contact - can be either an email contact or a friend
 enum SafetyContact: Identifiable, Hashable {
     case emailContact(Contact)

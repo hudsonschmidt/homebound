@@ -455,3 +455,97 @@ def remove_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_u
         )
 
         return {"ok": True, "message": "Friend removed"}
+
+
+# ==================== Friend's Active Trips ====================
+
+class FriendActiveTripOwner(BaseModel):
+    user_id: int
+    first_name: str
+    last_name: str
+    profile_photo_url: str | None
+
+
+class FriendActiveTrip(BaseModel):
+    id: int
+    owner: FriendActiveTripOwner
+    title: str
+    activity_name: str
+    activity_icon: str
+    activity_colors: dict
+    status: str
+    start: str
+    eta: str
+    grace_min: int
+    location_text: str | None
+    start_location_text: str | None
+    notes: str | None
+    timezone: str | None
+
+
+@router.get("/active-trips", response_model=list[FriendActiveTrip])
+def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
+    """Get all active/planned trips where the current user is a friend safety contact.
+
+    This allows friends to see the status of trips they're monitoring.
+    """
+    import json
+
+    with db.engine.begin() as connection:
+        trips = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
+                       t.location_text, t.start_location_text, t.notes, t.status, t.timezone,
+                       a.name as activity_name, a.icon as activity_icon, a.colors as activity_colors,
+                       u.first_name, u.last_name, u.profile_photo_url
+                FROM trips t
+                JOIN trip_safety_contacts tsc ON tsc.trip_id = t.id
+                JOIN activities a ON t.activity = a.id
+                JOIN users u ON t.user_id = u.id
+                WHERE tsc.friend_user_id = :current_user_id
+                AND t.status IN ('active', 'overdue', 'overdue_notified', 'planned')
+                ORDER BY t.start ASC
+                """
+            ),
+            {"current_user_id": user_id}
+        ).mappings().fetchall()
+
+        result = []
+        for trip in trips:
+            # Parse activity colors (may be JSON string or dict)
+            colors = trip["activity_colors"]
+            if isinstance(colors, str):
+                colors = json.loads(colors)
+
+            # Format datetime fields
+            start_str = trip["start"]
+            if hasattr(start_str, 'isoformat'):
+                start_str = start_str.isoformat()
+            eta_str = trip["eta"]
+            if hasattr(eta_str, 'isoformat'):
+                eta_str = eta_str.isoformat()
+
+            result.append(FriendActiveTrip(
+                id=trip["id"],
+                owner=FriendActiveTripOwner(
+                    user_id=trip["user_id"],
+                    first_name=trip["first_name"] or "",
+                    last_name=trip["last_name"] or "",
+                    profile_photo_url=trip["profile_photo_url"]
+                ),
+                title=trip["title"],
+                activity_name=trip["activity_name"],
+                activity_icon=trip["activity_icon"],
+                activity_colors=colors,
+                status=trip["status"],
+                start=start_str,
+                eta=eta_str,
+                grace_min=trip["grace_min"],
+                location_text=trip["location_text"],
+                start_location_text=trip["start_location_text"],
+                notes=trip["notes"],
+                timezone=trip["timezone"]
+            ))
+
+        return result

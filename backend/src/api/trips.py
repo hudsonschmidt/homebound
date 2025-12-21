@@ -17,6 +17,7 @@ from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
     send_friend_trip_completed_push,
     send_friend_trip_created_push,
+    send_friend_trip_extended_push,
     send_friend_trip_starting_push,
     send_trip_completed_emails,
     send_trip_created_emails,
@@ -1576,6 +1577,32 @@ def extend_trip(
             background_tasks.add_task(send_emails_sync)
         num_contacts = len(contacts_for_email)
         log.info(f"[Trips] Scheduled extended trip emails for {num_contacts} contacts")
+
+        # Send push notifications to friend safety contacts
+        friend_contacts = _get_friend_contacts_for_trip(connection, trip_id)
+        friend_user_ids = [
+            friend_contacts["friend_contact1"],
+            friend_contacts["friend_contact2"],
+            friend_contacts["friend_contact3"]
+        ]
+        friend_user_ids = [f for f in friend_user_ids if f is not None]
+
+        if friend_user_ids:
+            trip_title_for_push = trip.title
+            user_name_for_push = user_name
+            extended_by_for_push = minutes
+
+            def send_friend_extended_push_sync():
+                for friend_id in friend_user_ids:
+                    asyncio.run(send_friend_trip_extended_push(
+                        friend_user_id=friend_id,
+                        user_name=user_name_for_push,
+                        trip_title=trip_title_for_push,
+                        extended_by_minutes=extended_by_for_push
+                    ))
+
+            background_tasks.add_task(send_friend_extended_push_sync)
+            log.info(f"[Trips] Scheduled extended push notifications for {len(friend_user_ids)} friend contacts")
 
         new_eta_iso = new_eta.isoformat()
         return {
