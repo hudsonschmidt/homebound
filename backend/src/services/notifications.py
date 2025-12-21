@@ -353,17 +353,18 @@ async def send_push_to_user(
         log.warning(f"Unknown push backend: {settings.PUSH_BACKEND}")
         return
 
-    # Query user's iOS devices
+    # Query user's iOS devices matching current environment (sandbox vs production)
+    current_env = "sandbox" if settings.APNS_USE_SANDBOX else "production"
     with db.engine.begin() as conn:
         devices = conn.execute(
             sqlalchemy.text(
-                "SELECT token, env FROM devices WHERE user_id = :uid AND platform = 'ios'"
+                "SELECT token, env FROM devices WHERE user_id = :uid AND platform = 'ios' AND env = :env"
             ),
-            {"uid": user_id}
+            {"uid": user_id, "env": current_env}
         ).fetchall()
 
     if not devices:
-        log.debug(f"No iOS devices registered for user {user_id}")
+        log.debug(f"No iOS devices registered for user {user_id} in {current_env} environment")
         return
 
     # Send to each device with retry logic
@@ -390,12 +391,12 @@ async def send_push_to_user(
                                    error_message="Device unregistered (410)")
                     success = True  # Not a retry-able error
                     break
-                elif result.status == 400 and result.detail == "BadDeviceToken":
-                    # 400 BadDeviceToken = invalid token, mark for removal (don't retry)
-                    log.info(f"[APNS] Bad device token for user {user_id}, will remove")
+                elif result.status == 400 and result.detail in ("BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered"):
+                    # 400 BadDeviceToken/DeviceTokenNotForTopic/Unregistered = invalid token, mark for removal
+                    log.info(f"[APNS] Bad device token for user {user_id} ({result.detail}), will remove")
                     tokens_to_remove.append(device.token)
                     log_notification(user_id, "push", title, body, "failed", device_token=device.token,
-                                   error_message="Bad device token (400)")
+                                   error_message=f"{result.detail} (400)")
                     success = True  # Not a retry-able error
                     break
                 else:
