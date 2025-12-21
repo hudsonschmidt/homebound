@@ -183,14 +183,24 @@ struct FriendActiveTrip: Codable, Identifiable {
     let start_location_text: String?
     let notes: String?
     let timezone: String?
+    let last_checkin_at: String?
 
     var startDate: Date? { parseISO8601Date(start) }
     var etaDate: Date? { parseISO8601Date(eta) }
+    var lastCheckinDate: Date? {
+        guard let checkin = last_checkin_at else { return nil }
+        return parseISO8601Date(checkin)
+    }
 
     var isActive: Bool { status == "active" }
     var isPlanned: Bool { status == "planned" }
     var isOverdue: Bool { status == "overdue" || status == "overdue_notified" }
     var contactsNotified: Bool { status == "overdue_notified" }
+
+    /// True if trip has an active status (not planned)
+    var isActiveStatus: Bool {
+        status == "active" || status == "overdue" || status == "overdue_notified"
+    }
 
     /// Primary color from activity
     var primaryColor: Color {
@@ -587,9 +597,12 @@ struct SavedTripTemplate: Codable, Identifiable {
     var hasSeparateLocations: Bool
     var graceMinutes: Int
     var notes: String?
-    var contact1Id: Int?                // Saved contact IDs
+    var contact1Id: Int?                // Saved contact IDs (email contacts)
     var contact2Id: Int?
     var contact3Id: Int?
+    var friendContact1Id: Int?          // Friend user IDs (push notification contacts)
+    var friendContact2Id: Int?
+    var friendContact3Id: Int?
     var checkinIntervalMinutes: Int
     var useNotificationHours: Bool
     var notifyStartHour: Int?
@@ -615,6 +628,9 @@ struct SavedTripTemplate: Codable, Identifiable {
         contact1Id: Int? = nil,
         contact2Id: Int? = nil,
         contact3Id: Int? = nil,
+        friendContact1Id: Int? = nil,
+        friendContact2Id: Int? = nil,
+        friendContact3Id: Int? = nil,
         checkinIntervalMinutes: Int = 30,
         useNotificationHours: Bool = false,
         notifyStartHour: Int? = nil,
@@ -639,6 +655,9 @@ struct SavedTripTemplate: Codable, Identifiable {
         self.contact1Id = contact1Id
         self.contact2Id = contact2Id
         self.contact3Id = contact3Id
+        self.friendContact1Id = friendContact1Id
+        self.friendContact2Id = friendContact2Id
+        self.friendContact3Id = friendContact3Id
         self.checkinIntervalMinutes = checkinIntervalMinutes
         self.useNotificationHours = useNotificationHours
         self.notifyStartHour = notifyStartHour

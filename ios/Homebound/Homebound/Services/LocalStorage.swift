@@ -9,7 +9,7 @@ final class LocalStorage {
     private let maxCachedTrips = 25
 
     // Schema versioning
-    private let currentSchemaVersion = 3
+    private let currentSchemaVersion = 4
     private let userDefaultsSchemaKey = "LocalStorageSchemaVersion"
 
     private init() {
@@ -84,6 +84,13 @@ final class LocalStorage {
                 description: "Add saved_templates table",
                 execute: { db in
                     try self.addSavedTemplatesTable(db)
+                }
+            ),
+            Migration(
+                version: 4,
+                description: "Add friend contact columns to saved_templates",
+                execute: { db in
+                    try self.addFriendContactsToTemplates(db)
                 }
             )
         ]
@@ -226,6 +233,9 @@ final class LocalStorage {
                 contact1_id INTEGER,
                 contact2_id INTEGER,
                 contact3_id INTEGER,
+                friend_contact1_id INTEGER,
+                friend_contact2_id INTEGER,
+                friend_contact3_id INTEGER,
                 checkin_interval_minutes INTEGER NOT NULL DEFAULT 30,
                 use_notification_hours INTEGER NOT NULL DEFAULT 0,
                 notify_start_hour INTEGER,
@@ -237,6 +247,18 @@ final class LocalStorage {
         """)
 
         debugLog("[LocalStorage] ✅ saved_templates table created successfully")
+    }
+
+    /// Migration v4: Add friend contact columns to saved_templates
+    private func addFriendContactsToTemplates(_ db: Database) throws {
+        debugLog("[LocalStorage] 🔄 Adding friend contact columns to saved_templates...")
+
+        // Add friend contact columns (nullable, defaults to NULL)
+        try db.execute(sql: "ALTER TABLE saved_templates ADD COLUMN friend_contact1_id INTEGER")
+        try db.execute(sql: "ALTER TABLE saved_templates ADD COLUMN friend_contact2_id INTEGER")
+        try db.execute(sql: "ALTER TABLE saved_templates ADD COLUMN friend_contact3_id INTEGER")
+
+        debugLog("[LocalStorage] ✅ Friend contact columns added to saved_templates")
     }
 
     // MARK: - Database Setup
@@ -1652,10 +1674,11 @@ final class LocalStorage {
                         start_location_text, start_lat, start_lng,
                         has_separate_locations, grace_minutes, notes,
                         contact1_id, contact2_id, contact3_id,
+                        friend_contact1_id, friend_contact2_id, friend_contact3_id,
                         checkin_interval_minutes, use_notification_hours,
                         notify_start_hour, notify_end_hour, notify_self,
                         created_at, last_used_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [
                     template.id.uuidString,
                     template.name,
@@ -1673,6 +1696,9 @@ final class LocalStorage {
                     template.contact1Id,
                     template.contact2Id,
                     template.contact3Id,
+                    template.friendContact1Id,
+                    template.friendContact2Id,
+                    template.friendContact3Id,
                     template.checkinIntervalMinutes,
                     template.useNotificationHours ? 1 : 0,
                     template.notifyStartHour,
@@ -1741,6 +1767,9 @@ final class LocalStorage {
                         contact1Id: (row["contact1_id"] as? Int64).map({ Int($0) }) ?? (row["contact1_id"] as? Int),
                         contact2Id: (row["contact2_id"] as? Int64).map({ Int($0) }) ?? (row["contact2_id"] as? Int),
                         contact3Id: (row["contact3_id"] as? Int64).map({ Int($0) }) ?? (row["contact3_id"] as? Int),
+                        friendContact1Id: (row["friend_contact1_id"] as? Int64).map({ Int($0) }) ?? (row["friend_contact1_id"] as? Int),
+                        friendContact2Id: (row["friend_contact2_id"] as? Int64).map({ Int($0) }) ?? (row["friend_contact2_id"] as? Int),
+                        friendContact3Id: (row["friend_contact3_id"] as? Int64).map({ Int($0) }) ?? (row["friend_contact3_id"] as? Int),
                         checkinIntervalMinutes: checkinIntervalMinutes,
                         useNotificationHours: useNotificationHours,
                         notifyStartHour: (row["notify_start_hour"] as? Int64).map({ Int($0) }) ?? (row["notify_start_hour"] as? Int),

@@ -78,7 +78,7 @@ struct HomeboundApp: App {
                                 showWhatsNew = true
                             }
                             // Check for pending friend invite from before login
-                            if let token = pendingFriendInviteToken {
+                            if pendingFriendInviteToken != nil {
                                 showFriendInvite = true
                             }
                         }
@@ -374,9 +374,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 // Refresh trip data and update Live Activity
                 Task {
                     await Session.shared.loadActivePlan()
-                    if let trip = Session.shared.activeTrip {
-                        await LiveActivityManager.shared.restoreActivityIfNeeded(from: trip)
-                    }
+                    let trip = Session.shared.activeTrip
+                    await LiveActivityManager.shared.restoreActivityIfNeeded(for: trip)
                     completionHandler(.newData)
                 }
 

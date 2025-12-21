@@ -1,13 +1,32 @@
 import SwiftUI
 
+/// Wrapper to handle both new trip and template-based trip creation
+enum CreateTripMode: Identifiable {
+    case newTrip
+    case fromTemplate(SavedTripTemplate)
+
+    var id: String {
+        switch self {
+        case .newTrip: return "new"
+        case .fromTemplate(let template): return "template-\(template.id)"
+        }
+    }
+
+    var template: SavedTripTemplate? {
+        switch self {
+        case .newTrip: return nil
+        case .fromTemplate(let template): return template
+        }
+    }
+}
+
 /// Pre-step view shown before CreatePlanView
 /// Allows users to choose between creating a new trip or using a saved template
 struct TripStartView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
 
-    @State private var showingCreatePlan = false
-    @State private var selectedTemplate: SavedTripTemplate? = nil
+    @State private var createTripMode: CreateTripMode? = nil
     @State private var templateToDelete: SavedTripTemplate? = nil
     @State private var showDeleteConfirmation = false
 
@@ -29,8 +48,7 @@ struct TripStartView: View {
 
                     // New Trip Button
                     Button(action: {
-                        selectedTemplate = nil
-                        showingCreatePlan = true
+                        createTripMode = .newTrip
                     }) {
                         NewTripOptionCard()
                     }
@@ -45,8 +63,7 @@ struct TripStartView: View {
 
                             ForEach(session.savedTemplates) { template in
                                 Button(action: {
-                                    selectedTemplate = template
-                                    showingCreatePlan = true
+                                    createTripMode = .fromTemplate(template)
                                 }) {
                                     TemplateCard(template: template, onDelete: {
                                         templateToDelete = template
@@ -69,8 +86,8 @@ struct TripStartView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showingCreatePlan) {
-                CreatePlanView(prefillTemplate: selectedTemplate)
+            .sheet(item: $createTripMode) { mode in
+                CreatePlanView(prefillTemplate: mode.template)
                     .environmentObject(session)
             }
             .alert("Delete Template?", isPresented: $showDeleteConfirmation) {
@@ -90,6 +107,10 @@ struct TripStartView: View {
             }
             .task {
                 session.loadTemplates()
+            }
+            // Dismiss when a trip is created from CreatePlanView
+            .onReceive(NotificationCenter.default.publisher(for: .tripCreated)) { _ in
+                dismiss()
             }
         }
     }

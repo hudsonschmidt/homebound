@@ -291,7 +291,7 @@ struct CreatePlanView: View {
                         }
                         notifySelf = template.notifySelf
 
-                        // Pre-populate contacts from template
+                        // Pre-populate email contacts from template
                         let contactIds = [template.contact1Id, template.contact2Id, template.contact3Id].compactMap { $0 }
                         for contactId in contactIds {
                             if let savedContact = session.contacts.first(where: { $0.id == contactId }) {
@@ -300,6 +300,14 @@ struct CreatePlanView: View {
                                     email: savedContact.email,
                                     savedContactId: savedContact.id
                                 ))
+                            }
+                        }
+
+                        // Pre-populate friend contacts from template
+                        let friendContactIds = [template.friendContact1Id, template.friendContact2Id, template.friendContact3Id].compactMap { $0 }
+                        for friendId in friendContactIds {
+                            if let friend = session.friends.first(where: { $0.user_id == friendId }) {
+                                selectedFriends.append(friend)
                             }
                         }
 
@@ -399,6 +407,9 @@ struct CreatePlanView: View {
             contact1Id: contacts.count > 0 ? contacts[0].savedContactId : nil,
             contact2Id: contacts.count > 1 ? contacts[1].savedContactId : nil,
             contact3Id: contacts.count > 2 ? contacts[2].savedContactId : nil,
+            friendContact1Id: selectedFriends.count > 0 ? selectedFriends[0].user_id : nil,
+            friendContact2Id: selectedFriends.count > 1 ? selectedFriends[1].user_id : nil,
+            friendContact3Id: selectedFriends.count > 2 ? selectedFriends[2].user_id : nil,
             checkinIntervalMinutes: checkinIntervalMinutes,
             useNotificationHours: useNotificationHours,
             notifyStartHour: useNotificationHours ? notifyStartHour : nil,

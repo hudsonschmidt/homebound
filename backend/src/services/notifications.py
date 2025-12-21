@@ -25,6 +25,7 @@ async def send_friend_trip_created_push(
     trip_title: str
 ):
     """Send push notification to a friend when they're added as a safety contact."""
+    log.info(f"[Notifications] send_friend_trip_created_push called: friend_user_id={friend_user_id}, user_name={user_name}, trip_title={trip_title}")
     title = "Safety Contact Added"
     body = f"{user_name} added you as a safety contact for their trip '{trip_title}'"
 
@@ -34,7 +35,7 @@ async def send_friend_trip_created_push(
         body,
         notification_type="general"
     )
-    log.info(f"Sent friend trip created push to user {friend_user_id}")
+    log.info(f"[Notifications] Completed send_friend_trip_created_push to user {friend_user_id}")
 
 
 async def send_friend_trip_starting_push(
@@ -383,7 +384,7 @@ async def send_push_to_user(
         ).fetchall()
 
     if not devices:
-        log.debug(f"No iOS devices registered for user {user_id} in {current_env} environment")
+        log.warning(f"[APNS] No iOS devices registered for user {user_id} in {current_env} environment - notification not sent: {title}")
         return
 
     # Send to each device with retry logic

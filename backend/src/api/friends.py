@@ -481,6 +481,7 @@ class FriendActiveTrip(BaseModel):
     start_location_text: str | None
     notes: str | None
     timezone: str | None
+    last_checkin_at: str | None
 
 
 @router.get("/active-trips", response_model=list[FriendActiveTrip])
@@ -490,19 +491,37 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
     This allows friends to see the status of trips they're monitoring.
     """
     import json
+    import logging
+    log = logging.getLogger(__name__)
+    log.info(f"[Friends] get_friend_active_trips called for user_id={user_id}")
 
     with db.engine.begin() as connection:
+        # Debug: Check what's in trip_safety_contacts for this user
+        debug_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT tsc.trip_id, tsc.friend_user_id, tsc.position, t.status, t.title
+                FROM trip_safety_contacts tsc
+                LEFT JOIN trips t ON t.id = tsc.trip_id
+                WHERE tsc.friend_user_id = :current_user_id
+                """
+            ),
+            {"current_user_id": user_id}
+        ).fetchall()
+        log.info(f"[Friends] Found {len(debug_contacts)} entries in trip_safety_contacts for user {user_id}: {[(c.trip_id, c.status, c.title) for c in debug_contacts]}")
         trips = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
                        t.location_text, t.start_location_text, t.notes, t.status, t.timezone,
                        a.name as activity_name, a.icon as activity_icon, a.colors as activity_colors,
-                       u.first_name, u.last_name, u.profile_photo_url
+                       u.first_name, u.last_name, u.profile_photo_url,
+                       e.timestamp as last_checkin_at
                 FROM trips t
                 JOIN trip_safety_contacts tsc ON tsc.trip_id = t.id
                 JOIN activities a ON t.activity = a.id
                 JOIN users u ON t.user_id = u.id
+                LEFT JOIN events e ON t.last_checkin = e.id
                 WHERE tsc.friend_user_id = :current_user_id
                 AND t.status IN ('active', 'overdue', 'overdue_notified', 'planned')
                 ORDER BY t.start ASC
@@ -525,6 +544,9 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             eta_str = trip["eta"]
             if hasattr(eta_str, 'isoformat'):
                 eta_str = eta_str.isoformat()
+            last_checkin_str = trip["last_checkin_at"]
+            if last_checkin_str is not None and hasattr(last_checkin_str, 'isoformat'):
+                last_checkin_str = last_checkin_str.isoformat()
 
             result.append(FriendActiveTrip(
                 id=trip["id"],
@@ -545,7 +567,8 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
                 location_text=trip["location_text"],
                 start_location_text=trip["start_location_text"],
                 notes=trip["notes"],
-                timezone=trip["timezone"]
+                timezone=trip["timezone"],
+                last_checkin_at=last_checkin_str
             ))
 
         return result
