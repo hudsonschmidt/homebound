@@ -1,17 +1,21 @@
 import os
 from logging.config import fileConfig
 
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+
+# Load .env file
+load_dotenv()
 
 # Alembic Config object
 config = context.config
 
 # Load DB URI from environment and override config
-# Check DATABASE_URL first (Render sets this), then POSTGRES_URI, then default to local Docker
+# Check DATABASE_URL first (Render sets this), then POSTGRES_URI, then default to local SQLite
 _db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI")
-database_url: str = _db_url if _db_url else "postgresql://myuser:mypassword@localhost:5432/mydatabase"
+database_url: str = _db_url if _db_url else "sqlite:///./homebound.db"
 
 # Debug: Print original URL (remove credentials for security)
 if '@' in database_url:
@@ -20,34 +24,35 @@ if '@' in database_url:
     url_for_display = f"{scheme}://***@{host}"
 else:
     url_for_display = database_url
-print(f"[Alembic] Original DATABASE_URL scheme: {url_for_display.split('://')[0]}")
+print(f"[Alembic] DATABASE_URL: {url_for_display}")
 
-# Force psycopg2 (synchronous) driver for Alembic migrations
-# Replace ANY async driver (asyncpg) with psycopg2
-if "+asyncpg" in database_url:
-    database_url = database_url.replace("+asyncpg", "+psycopg2")
-elif "postgresql+psycopg:" in database_url:
-    database_url = database_url.replace("postgresql+psycopg:", "postgresql+psycopg2:")
-elif database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
-elif database_url.startswith("postgresql://"):
-    database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+# Only apply PostgreSQL-specific transformations if using PostgreSQL
+if database_url.startswith("postgresql") or database_url.startswith("postgres://"):
+    # Force psycopg2 (synchronous) driver for Alembic migrations
+    # Replace ANY async driver (asyncpg) with psycopg2
+    if "+asyncpg" in database_url:
+        database_url = database_url.replace("+asyncpg", "+psycopg2")
+    elif "postgresql+psycopg:" in database_url:
+        database_url = database_url.replace("postgresql+psycopg:", "postgresql+psycopg2:")
+    elif database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-# CRITICAL: Switch Supabase from Session Mode (port 5432) to Transaction Mode (port 6543)
-# Transaction mode supports many more concurrent connections and is recommended for web apps
-# Session mode has very low connection limits and causes "MaxClientsInSessionMode" errors
-if "supabase.com" in database_url and ":5432" in database_url:
-    print("[Alembic] ⚠️  Supabase Session Mode detected (port 5432)")
-    print("[Alembic] Switching to Transaction Mode (port 6543)")
-    database_url = database_url.replace(":5432", ":6543")
+    # CRITICAL: Switch Supabase from Session Mode (port 5432) to Transaction Mode (port 6543)
+    if "supabase.com" in database_url and ":5432" in database_url:
+        print("[Alembic] ⚠️  Supabase Session Mode detected (port 5432)")
+        print("[Alembic] Switching to Transaction Mode (port 6543)")
+        database_url = database_url.replace(":5432", ":6543")
 
-# Add SSL mode for Supabase connection pooler if not already present
-if "supabase.com" in database_url and "sslmode=" not in database_url:
-    separator = "&" if "?" in database_url else "?"
-    database_url = f"{database_url}{separator}sslmode=require"
+    # Add SSL mode for Supabase connection pooler if not already present
+    if "supabase.com" in database_url and "sslmode=" not in database_url:
+        separator = "&" if "?" in database_url else "?"
+        database_url = f"{database_url}{separator}sslmode=require"
 
-print(f"[Alembic] Final URL scheme: {database_url.split('://')[0]}")
-print("[Alembic] ✅ Using Supabase Transaction Mode (port 6543) for migrations")
+    print(f"[Alembic] Using PostgreSQL: {database_url.split('://')[0]}")
+else:
+    print(f"[Alembic] Using SQLite database")
 
 config.set_main_option("sqlalchemy.url", database_url)
 

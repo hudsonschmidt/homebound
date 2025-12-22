@@ -14,6 +14,7 @@ from src.services.notifications import (
     send_friend_checkin_push,
     send_friend_overdue_resolved_push,
     send_friend_trip_completed_push,
+    send_live_activity_update,
     send_overdue_resolved_emails,
     send_push_to_user,
     send_trip_completed_emails,
@@ -132,6 +133,41 @@ def checkin_with_token(
             else:
                 log.info("[Checkin] Reverse geocoding returned no result")
 
+        # Get check-in count for Live Activity update
+        checkin_count_row = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM events WHERE trip_id = :trip_id AND what = 'checkin'"),
+            {"trip_id": trip.id}
+        ).fetchone()
+        checkin_count = checkin_count_row[0] if checkin_count_row else 1
+
+        # Parse ETA for Live Activity update
+        eta_dt = None
+        if trip.eta:
+            try:
+                eta_str = str(trip.eta).replace(' ', 'T').replace('Z', '').replace('+00:00', '')
+                eta_dt = datetime.fromisoformat(eta_str)
+            except Exception:
+                eta_dt = now
+
+        # Capture values for background tasks
+        trip_id_for_la = trip.id
+        eta_for_la = eta_dt or now
+        now_for_la = now
+        checkin_count_for_la = checkin_count
+
+        # Always send Live Activity update (runs in background)
+        def send_live_activity_sync():
+            asyncio.run(send_live_activity_update(
+                trip_id=trip_id_for_la,
+                status="active",
+                eta=eta_for_la,
+                last_checkin_time=now_for_la,
+                is_overdue=False,
+                checkin_count=checkin_count_for_la
+            ))
+
+        background_tasks.add_task(send_live_activity_sync)
+
         # Schedule background task to send checkin update emails to contacts and push to user
         def send_notifications_sync():
             # Send push notification to user confirming check-in
@@ -140,6 +176,7 @@ def checkin_with_token(
                 "Checked In",
                 f"You've checked in to '{trip.title}'. Stay safe!"
             ))
+
             # Send emails to contacts
             asyncio.run(send_checkin_update_emails(
                 trip=trip_data,
@@ -272,6 +309,23 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
         trip_data = {"title": trip.title, "location_text": trip.location_text}
         activity_name = trip.activity_name
         user_timezone = trip.timezone
+
+        # Capture trip ID for Live Activity end
+        trip_id_for_la = trip.id
+
+        # Send Live Activity "end" event to dismiss the widget
+        def send_live_activity_end_sync():
+            asyncio.run(send_live_activity_update(
+                trip_id=trip_id_for_la,
+                status="completed",
+                eta=now,
+                last_checkin_time=None,
+                is_overdue=False,
+                checkin_count=0,
+                event="end"
+            ))
+
+        background_tasks.add_task(send_live_activity_end_sync)
 
         # Schedule background task to send emails to contacts
         # If trip was overdue, send "all clear" email from alerts@

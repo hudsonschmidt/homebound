@@ -14,6 +14,7 @@ from .notifications import (
     send_overdue_notifications,
     send_push_to_user,
     send_friend_overdue_push,
+    send_live_activity_update,
 )
 
 settings = get_settings()
@@ -468,9 +469,9 @@ async def check_push_notifications():
 async def check_live_activity_transitions():
     """Check for Live Activity countdown transitions and send update pushes.
 
-    Sends silent pushes to update Live Activity state at:
-    1. ~15 seconds before ETA -> "Check In Now" warning state
-    2. ~15 seconds before grace period ends -> "Overdue" state
+    Sends direct Live Activity push updates at:
+    1. ~15 seconds before ETA -> "Check In Now" warning state (isOverdue: false)
+    2. ~15 seconds before grace period ends -> "Overdue" state (isOverdue: true)
     """
     try:
         now = datetime.utcnow()
@@ -479,7 +480,7 @@ async def check_live_activity_transitions():
             # Find active trips approaching ETA (within 15 seconds)
             approaching_eta = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, eta, grace_min
+                    SELECT id, user_id, eta, grace_min, status, last_checkin
                     FROM trips
                     WHERE status = 'active'
                     AND notified_eta_transition = false
@@ -493,7 +494,43 @@ async def check_live_activity_transitions():
             ).fetchall()
 
             for trip in approaching_eta:
-                # Send silent push to trigger Live Activity update
+                # Parse eta for content-state
+                if isinstance(trip.eta, str):
+                    eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
+                else:
+                    eta_dt = trip.eta.replace(tzinfo=None) if trip.eta.tzinfo else trip.eta
+
+                # Parse last_checkin if present
+                last_checkin_dt = None
+                if trip.last_checkin:
+                    try:
+                        last_checkin_dt = datetime.fromisoformat(str(trip.last_checkin).replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
+                    except Exception:
+                        pass
+
+                # Get check-in count from events (optional, default to 0)
+                checkin_count = 0
+                try:
+                    count_row = conn.execute(
+                        sqlalchemy.text("SELECT COUNT(*) FROM timeline_events WHERE trip_id = :trip_id AND event_type = 'checkin'"),
+                        {"trip_id": trip.id}
+                    ).fetchone()
+                    if count_row:
+                        checkin_count = count_row[0]
+                except Exception:
+                    pass
+
+                # Send direct Live Activity update (new approach)
+                await send_live_activity_update(
+                    trip_id=trip.id,
+                    status="active",
+                    eta=eta_dt,
+                    last_checkin_time=last_checkin_dt,
+                    is_overdue=False,  # ETA warning, not yet overdue
+                    checkin_count=checkin_count
+                )
+
+                # Also send silent push as fallback for older devices
                 await send_push_to_user(
                     trip.user_id,
                     "",  # Empty for silent push
@@ -505,16 +542,17 @@ async def check_live_activity_transitions():
                     },
                     notification_type="emergency"
                 )
+
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_eta_transition = true WHERE id = :id"),
                     {"id": trip.id}
                 )
-                log.info(f"[LiveActivity] Sent ETA warning transition push for trip {trip.id}")
+                log.info(f"[LiveActivity] Sent ETA warning transition for trip {trip.id}")
 
             # Find overdue trips approaching grace period end (within 15 seconds)
             overdue_trips = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, eta, grace_min
+                    SELECT id, user_id, eta, grace_min, status, last_checkin
                     FROM trips
                     WHERE status = 'overdue'
                     AND notified_grace_transition = false
@@ -533,6 +571,37 @@ async def check_live_activity_transitions():
 
                 # Send push if within 15 seconds of grace ending
                 if 0 < seconds_until_grace_end <= 15:
+                    # Parse last_checkin if present
+                    last_checkin_dt = None
+                    if trip.last_checkin:
+                        try:
+                            last_checkin_dt = datetime.fromisoformat(str(trip.last_checkin).replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
+                        except Exception:
+                            pass
+
+                    # Get check-in count
+                    checkin_count = 0
+                    try:
+                        count_row = conn.execute(
+                            sqlalchemy.text("SELECT COUNT(*) FROM timeline_events WHERE trip_id = :trip_id AND event_type = 'checkin'"),
+                            {"trip_id": trip.id}
+                        ).fetchone()
+                        if count_row:
+                            checkin_count = count_row[0]
+                    except Exception:
+                        pass
+
+                    # Send direct Live Activity update
+                    await send_live_activity_update(
+                        trip_id=trip.id,
+                        status="overdue",
+                        eta=eta_dt,
+                        last_checkin_time=last_checkin_dt,
+                        is_overdue=True,  # Past grace period
+                        checkin_count=checkin_count
+                    )
+
+                    # Also send silent push as fallback
                     await send_push_to_user(
                         trip.user_id,
                         "",
@@ -544,11 +613,12 @@ async def check_live_activity_transitions():
                         },
                         notification_type="emergency"
                     )
+
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET notified_grace_transition = true WHERE id = :id"),
                         {"id": trip.id}
                     )
-                    log.info(f"[LiveActivity] Sent overdue transition push for trip {trip.id}")
+                    log.info(f"[LiveActivity] Sent overdue transition for trip {trip.id}")
 
     except Exception as e:
         log.error(f"Error checking Live Activity transitions: {e}", exc_info=True)

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
-from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, profile, trips
+from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, profile, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
@@ -39,6 +39,7 @@ tags_metadata = [
     {"name": "contacts", "description": "Manage emergency contacts"},
     {"name": "friends", "description": "Friend management and invites"},
     {"name": "devices", "description": "Device registration for push notifications"},
+    {"name": "live-activity", "description": "Live Activity push token management"},
     {"name": "checkin", "description": "Check-in and check-out functionality"},
     {"name": "profile", "description": "User profile management"},
 ]
@@ -92,6 +93,7 @@ app.include_router(activities.router)
 app.include_router(contacts.router)
 app.include_router(friends.router)
 app.include_router(devices.router)
+app.include_router(live_activity_tokens.router)
 app.include_router(checkin.router)
 app.include_router(profile.router)
 app.include_router(invite_page.router)

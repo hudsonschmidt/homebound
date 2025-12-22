@@ -459,6 +459,66 @@ final class Session: ObservableObject {
         self.notice = "Push notifications unavailable. Check your notification settings."
     }
 
+    // MARK: - Live Activity Token Management
+
+    /// Register a live activity push token with the backend
+    /// This token is different from the regular APNs device token
+    func registerLiveActivityToken(token: String, tripId: Int) async {
+        guard let bearer = accessToken else {
+            debugLog("[LiveActivity] Cannot register token - not authenticated")
+            return
+        }
+
+        struct LiveActivityTokenRequest: Encodable {
+            let token: String
+            let trip_id: Int
+            let bundle_id: String
+            let env: String
+        }
+
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.homeboundapp.Homebound"
+        #if DEBUG
+        let environment = "development"
+        #else
+        let environment = "production"
+        #endif
+
+        do {
+            let _: API.Empty = try await api.post(
+                url("/api/v1/live-activity-tokens/"),
+                body: LiveActivityTokenRequest(
+                    token: token,
+                    trip_id: tripId,
+                    bundle_id: bundleId,
+                    env: environment
+                ),
+                bearer: bearer
+            )
+            debugLog("[LiveActivity] ✅ Token registered for trip #\(tripId)")
+        } catch {
+            debugLog("[LiveActivity] ❌ Failed to register token: \(error.localizedDescription)")
+        }
+    }
+
+    /// Unregister a live activity push token when activity ends
+    func unregisterLiveActivityToken(tripId: Int) async {
+        guard let bearer = accessToken else {
+            debugLog("[LiveActivity] Cannot unregister token - not authenticated")
+            return
+        }
+
+        do {
+            let _: API.Empty = try await api.delete(
+                url("/api/v1/live-activity-tokens/\(tripId)"),
+                bearer: bearer
+            )
+            debugLog("[LiveActivity] ✅ Token unregistered for trip #\(tripId)")
+        } catch {
+            // Don't report error if token was already removed or trip doesn't exist
+            debugLog("[LiveActivity] Token unregister result: \(error.localizedDescription)")
+        }
+    }
+
     /// Step 1: ask backend to send a code / magic link
     @MainActor
     func requestMagicLink(email: String) async {

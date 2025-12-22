@@ -120,8 +120,82 @@ class APNsClient:
                 detail = r.text or r.headers.get("apns-id", "unknown error")
         return PushResult(ok=ok, status=r.status_code, detail=detail)
 
+    async def send_live_activity_update(
+        self,
+        live_activity_token: str,
+        content_state: dict,
+        event: str = "update",
+        timestamp: int | None = None
+    ) -> PushResult:
+        """
+        Send a Live Activity update push notification.
+
+        This uses a different APNs push type and topic than regular notifications.
+
+        Args:
+            live_activity_token: The Live Activity push token (NOT device token)
+            content_state: Dict matching TripLiveActivityAttributes.ContentState
+                           Keys must be camelCase to match Swift Codable
+            event: "update" to update the activity, "end" to dismiss it
+            timestamp: Unix timestamp for ordering updates (defaults to now)
+
+        Returns:
+            PushResult with ok status and details
+        """
+        c = await self._client_ctx()
+        url = f"{self.base_url}/3/device/{live_activity_token}"
+
+        # Live Activity pushes require different headers than regular notifications
+        headers = {
+            "authorization": f"bearer {self._provider_jwt()}",
+            "apns-topic": f"{self.bundle_id}.push-type.liveactivity",  # Must include suffix
+            "apns-push-type": "liveactivity",
+            "apns-priority": "10",
+            "content-type": "application/json",
+        }
+
+        # Live Activity payload structure per Apple docs
+        payload: dict[str, Any] = {
+            "aps": {
+                "timestamp": timestamp or int(time.time()),
+                "event": event,
+                "content-state": content_state
+            }
+        }
+
+        log.info(f"[APNS] Sending Live Activity {event}: token={live_activity_token[:20]}... state={content_state}")
+
+        r = await c.post(url, headers=headers, json=payload)
+        ok = 200 <= r.status_code < 300
+        if ok:
+            detail = r.headers.get("apns-id", "success")
+            log.info(f"[APNS] Live Activity update sent successfully")
+        else:
+            try:
+                error_body = r.json()
+                detail = error_body.get("reason", r.text)
+            except Exception:
+                detail = r.text or r.headers.get("apns-id", "unknown error")
+            log.warning(f"[APNS] Live Activity update failed: status={r.status_code} detail={detail}")
+
+        return PushResult(ok=ok, status=r.status_code, detail=detail)
+
+
+class DummyPushWithLiveActivity(DummyPush):
+    """Extended dummy push that also handles Live Activity updates"""
+
+    async def send_live_activity_update(
+        self,
+        live_activity_token: str,
+        content_state: dict,
+        event: str = "update",
+        timestamp: int | None = None
+    ) -> PushResult:
+        print(f"[DUMMY LIVE ACTIVITY] token={live_activity_token[:20]}... event={event} state={content_state}")
+        return PushResult(ok=True, status=200, detail="dummy")
+
 
 def get_push_sender():
     if settings.PUSH_BACKEND.lower() == "apns":
         return APNsClient()
-    return DummyPush()
+    return DummyPushWithLiveActivity()

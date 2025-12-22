@@ -28,6 +28,9 @@ final class LiveActivityManager: ObservableObject {
     private let appGroupIdentifier = "group.com.homeboundapp.Homebound"
     private let enabledKey = "liveActivityEnabled"
 
+    /// Track active token observation tasks by trip ID
+    private var tokenObservationTasks: [Int: Task<Void, Never>] = [:]
+
     // MARK: - Initialization
 
     private init() {
@@ -172,16 +175,42 @@ final class LiveActivityManager: ObservableObject {
             let activity = try ActivityKit.Activity<TripLiveActivityAttributes>.request(
                 attributes: attributes,
                 content: content,
-                pushType: nil
+                pushType: .token
             )
             // Store the activity ID in shared UserDefaults for widget access
             sharedDefaults?.set(activity.id, forKey: LiveActivityConstants.activityIdKey)
             debugLog("[LiveActivity] Started activity for trip #\(trip.id), id: \(activity.id)")
+
+            // Start observing push token updates to send to backend
+            observePushTokenUpdates(for: activity, tripId: trip.id)
+
             return true
         } catch {
             debugLog("[LiveActivity] Failed to start: \(error.localizedDescription)")
             return false
         }
+    }
+
+    /// Observe push token updates for an activity and send to backend
+    @available(iOS 16.1, *)
+    private func observePushTokenUpdates(for activity: ActivityKit.Activity<TripLiveActivityAttributes>, tripId: Int) {
+        // Cancel any existing observation for this trip
+        tokenObservationTasks[tripId]?.cancel()
+
+        // Start new observation task
+        tokenObservationTasks[tripId] = Task { [weak self] in
+            for await tokenData in activity.pushTokenUpdates {
+                guard !Task.isCancelled else { break }
+                let tokenString = tokenData.map { String(format: "%02x", $0) }.joined()
+                debugLog("[LiveActivity] Push token update for trip #\(tripId): \(tokenString.prefix(20))...")
+                await self?.sendPushTokenToBackend(token: tokenString, tripId: tripId)
+            }
+        }
+    }
+
+    /// Send live activity push token to backend
+    private func sendPushTokenToBackend(token: String, tripId: Int) async {
+        await Session.shared.registerLiveActivityToken(token: token, tripId: tripId)
     }
 
     /// Update the Live Activity with new trip state
@@ -223,6 +252,15 @@ final class LiveActivityManager: ObservableObject {
         let activities = ActivityKit.Activity<TripLiveActivityAttributes>.activities
 
         for activity in activities {
+            let tripId = activity.attributes.tripId
+
+            // Cancel token observation for this trip
+            tokenObservationTasks[tripId]?.cancel()
+            tokenObservationTasks.removeValue(forKey: tripId)
+
+            // Unregister token from backend
+            await Session.shared.unregisterLiveActivityToken(tripId: tripId)
+
             if let trip = trip {
                 let finalState = TripLiveActivityAttributes.ContentState(
                     status: "completed",
@@ -255,6 +293,15 @@ final class LiveActivityManager: ObservableObject {
 
         let activities = ActivityKit.Activity<TripLiveActivityAttributes>.activities
         for activity in activities {
+            let tripId = activity.attributes.tripId
+
+            // Cancel token observation for this trip
+            tokenObservationTasks[tripId]?.cancel()
+            tokenObservationTasks.removeValue(forKey: tripId)
+
+            // Unregister token from backend
+            await Session.shared.unregisterLiveActivityToken(tripId: tripId)
+
             let finalState = TripLiveActivityAttributes.ContentState(
                 status: "completed",
                 eta: Date(),

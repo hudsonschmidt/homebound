@@ -448,6 +448,90 @@ async def send_push_to_user(
                 )
             log.info(f"[APNS] Removed {len(tokens_to_remove)} unregistered device(s) for user {user_id}")
 
+
+# Live Activity Updates ------------------------------------------------------------------------
+async def send_live_activity_update(
+    trip_id: int,
+    status: str,
+    eta: datetime,
+    last_checkin_time: datetime | None,
+    is_overdue: bool,
+    checkin_count: int,
+    event: str = "update"
+):
+    """Send a Live Activity push update to the iOS lock screen widget.
+
+    This sends a push notification that directly updates the Live Activity UI
+    without needing to wake the app.
+
+    Args:
+        trip_id: The trip ID
+        status: Trip status ("active", "overdue", "overdue_notified")
+        eta: Expected arrival time
+        last_checkin_time: Last check-in timestamp (optional)
+        is_overdue: Whether trip is past ETA + grace period
+        checkin_count: Number of check-ins performed
+        event: "update" to update, "end" to dismiss the activity
+    """
+    import time
+    from ..messaging.apns import get_push_sender
+
+    # Get the live activity token for this trip
+    with db.engine.begin() as conn:
+        token_row = conn.execute(
+            sqlalchemy.text("""
+                SELECT token, env FROM live_activity_tokens
+                WHERE trip_id = :trip_id
+            """),
+            {"trip_id": trip_id}
+        ).fetchone()
+
+    if not token_row:
+        log.debug(f"[LiveActivity] No token registered for trip {trip_id}")
+        return
+
+    # Check environment matches
+    current_env = "development" if settings.APNS_USE_SANDBOX else "production"
+    if token_row.env != current_env:
+        log.debug(f"[LiveActivity] Token env mismatch for trip {trip_id}: {token_row.env} vs {current_env}")
+        return
+
+    # Build content-state matching iOS ContentState struct
+    # CRITICAL: Keys must be camelCase to match Swift Codable
+    content_state = {
+        "status": status,
+        "eta": eta.isoformat() if eta else None,
+        "lastCheckinTime": last_checkin_time.isoformat() if last_checkin_time else None,
+        "isOverdue": is_overdue,
+        "checkinCount": checkin_count
+    }
+
+    sender = get_push_sender()
+    if hasattr(sender, 'send_live_activity_update'):
+        result = await sender.send_live_activity_update(
+            live_activity_token=token_row.token,
+            content_state=content_state,
+            event=event,
+            timestamp=int(time.time())
+        )
+
+        if result.ok:
+            log.info(f"[LiveActivity] Update sent for trip {trip_id}: {status}")
+        else:
+            log.warning(f"[LiveActivity] Update failed for trip {trip_id}: {result.detail}")
+
+            # Handle token invalidation (410 Gone or specific errors)
+            if result.status == 410 or result.detail in ("ExpiredToken", "Unregistered", "BadDeviceToken"):
+                log.info(f"[LiveActivity] Removing invalid token for trip {trip_id}")
+                with db.engine.begin() as conn:
+                    conn.execute(
+                        sqlalchemy.text("DELETE FROM live_activity_tokens WHERE trip_id = :trip_id"),
+                        {"trip_id": trip_id}
+                    )
+    else:
+        log.info(f"[LiveActivity] Dummy push for trip {trip_id}: {content_state}")
+
+
 # Magic Link --------------------------------------------------------------------------------
 async def send_magic_link_email(email: str, code: str):
     """Send magic link code via email."""
