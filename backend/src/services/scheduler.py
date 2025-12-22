@@ -217,7 +217,24 @@ async def check_overdue_trips():
                         {"trip_id": trip_id}
                     )
 
-                    # Send silent push to trigger Live Activity update on iOS
+                    # Parse eta for Live Activity update
+                    if isinstance(trip.eta, str):
+                        eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
+                    else:
+                        eta_dt = trip.eta.replace(tzinfo=None) if trip.eta.tzinfo else trip.eta
+
+                    # Send direct Live Activity update (more reliable than silent push)
+                    await send_live_activity_update(
+                        trip_id=trip_id,
+                        status="overdue",
+                        eta=eta_dt,
+                        last_checkin_time=None,  # Will be updated if available
+                        is_overdue=False,  # Not past grace period yet, just past ETA
+                        checkin_count=0
+                    )
+                    log.info(f"[Scheduler] Sent Live Activity update for overdue trip {trip_id}")
+
+                    # Also send silent push as fallback
                     await send_push_to_user(
                         trip.user_id,
                         "",  # Empty title for silent/background push

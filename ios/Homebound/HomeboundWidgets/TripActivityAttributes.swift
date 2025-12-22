@@ -55,12 +55,18 @@ struct TripLiveActivityAttributes: ActivityAttributes {
         var statusText: String {
             if contactsNotified { return "OVERDUE" }
             if isOverdue { return "CHECK IN NOW" }
+            if status == "overdue" { return "CHECK IN NOW" }  // Past ETA, in grace period
             return "ACTIVE TRIP"
         }
 
         /// Whether contacts have been notified
         var contactsNotified: Bool {
             status == "overdue_notified"
+        }
+
+        /// Whether past ETA (in grace period or beyond)
+        var isPastETA: Bool {
+            status == "overdue" || status == "overdue_notified"
         }
     }
 

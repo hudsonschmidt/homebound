@@ -498,12 +498,13 @@ async def send_live_activity_update(
 
     # Build content-state matching iOS ContentState struct
     # CRITICAL: Keys must be camelCase to match Swift Codable
-    # CRITICAL: Dates must be Unix timestamps (Double), not ISO strings!
-    # Swift's default Codable Date strategy expects TimeInterval (seconds since 1970)
+    # CRITICAL: Swift's default Codable Date strategy uses Apple's reference date
+    # (Jan 1, 2001), NOT Unix epoch (Jan 1, 1970). Difference is 978307200 seconds.
+    APPLE_EPOCH_OFFSET = 978307200  # Seconds between 1970-01-01 and 2001-01-01
     content_state = {
         "status": status,
-        "eta": eta.timestamp() if eta else None,
-        "lastCheckinTime": last_checkin_time.timestamp() if last_checkin_time else None,
+        "eta": (eta.timestamp() - APPLE_EPOCH_OFFSET) if eta else None,
+        "lastCheckinTime": (last_checkin_time.timestamp() - APPLE_EPOCH_OFFSET) if last_checkin_time else None,
         "isOverdue": is_overdue,
         "checkinCount": checkin_count
     }
