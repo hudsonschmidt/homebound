@@ -567,9 +567,15 @@ struct CountdownView: View {
     let isOverdue: Bool
     var statusColor: Color = .orange
 
+    /// Check if ETA has passed (locally, without needing a push update)
+    private var isPastETA: Bool {
+        Date() > eta
+    }
+
     var body: some View {
-        if isOverdue {
-            Text("OVERDUE")
+        if isOverdue || isPastETA {
+            // Show OVERDUE when either the server says so OR the local time is past ETA
+            Text(isOverdue ? "OVERDUE" : "CHECK IN")
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundStyle(statusColor)
         } else {

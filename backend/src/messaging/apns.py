@@ -163,13 +163,16 @@ class APNsClient:
             }
         }
 
-        log.info(f"[APNS] Sending Live Activity {event}: token={live_activity_token[:20]}... state={content_state}")
+        import json
+        log.info(f"[APNS] Sending Live Activity {event}: token={live_activity_token[:20]}...")
+        log.info(f"[APNS] Content-state: {json.dumps(content_state)}")
+        log.info(f"[APNS] Full payload: {json.dumps(payload)}")
 
         r = await c.post(url, headers=headers, json=payload)
         ok = 200 <= r.status_code < 300
         if ok:
             detail = r.headers.get("apns-id", "success")
-            log.info(f"[APNS] Live Activity update sent successfully")
+            log.info(f"[APNS] Live Activity update sent successfully (apns-id: {detail})")
         else:
             try:
                 error_body = r.json()

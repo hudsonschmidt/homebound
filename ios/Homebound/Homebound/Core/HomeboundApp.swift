@@ -360,12 +360,32 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         debugLog("[AppDelegate] 📬 Received remote notification")
 
         // Check if this is a sync notification
-        if let sync = userInfo["sync"] as? String {
+        // The sync value can be at top level or nested in "data" depending on push type
+        let sync: String? = {
+            if let s = userInfo["sync"] as? String { return s }
+            if let data = userInfo["data"] as? [String: Any],
+               let s = data["sync"] as? String { return s }
+            return nil
+        }()
+
+        if let sync = sync {
             switch sync {
             case "pending_actions":
                 debugLog("[AppDelegate] 🔄 Silent push: syncing pending actions")
                 NotificationCenter.default.post(name: .backgroundSyncRequested, object: nil)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    completionHandler(.newData)
+                }
+
+            case "start_live_activity":
+                debugLog("[AppDelegate] 🚀 Silent push: starting Live Activity for new trip")
+                // Fetch trip data and start Live Activity
+                Task {
+                    await Session.shared.loadActivePlan()
+                    if let trip = Session.shared.activeTrip {
+                        await LiveActivityManager.shared.startActivity(for: trip)
+                        debugLog("[AppDelegate] ✅ Live Activity started for trip #\(trip.id)")
+                    }
                     completionHandler(.newData)
                 }
 

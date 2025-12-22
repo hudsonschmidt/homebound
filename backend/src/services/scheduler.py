@@ -291,11 +291,28 @@ async def check_push_notifications():
             ).fetchall()
 
             for trip in just_started:
+                # Send visible notification
                 await send_push_to_user(
                     trip.user_id,
                     "Trip Started",
                     f"Your trip '{trip.title}' has started. Stay safe!",
+                    data={
+                        "sync": "start_live_activity",
+                        "trip_id": trip.id
+                    },
                     notification_type="trip_reminder"
+                )
+                # Also send a silent background push to ensure Live Activity starts
+                # even if the visible notification is dismissed
+                await send_push_to_user(
+                    trip.user_id,
+                    "",  # Empty for silent push
+                    "",
+                    data={
+                        "sync": "start_live_activity",
+                        "trip_id": trip.id
+                    },
+                    notification_type="emergency"  # Always send
                 )
                 conn.execute(
                     sqlalchemy.text("UPDATE trips SET notified_trip_started = true WHERE id = :id"),
