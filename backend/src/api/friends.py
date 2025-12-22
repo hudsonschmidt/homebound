@@ -390,74 +390,8 @@ def get_friends(user_id: int = Depends(auth.get_current_user_id)):
         ]
 
 
-@router.get("/{friend_user_id}", response_model=FriendResponse)
-def get_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_user_id)):
-    """Get a specific friend's profile."""
-    with db.engine.begin() as connection:
-        # Verify they are friends
-        friendship = _get_friendship(connection, user_id, friend_user_id)
-        if not friendship:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Friend not found"
-            )
-
-        # Get friend's profile
-        friend = connection.execute(
-            sqlalchemy.text(
-                """
-                SELECT id, first_name, last_name, profile_photo_url, created_at
-                FROM users
-                WHERE id = :friend_id
-                """
-            ),
-            {"friend_id": friend_user_id}
-        ).fetchone()
-
-        if not friend:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-
-        return FriendResponse(
-            user_id=friend.id,
-            first_name=friend.first_name or "",
-            last_name=friend.last_name or "",
-            profile_photo_url=friend.profile_photo_url,
-            member_since=friend.created_at.isoformat() if friend.created_at else "",
-            friendship_since=friendship.created_at.isoformat() if friendship.created_at else ""
-        )
-
-
-@router.delete("/{friend_user_id}")
-def remove_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_user_id)):
-    """Remove a friend."""
-    with db.engine.begin() as connection:
-        # Verify they are friends and get the friendship
-        friendship = _get_friendship(connection, user_id, friend_user_id)
-        if not friendship:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Friend not found"
-            )
-
-        # Delete the friendship
-        id1, id2 = min(user_id, friend_user_id), max(user_id, friend_user_id)
-        connection.execute(
-            sqlalchemy.text(
-                """
-                DELETE FROM friendships
-                WHERE user_id_1 = :id1 AND user_id_2 = :id2
-                """
-            ),
-            {"id1": id1, "id2": id2}
-        )
-
-        return {"ok": True, "message": "Friend removed"}
-
-
 # ==================== Friend's Active Trips ====================
+# NOTE: This must be defined BEFORE /{friend_user_id} to avoid route conflicts
 
 class FriendActiveTripOwner(BaseModel):
     user_id: int
@@ -572,3 +506,72 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             ))
 
         return result
+
+
+# ==================== Individual Friend Endpoints ====================
+
+@router.get("/{friend_user_id}", response_model=FriendResponse)
+def get_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Get a specific friend's profile."""
+    with db.engine.begin() as connection:
+        # Verify they are friends
+        friendship = _get_friendship(connection, user_id, friend_user_id)
+        if not friendship:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Friend not found"
+            )
+
+        # Get friend's profile
+        friend = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, first_name, last_name, profile_photo_url, created_at
+                FROM users
+                WHERE id = :friend_id
+                """
+            ),
+            {"friend_id": friend_user_id}
+        ).fetchone()
+
+        if not friend:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        return FriendResponse(
+            user_id=friend.id,
+            first_name=friend.first_name or "",
+            last_name=friend.last_name or "",
+            profile_photo_url=friend.profile_photo_url,
+            member_since=friend.created_at.isoformat() if friend.created_at else "",
+            friendship_since=friendship.created_at.isoformat() if friendship.created_at else ""
+        )
+
+
+@router.delete("/{friend_user_id}")
+def remove_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Remove a friend."""
+    with db.engine.begin() as connection:
+        # Verify they are friends and get the friendship
+        friendship = _get_friendship(connection, user_id, friend_user_id)
+        if not friendship:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Friend not found"
+            )
+
+        # Delete the friendship
+        id1, id2 = min(user_id, friend_user_id), max(user_id, friend_user_id)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                DELETE FROM friendships
+                WHERE user_id_1 = :id1 AND user_id_2 = :id2
+                """
+            ),
+            {"id1": id1, "id2": id2}
+        )
+
+        return {"ok": True, "message": "Friend removed"}

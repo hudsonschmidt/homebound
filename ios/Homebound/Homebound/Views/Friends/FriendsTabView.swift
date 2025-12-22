@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Main Friends tab view showing friends list and invite options
 struct FriendsTabView: View {
