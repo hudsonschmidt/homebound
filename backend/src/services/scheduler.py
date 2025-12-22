@@ -476,7 +476,8 @@ async def check_live_activity_transitions():
     try:
         now = datetime.utcnow()
 
-        with db.engine.begin() as conn:
+        # First, fetch all trips that need processing (read-only transaction)
+        with db.engine.connect() as conn:
             # Find active trips approaching ETA (within 15 seconds)
             approaching_eta = conn.execute(
                 sqlalchemy.text("""
@@ -493,7 +494,19 @@ async def check_live_activity_transitions():
                 }
             ).fetchall()
 
-            for trip in approaching_eta:
+            # Find overdue trips approaching grace period end
+            overdue_trips = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id, user_id, eta, grace_min, status, last_checkin
+                    FROM trips
+                    WHERE status = 'overdue'
+                    AND notified_grace_transition = false
+                """)
+            ).fetchall()
+
+        # Process each ETA transition trip in its own transaction
+        for trip in approaching_eta:
+            try:
                 # Parse eta for content-state
                 if isinstance(trip.eta, str):
                     eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
@@ -511,14 +524,15 @@ async def check_live_activity_transitions():
                 # Get check-in count from events (optional, default to 0)
                 checkin_count = 0
                 try:
-                    count_row = conn.execute(
-                        sqlalchemy.text("SELECT COUNT(*) FROM timeline_events WHERE trip_id = :trip_id AND event_type = 'checkin'"),
-                        {"trip_id": trip.id}
-                    ).fetchone()
-                    if count_row:
-                        checkin_count = count_row[0]
+                    with db.engine.connect() as conn:
+                        count_row = conn.execute(
+                            sqlalchemy.text("SELECT COUNT(*) FROM timeline_events WHERE trip_id = :trip_id AND event_type = 'checkin'"),
+                            {"trip_id": trip.id}
+                        ).fetchone()
+                        if count_row:
+                            checkin_count = count_row[0]
                 except Exception:
-                    pass
+                    pass  # timeline_events table may not exist, use default 0
 
                 # Send direct Live Activity update (new approach)
                 await send_live_activity_update(
@@ -543,23 +557,20 @@ async def check_live_activity_transitions():
                     notification_type="emergency"
                 )
 
-                conn.execute(
-                    sqlalchemy.text("UPDATE trips SET notified_eta_transition = true WHERE id = :id"),
-                    {"id": trip.id}
-                )
+                # Mark as notified in its own transaction
+                with db.engine.begin() as conn:
+                    conn.execute(
+                        sqlalchemy.text("UPDATE trips SET notified_eta_transition = true WHERE id = :id"),
+                        {"id": trip.id}
+                    )
                 log.info(f"[LiveActivity] Sent ETA warning transition for trip {trip.id}")
 
-            # Find overdue trips approaching grace period end (within 15 seconds)
-            overdue_trips = conn.execute(
-                sqlalchemy.text("""
-                    SELECT id, user_id, eta, grace_min, status, last_checkin
-                    FROM trips
-                    WHERE status = 'overdue'
-                    AND notified_grace_transition = false
-                """)
-            ).fetchall()
+            except Exception as e:
+                log.error(f"[LiveActivity] Error processing ETA transition for trip {trip.id}: {e}", exc_info=True)
 
-            for trip in overdue_trips:
+        # Process each grace period transition trip in its own transaction
+        for trip in overdue_trips:
+            try:
                 # Parse eta
                 if isinstance(trip.eta, str):
                     eta_dt = datetime.fromisoformat(trip.eta.replace(' ', 'T').replace('Z', '').replace('+00:00', ''))
@@ -582,14 +593,15 @@ async def check_live_activity_transitions():
                     # Get check-in count
                     checkin_count = 0
                     try:
-                        count_row = conn.execute(
-                            sqlalchemy.text("SELECT COUNT(*) FROM timeline_events WHERE trip_id = :trip_id AND event_type = 'checkin'"),
-                            {"trip_id": trip.id}
-                        ).fetchone()
-                        if count_row:
-                            checkin_count = count_row[0]
+                        with db.engine.connect() as conn:
+                            count_row = conn.execute(
+                                sqlalchemy.text("SELECT COUNT(*) FROM timeline_events WHERE trip_id = :trip_id AND event_type = 'checkin'"),
+                                {"trip_id": trip.id}
+                            ).fetchone()
+                            if count_row:
+                                checkin_count = count_row[0]
                     except Exception:
-                        pass
+                        pass  # timeline_events table may not exist, use default 0
 
                     # Send direct Live Activity update
                     await send_live_activity_update(
@@ -614,11 +626,16 @@ async def check_live_activity_transitions():
                         notification_type="emergency"
                     )
 
-                    conn.execute(
-                        sqlalchemy.text("UPDATE trips SET notified_grace_transition = true WHERE id = :id"),
-                        {"id": trip.id}
-                    )
+                    # Mark as notified in its own transaction
+                    with db.engine.begin() as conn:
+                        conn.execute(
+                            sqlalchemy.text("UPDATE trips SET notified_grace_transition = true WHERE id = :id"),
+                            {"id": trip.id}
+                        )
                     log.info(f"[LiveActivity] Sent overdue transition for trip {trip.id}")
+
+            except Exception as e:
+                log.error(f"[LiveActivity] Error processing grace transition for trip {trip.id}: {e}", exc_info=True)
 
     except Exception as e:
         log.error(f"Error checking Live Activity transitions: {e}", exc_info=True)
