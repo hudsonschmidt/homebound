@@ -115,7 +115,7 @@ async def request_magic_link(body: MagicLinkRequest):
         code = f"{secrets.randbelow(1000000):06d}"
         expires_at = datetime.now(UTC) + timedelta(minutes=15)
 
-        # Store the token
+        # Store the token (store as ISO string to ensure consistent UTC handling)
         connection.execute(
             sqlalchemy.text(
                 """
@@ -127,7 +127,7 @@ async def request_magic_link(body: MagicLinkRequest):
                 "user_id": user.id,
                 "email": body.email,
                 "token": code,
-                "expires_at": expires_at
+                "expires_at": expires_at.isoformat()
             }
         )
 

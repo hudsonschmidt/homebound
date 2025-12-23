@@ -685,3 +685,206 @@ def test_live_activity_update_called_before_other_notifications():
                 mock_la_update.assert_called_once()
 
     cleanup_test_data(user_id)
+
+
+# ============================================================================
+# Trip Status Transition Tests
+# ============================================================================
+
+def setup_planned_trip():
+    """Helper to set up a planned (not yet active) trip with tokens"""
+    test_email = "planned-trip@homeboundapp.com"
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM live_activity_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM devices WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM login_tokens WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+            {"email": test_email}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Planned",
+                "last_name": "Test",
+                "age": 30
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create contact
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "name": "Emergency Contact",
+                "email": "contact@homeboundapp.com"
+            }
+        )
+        contact_id = result.fetchone()[0]
+
+        # Get Hiking activity ID
+        activity_result = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities WHERE name = 'Hiking'")
+        ).fetchone()
+        activity_id = activity_result[0]
+
+        # Create PLANNED trip (start time in future)
+        now = datetime.now(UTC)
+        future_start = now + timedelta(hours=24)  # Start tomorrow
+        checkin_token = "test_planned_checkin_123"
+        checkout_token = "test_planned_checkout_456"
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (
+                    user_id, title, activity, start, eta, grace_min,
+                    location_text, gen_lat, gen_lon, status, contact1,
+                    created_at, checkin_token, checkout_token
+                )
+                VALUES (
+                    :user_id, :title, :activity, :start, :eta, :grace_min,
+                    :location_text, :gen_lat, :gen_lon, 'planned', :contact1,
+                    :created_at, :checkin_token, :checkout_token
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "title": "Planned Trip",
+                "activity": activity_id,
+                "start": future_start.isoformat(),
+                "eta": (future_start + timedelta(hours=2)).isoformat(),
+                "grace_min": 30,
+                "location_text": "Future Trail",
+                "gen_lat": 37.7749,
+                "gen_lon": -122.4194,
+                "contact1": contact_id,
+                "created_at": now.isoformat(),
+                "checkin_token": checkin_token,
+                "checkout_token": checkout_token
+            }
+        )
+        trip_id = result.fetchone()[0]
+
+    return user_id, trip_id, checkin_token, checkout_token
+
+
+def test_checkin_to_planned_trip_fails():
+    """Test that checking in to a planned (not yet started) trip fails"""
+    user_id, trip_id, checkin_token, _ = setup_planned_trip()
+
+    background_tasks = BackgroundTasks()
+    with pytest.raises(HTTPException) as exc_info:
+        checkin_with_token(checkin_token, background_tasks, lat=None, lon=None)
+
+    # Should return 404 because the trip query filters by status IN ('active', 'overdue', 'overdue_notified')
+    assert exc_info.value.status_code == 404
+    assert "invalid" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_checkout_from_planned_trip_fails():
+    """Test that checking out from a planned trip fails"""
+    user_id, _, _, checkout_token = setup_planned_trip()
+
+    background_tasks = BackgroundTasks()
+    with pytest.raises(HTTPException) as exc_info:
+        checkout_with_token(checkout_token, background_tasks)
+
+    assert exc_info.value.status_code == 404
+    assert "invalid" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_checkin_to_completed_trip_fails():
+    """Test that checking in to a completed trip fails"""
+    user_id, trip_id, checkin_token, checkout_token = setup_test_trip_with_tokens()
+
+    # First checkout to complete the trip
+    background_tasks = BackgroundTasks()
+    checkout_with_token(checkout_token, background_tasks)
+
+    # Verify trip is completed
+    with db.engine.begin() as connection:
+        trip = connection.execute(
+            sqlalchemy.text("SELECT status FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip_id}
+        ).fetchone()
+        assert trip.status == "completed"
+
+    # Now try to checkin - should fail
+    with pytest.raises(HTTPException) as exc_info:
+        checkin_with_token(checkin_token, BackgroundTasks(), lat=None, lon=None)
+
+    assert exc_info.value.status_code == 404
+    assert "invalid" in exc_info.value.detail.lower()
+
+    cleanup_test_data(user_id)
+
+
+def test_checkin_token_invalid_after_checkout():
+    """Test that checkin token becomes invalid after trip is checked out"""
+    user_id, trip_id, checkin_token, checkout_token = setup_test_trip_with_tokens()
+
+    # First, checkin works
+    background_tasks = BackgroundTasks()
+    response = checkin_with_token(checkin_token, background_tasks, lat=None, lon=None)
+    assert response.ok is True
+
+    # Checkout
+    checkout_response = checkout_with_token(checkout_token, BackgroundTasks())
+    assert checkout_response.ok is True
+
+    # After checkout, checkin should fail
+    with pytest.raises(HTTPException) as exc_info:
+        checkin_with_token(checkin_token, BackgroundTasks(), lat=None, lon=None)
+
+    assert exc_info.value.status_code == 404
+
+    cleanup_test_data(user_id)

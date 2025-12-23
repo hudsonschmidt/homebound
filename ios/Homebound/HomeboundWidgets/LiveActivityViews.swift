@@ -104,7 +104,7 @@ struct LockScreenView: View {
 
     // Whether trip is in urgent state (overdue or grace warning)
     private var isUrgent: Bool {
-        isOverdue
+        isOverdue || state.isPastETA
     }
 
     // Status badge dot size (larger when urgent)

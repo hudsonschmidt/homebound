@@ -2,7 +2,7 @@
 import pytest
 import sqlalchemy
 from datetime import datetime, timedelta
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from src import database as db
 from src.api.friends import (
@@ -166,7 +166,7 @@ def test_accept_invite():
         invite = create_invite(user_id=inviter_id)
 
         # Accept invite
-        friend = accept_invite(invite.token, user_id=accepter_id)
+        friend = accept_invite(invite.token, BackgroundTasks(), user_id=accepter_id)
 
         assert isinstance(friend, FriendResponse)
         assert friend.user_id == inviter_id
@@ -206,7 +206,7 @@ def test_accept_own_invite_fails():
         invite = create_invite(user_id=user_id)
 
         with pytest.raises(HTTPException) as exc_info:
-            accept_invite(invite.token, user_id=user_id)
+            accept_invite(invite.token, BackgroundTasks(), user_id=user_id)
         assert exc_info.value.status_code == 400
         assert "own invite" in exc_info.value.detail.lower()
     finally:
@@ -234,7 +234,7 @@ def test_accept_expired_invite_fails():
 
     try:
         with pytest.raises(HTTPException) as exc_info:
-            accept_invite("expired_accept_token", user_id=accepter_id)
+            accept_invite("expired_accept_token", BackgroundTasks(), user_id=accepter_id)
         assert exc_info.value.status_code == 410
         assert "expired" in exc_info.value.detail.lower()
     finally:
@@ -262,7 +262,7 @@ def test_accept_already_friends_fails():
         invite = create_invite(user_id=inviter_id)
 
         with pytest.raises(HTTPException) as exc_info:
-            accept_invite(invite.token, user_id=accepter_id)
+            accept_invite(invite.token, BackgroundTasks(), user_id=accepter_id)
         assert exc_info.value.status_code == 409
         assert "already friends" in exc_info.value.detail.lower()
     finally:
@@ -302,7 +302,7 @@ def test_pending_invites_shows_accepted():
 
     try:
         invite = create_invite(user_id=inviter_id)
-        accept_invite(invite.token, user_id=accepter_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=accepter_id)
 
         pending = get_pending_invites(user_id=inviter_id)
 
@@ -326,7 +326,7 @@ def test_get_friends():
     try:
         # Create friendship via invite
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         # Both users should see each other as friends
         friends1 = get_friends(user_id=user1_id)
@@ -366,7 +366,7 @@ def test_get_friend_profile():
 
     try:
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         friend = get_friend(user2_id, user_id=user1_id)
 
@@ -407,7 +407,7 @@ def test_remove_friend():
     try:
         # Create friendship
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         # Remove friend
         result = remove_friend(user2_id, user_id=user1_id)
@@ -450,7 +450,7 @@ def test_either_user_can_remove_friendship():
     try:
         # Create friendship (user1 invites, user2 accepts)
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         # User2 removes the friendship (not the inviter)
         result = remove_friend(user1_id, user_id=user2_id)
@@ -479,7 +479,7 @@ def test_multiple_friendships():
         # Create friendships
         for friend_id in [friend1_id, friend2_id, friend3_id]:
             invite = create_invite(user_id=user_id)
-            accept_invite(invite.token, user_id=friend_id)
+            accept_invite(invite.token, BackgroundTasks(), user_id=friend_id)
 
         friends = get_friends(user_id=user_id)
         assert len(friends) == 3
@@ -507,11 +507,11 @@ def test_invite_max_uses_exceeded():
         invite = create_invite(user_id=inviter_id)
 
         # First user accepts successfully
-        accept_invite(invite.token, user_id=accepter1_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=accepter1_id)
 
         # Second user should fail (max uses exceeded)
         with pytest.raises(HTTPException) as exc_info:
-            accept_invite(invite.token, user_id=accepter2_id)
+            accept_invite(invite.token, BackgroundTasks(), user_id=accepter2_id)
         assert exc_info.value.status_code == 410
         assert "already been used" in exc_info.value.detail.lower()
     finally:
@@ -535,7 +535,7 @@ def test_invite_preview_used_up_shows_invalid():
         assert preview_before.is_valid is True
 
         # Accept the invite
-        accept_invite(invite.token, user_id=accepter_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=accepter_id)
 
         # Preview after acceptance should be invalid
         preview_after = get_invite_preview(invite.token)
@@ -553,7 +553,7 @@ def test_accept_nonexistent_invite_fails():
 
     try:
         with pytest.raises(HTTPException) as exc_info:
-            accept_invite("totally_fake_token_12345", user_id=user_id)
+            accept_invite("totally_fake_token_12345", BackgroundTasks(), user_id=user_id)
         assert exc_info.value.status_code == 404
         assert "not found" in exc_info.value.detail.lower()
     finally:
@@ -606,7 +606,7 @@ def test_friend_profile_includes_all_fields():
 
     try:
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         friend = get_friend(user2_id, user_id=user1_id)
 
@@ -652,7 +652,7 @@ def test_remove_friend_idempotent():
 
     try:
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         # First removal succeeds
         result = remove_friend(user2_id, user_id=user1_id)
@@ -676,7 +676,7 @@ def test_friendship_symmetry():
 
     try:
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         # Both users can see each other
         friend1 = get_friend(user2_id, user_id=user1_id)
@@ -745,7 +745,7 @@ def test_friend_with_empty_name():
 
     try:
         invite = create_invite(user_id=user1_id)
-        accept_invite(invite.token, user_id=user2_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=user2_id)
 
         # Getting friend with empty name should return empty strings
         friend = get_friend(user1_id, user_id=user2_id)
@@ -765,12 +765,12 @@ def test_accept_invite_same_token_twice_by_same_user():
 
     try:
         invite = create_invite(user_id=inviter_id)
-        accept_invite(invite.token, user_id=accepter_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=accepter_id)
 
         # Try to accept again with new invite - should fail (already friends)
         invite2 = create_invite(user_id=inviter_id)
         with pytest.raises(HTTPException) as exc_info:
-            accept_invite(invite2.token, user_id=accepter_id)
+            accept_invite(invite2.token, BackgroundTasks(), user_id=accepter_id)
         assert exc_info.value.status_code == 409
         assert "already friends" in exc_info.value.detail.lower()
     finally:
@@ -803,13 +803,13 @@ def test_friends_list_ordered_by_friendship_date():
     try:
         # Create friendships in order
         invite1 = create_invite(user_id=user_id)
-        accept_invite(invite1.token, user_id=friend1_id)
+        accept_invite(invite1.token, BackgroundTasks(), user_id=friend1_id)
 
         invite2 = create_invite(user_id=user_id)
-        accept_invite(invite2.token, user_id=friend2_id)
+        accept_invite(invite2.token, BackgroundTasks(), user_id=friend2_id)
 
         invite3 = create_invite(user_id=user_id)
-        accept_invite(invite3.token, user_id=friend3_id)
+        accept_invite(invite3.token, BackgroundTasks(), user_id=friend3_id)
 
         friends = get_friends(user_id=user_id)
 

@@ -18,6 +18,7 @@ from src.api.auth_endpoints import (
     request_magic_link,
     verify_magic_code,
 )
+from src.api.auth import get_current_user_id
 
 settings = config.get_settings()
 
@@ -349,8 +350,9 @@ def test_verify_magic_code_success():
         )
         user_id = result.fetchone()[0]
 
-        # Create a magic token
+        # Create a magic token (store as ISO string to match production code)
         test_code = "123456"
+        expires_at = datetime.now(UTC) + timedelta(minutes=15)
         connection.execute(
             sqlalchemy.text(
                 """
@@ -362,7 +364,7 @@ def test_verify_magic_code_success():
                 "user_id": user_id,
                 "email": test_email,
                 "token": test_code,
-                "expires_at": datetime.now(UTC) + timedelta(minutes=15)
+                "expires_at": expires_at.isoformat()
             }
         )
 
@@ -627,3 +629,200 @@ def test_refresh_token_invalid():
 
     assert exc_info.value.status_code == 401
     assert "invalid" in exc_info.value.detail.lower()
+
+
+def test_apple_review_test_account_new_user():
+    """Test Apple App Store Review test account creates user"""
+    apple_review_email = "apple-review@homeboundapp.com"
+    apple_review_code = "123456"
+
+    # Clean up any existing test user
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": apple_review_email}
+        )
+
+    # Verify with special test account credentials
+    verify_req = VerifyRequest(email=apple_review_email, code=apple_review_code)
+    token_response = verify_magic_code(verify_req)
+
+    assert isinstance(token_response, TokenResponse)
+    assert token_response.user["email"] == apple_review_email
+    assert token_response.user["first_name"] == "Apple"
+    assert token_response.user["last_name"] == "Reviewer"
+    assert token_response.user["profile_completed"] is True
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": apple_review_email}
+        )
+
+
+def test_apple_review_test_account_existing_user():
+    """Test Apple App Store Review test account with existing user"""
+    apple_review_email = "apple-review@homeboundapp.com"
+    apple_review_code = "123456"
+
+    # Ensure test user exists
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": apple_review_email}
+        )
+        connection.execute(
+            sqlalchemy.text("""
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, 'Apple', 'Reviewer', 30)
+            """),
+            {"email": apple_review_email}
+        )
+
+    # Verify with special test account credentials
+    verify_req = VerifyRequest(email=apple_review_email, code=apple_review_code)
+    token_response = verify_magic_code(verify_req)
+
+    assert isinstance(token_response, TokenResponse)
+    assert token_response.user["email"] == apple_review_email
+
+    # Clean up
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": apple_review_email}
+        )
+
+
+# ============================================================================
+# get_current_user_id Tests (auth middleware)
+# ============================================================================
+
+class MockRequest:
+    """Mock FastAPI Request for auth testing"""
+    def __init__(self, headers: dict):
+        self.headers = headers
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_valid_token():
+    """Test get_current_user_id with valid token"""
+    user_id = 123
+    email = "test@example.com"
+    access_token, _ = create_jwt_pair(user_id, email)
+
+    request = MockRequest({"authorization": f"Bearer {access_token}"})
+    result = await get_current_user_id(request)
+
+    assert result == user_id
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_x_auth_token_header():
+    """Test get_current_user_id with X-Auth-Token header"""
+    user_id = 456
+    email = "test2@example.com"
+    access_token, _ = create_jwt_pair(user_id, email)
+
+    request = MockRequest({"x-auth-token": f"Bearer {access_token}"})
+    result = await get_current_user_id(request)
+
+    assert result == user_id
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_missing_token():
+    """Test get_current_user_id with missing token"""
+    request = MockRequest({})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user_id(request)
+
+    assert exc_info.value.status_code == 401
+    assert "Missing" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_invalid_bearer_format():
+    """Test get_current_user_id with non-bearer token"""
+    request = MockRequest({"authorization": "Basic sometoken"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user_id(request)
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_wrong_token_type():
+    """Test get_current_user_id with refresh token instead of access"""
+    user_id = 789
+    email = "test3@example.com"
+    _, refresh_token_str = create_jwt_pair(user_id, email)
+
+    request = MockRequest({"authorization": f"Bearer {refresh_token_str}"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user_id(request)
+
+    assert exc_info.value.status_code == 401
+    assert "Invalid token type" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_expired_token():
+    """Test get_current_user_id with expired token"""
+    user_id = 101
+    email = "expired@example.com"
+
+    # Create expired token
+    expired_payload = {
+        "sub": str(user_id),
+        "email": email,
+        "typ": "access",
+        "iss": "homebound",
+        "exp": datetime.now(UTC) - timedelta(hours=1)  # Already expired
+    }
+    expired_token = jwt.encode(expired_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    request = MockRequest({"authorization": f"Bearer {expired_token}"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user_id(request)
+
+    assert exc_info.value.status_code == 401
+    assert "expired" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_invalid_token():
+    """Test get_current_user_id with malformed token"""
+    request = MockRequest({"authorization": "Bearer invalid.token.here"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user_id(request)
+
+    assert exc_info.value.status_code == 401
+    assert "Invalid token" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_id_missing_sub():
+    """Test get_current_user_id with token missing sub claim"""
+    # Create token without sub claim
+    payload = {
+        "email": "test@example.com",
+        "typ": "access",
+        "iss": "homebound",
+        "exp": datetime.now(UTC) + timedelta(hours=1)
+    }
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    request = MockRequest({"authorization": f"Bearer {token}"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user_id(request)
+
+    assert exc_info.value.status_code == 401
+    assert "no sub" in exc_info.value.detail.lower()

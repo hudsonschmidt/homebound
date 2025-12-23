@@ -21,6 +21,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # Drop old tables that will be replaced with new schema
+    op.drop_table("events")
+    op.drop_table("contacts")
+    op.drop_table("devices")
+    op.drop_index(op.f('ix_login_tokens_email'), table_name='login_tokens')
+    op.drop_table("login_tokens")
+    op.drop_table("plans")
+    op.drop_index(op.f('ix_users_email'), table_name='users')
+    op.drop_table("users")
+
+    # Create users table with new schema
     op.create_table(
         "users",
         sa.Column("id", sa.Integer, primary_key=True),
@@ -302,5 +313,5 @@ def downgrade() -> None:
     op.drop_table("events")
     op.drop_table("trips")
     op.drop_table("contacts")
-    op.drop_table("users")
+    # users table dropped by initial migration downgrade
     op.drop_table("activities")

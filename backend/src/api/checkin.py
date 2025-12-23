@@ -77,13 +77,13 @@ def checkin_with_token(
         assert row is not None
         event_id = row[0]
 
-        # Update last check-in timestamp, reset status to active, and clear warning timestamps
+        # Update last check-in event reference, reset status to active, and clear warning timestamps
         # Also reset transition flags so Live Activity updates work if trip extends past new ETA
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
-                SET last_checkin = :last_checkin_time,
+                SET last_checkin = :last_checkin_event_id,
                     status = 'active',
                     last_grace_warning = NULL,
                     last_checkin_reminder = :now,
@@ -92,7 +92,7 @@ def checkin_with_token(
                 WHERE id = :trip_id
                 """
             ),
-            {"last_checkin_time": now.isoformat(), "trip_id": trip.id, "now": now.isoformat()}
+            {"last_checkin_event_id": event_id, "trip_id": trip.id, "now": now.isoformat()}
         )
 
         # Fetch user name and email for notification
@@ -159,12 +159,10 @@ def checkin_with_token(
         now_for_la = now
         checkin_count_for_la = checkin_count
 
-        # Calculate actual is_overdue state based on ETA + grace period
-        # After check-in, user is no longer overdue (trip status reset to active)
-        # But we still need to calculate if we're past ETA for display purposes
+        # After check-in, user is no longer overdue - they just confirmed they're okay
+        # The trip status is reset to 'active', so is_overdue should be False
         grace_min = trip.grace_min or 15  # Default 15 minutes if not set
-        grace_end = eta_for_la + timedelta(minutes=grace_min)
-        is_overdue_for_la = now > grace_end
+        is_overdue_for_la = False  # User just checked in, so not overdue
         grace_min_for_la = grace_min
 
         # Always send Live Activity update (runs in background)

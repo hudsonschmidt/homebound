@@ -118,6 +118,12 @@ async def _process_overdue_trip(trip, now: datetime):
     trip_id = trip.id
     log.info(f"[Scheduler] Processing trip {trip_id}: status={trip.status}, eta={trip.eta}, grace_min={trip.grace_min}")
 
+    # Parse ETA first - needed for all paths
+    eta_dt = parse_datetime_robust(trip.eta)
+    if eta_dt is None:
+        log.error(f"[Scheduler] Failed to parse ETA for trip {trip_id}: {trip.eta}")
+        return
+
     # Check if we've already marked this trip as overdue
     with db.engine.connect() as conn:
         existing_overdue = conn.execute(
@@ -129,121 +135,8 @@ async def _process_overdue_trip(trip, now: datetime):
             {"trip_id": trip_id}
         ).fetchone()
 
-    if existing_overdue:
-        log.info(f"[Scheduler] Trip {trip_id} already has overdue event, checking grace period")
-        # Already marked as overdue, check if grace period expired
-        eta_dt = parse_datetime_robust(trip.eta)
-        if eta_dt is None:
-            log.error(f"[Scheduler] Failed to parse ETA for trip {trip_id}: {trip.eta}")
-            return
-
-        grace_expired = eta_dt + timedelta(minutes=trip.grace_min)
-        log.info(f"[Scheduler] Trip {trip_id}: eta_dt={eta_dt}, grace_expired={grace_expired}, now={now}, grace_expired_check={now > grace_expired}")
-
-        if now > grace_expired:
-            # Check if we've already notified
-            with db.engine.connect() as conn:
-                existing_notify = conn.execute(
-                    sqlalchemy.text("""
-                        SELECT id FROM events
-                        WHERE trip_id = :trip_id AND what = 'notify'
-                        LIMIT 1
-                    """),
-                    {"trip_id": trip_id}
-                ).fetchone()
-
-            if not existing_notify:
-                log.info(f"[Scheduler] Trip {trip_id}: Grace period expired, no notify event yet - sending notifications")
-
-                # Fetch contacts and user info in read-only query
-                with db.engine.connect() as conn:
-                    contacts = conn.execute(
-                        sqlalchemy.text("""
-                            SELECT c.name, c.email
-                            FROM contacts c
-                            JOIN trips t ON (
-                                c.id = t.contact1 OR
-                                c.id = t.contact2 OR
-                                c.id = t.contact3
-                            )
-                            WHERE t.id = :trip_id AND c.email IS NOT NULL
-                        """),
-                        {"trip_id": trip_id}
-                    ).fetchall()
-
-                    user = conn.execute(
-                        sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
-                        {"user_id": trip.user_id}
-                    ).fetchone()
-
-                    friend_contacts = conn.execute(
-                        sqlalchemy.text("""
-                            SELECT tsc.friend_user_id
-                            FROM trip_safety_contacts tsc
-                            WHERE tsc.trip_id = :trip_id
-                            AND tsc.friend_user_id IS NOT NULL
-                        """),
-                        {"trip_id": trip_id}
-                    ).fetchall()
-
-                log.info(f"[Scheduler] Trip {trip_id}: Found {len(contacts)} contacts with email")
-
-                user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
-                if not user_name:
-                    user_name = "A Homebound user"
-
-                # Send notifications (async, outside transaction)
-                if contacts:
-                    log.info(f"[Scheduler] Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
-                    user_timezone = trip.timezone if hasattr(trip, 'timezone') else None
-                    start_location = trip.start_location_text if trip.has_separate_locations else None
-                    await send_overdue_notifications(trip, list(contacts), user_name, user_timezone, start_location)
-                    log.info(f"[Scheduler] Overdue notifications sent for trip {trip_id}")
-
-                if friend_contacts:
-                    log.info(f"[Scheduler] Sending overdue push notifications to {len(friend_contacts)} friend contacts for trip {trip_id}")
-                    for friend in friend_contacts:
-                        await send_friend_overdue_push(
-                            friend_user_id=friend.friend_user_id,
-                            user_name=user_name,
-                            trip_title=trip.title,
-                            trip_id=trip_id
-                        )
-                    log.info(f"[Scheduler] Friend overdue notifications sent for trip {trip_id}")
-
-                # Update database in isolated transaction
-                if not contacts and not friend_contacts:
-                    log.warning(f"[Scheduler] Trip {trip_id}: No contacts (email or friend) found, skipping notification")
-                else:
-                    with db.engine.begin() as conn:
-                        conn.execute(
-                            sqlalchemy.text("""
-                                INSERT INTO events (user_id, trip_id, what, timestamp)
-                                VALUES (:user_id, :trip_id, 'notify', :timestamp)
-                            """),
-                            {
-                                "user_id": trip.user_id,
-                                "trip_id": trip_id,
-                                "timestamp": datetime.utcnow()
-                            }
-                        )
-
-                # Update trip status in separate transaction
-                with db.engine.begin() as conn:
-                    conn.execute(
-                        sqlalchemy.text("""
-                            UPDATE trips SET status = 'overdue_notified'
-                            WHERE id = :trip_id
-                        """),
-                        {"trip_id": trip_id}
-                    )
-                log.info(f"[Scheduler] Trip {trip_id}: Status updated to overdue_notified")
-            else:
-                log.info(f"[Scheduler] Trip {trip_id}: Already has notify event, skipping")
-        else:
-            log.info(f"[Scheduler] Trip {trip_id}: Grace period not yet expired")
-    else:
-        # Mark as overdue
+    # Step 1: Mark as overdue if not already marked
+    if not existing_overdue:
         log.info(f"Marking trip {trip_id} as overdue")
 
         # Insert event and update status in isolated transaction
@@ -267,12 +160,6 @@ async def _process_overdue_trip(trip, now: datetime):
                 {"trip_id": trip_id}
             )
 
-        # Parse eta for Live Activity update
-        eta_dt = parse_datetime_robust(trip.eta)
-        if eta_dt is None:
-            log.error(f"[Scheduler] Failed to parse ETA for trip {trip_id}: {trip.eta}")
-            return
-
         # Send Live Activity update (outside transaction)
         await send_live_activity_update(
             trip_id=trip_id,
@@ -291,6 +178,116 @@ async def _process_overdue_trip(trip, now: datetime):
             data={"sync": "trip_state_update", "trip_id": trip_id}
         )
         log.info(f"[Scheduler] Sent background push for Live Activity update, trip {trip_id}")
+    else:
+        log.info(f"[Scheduler] Trip {trip_id} already has overdue event")
+
+    # Step 2: Check if grace period has expired (regardless of whether we just marked it)
+    grace_expired_time = eta_dt + timedelta(minutes=trip.grace_min)
+    log.info(f"[Scheduler] Trip {trip_id}: eta_dt={eta_dt}, grace_expired_time={grace_expired_time}, now={now}, grace_expired_check={now > grace_expired_time}")
+
+    if now > grace_expired_time:
+        # Check if we've already notified
+        with db.engine.connect() as conn:
+            existing_notify = conn.execute(
+                sqlalchemy.text("""
+                    SELECT id FROM events
+                    WHERE trip_id = :trip_id AND what = 'notify'
+                    LIMIT 1
+                """),
+                {"trip_id": trip_id}
+            ).fetchone()
+
+        if existing_notify:
+            log.info(f"[Scheduler] Trip {trip_id}: Already has notify event, skipping")
+            return
+
+        log.info(f"[Scheduler] Trip {trip_id}: Grace period expired, no notify event yet - sending notifications")
+
+        # Fetch contacts and user info in read-only query
+        with db.engine.connect() as conn:
+            contacts = conn.execute(
+                sqlalchemy.text("""
+                    SELECT c.name, c.email
+                    FROM contacts c
+                    JOIN trips t ON (
+                        c.id = t.contact1 OR
+                        c.id = t.contact2 OR
+                        c.id = t.contact3
+                    )
+                    WHERE t.id = :trip_id AND c.email IS NOT NULL
+                """),
+                {"trip_id": trip_id}
+            ).fetchall()
+
+            user = conn.execute(
+                sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+                {"user_id": trip.user_id}
+            ).fetchone()
+
+            friend_contacts = conn.execute(
+                sqlalchemy.text("""
+                    SELECT tsc.friend_user_id
+                    FROM trip_safety_contacts tsc
+                    WHERE tsc.trip_id = :trip_id
+                    AND tsc.friend_user_id IS NOT NULL
+                """),
+                {"trip_id": trip_id}
+            ).fetchall()
+
+        log.info(f"[Scheduler] Trip {trip_id}: Found {len(contacts)} contacts with email")
+
+        user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
+        if not user_name:
+            user_name = "A Homebound user"
+
+        # Send notifications (async, outside transaction)
+        if contacts:
+            log.info(f"[Scheduler] Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
+            user_timezone = trip.timezone if hasattr(trip, 'timezone') else None
+            start_location = trip.start_location_text if trip.has_separate_locations else None
+            await send_overdue_notifications(trip, list(contacts), user_name, user_timezone, start_location)
+            log.info(f"[Scheduler] Overdue notifications sent for trip {trip_id}")
+
+        if friend_contacts:
+            log.info(f"[Scheduler] Sending overdue push notifications to {len(friend_contacts)} friend contacts for trip {trip_id}")
+            for friend in friend_contacts:
+                await send_friend_overdue_push(
+                    friend_user_id=friend.friend_user_id,
+                    user_name=user_name,
+                    trip_title=trip.title,
+                    trip_id=trip_id
+                )
+            log.info(f"[Scheduler] Friend overdue notifications sent for trip {trip_id}")
+
+        # Update database in isolated transaction
+        if not contacts and not friend_contacts:
+            log.warning(f"[Scheduler] Trip {trip_id}: No contacts (email or friend) found, skipping notification")
+        else:
+            with db.engine.begin() as conn:
+                conn.execute(
+                    sqlalchemy.text("""
+                        INSERT INTO events (user_id, trip_id, what, timestamp)
+                        VALUES (:user_id, :trip_id, 'notify', :timestamp)
+                    """),
+                    {
+                        "user_id": trip.user_id,
+                        "trip_id": trip_id,
+                        "timestamp": datetime.utcnow()
+                    }
+                )
+
+        # Update trip status in separate transaction
+        with db.engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("""
+                    UPDATE trips SET status = 'overdue_notified'
+                    WHERE id = :trip_id
+                """),
+                {"trip_id": trip_id}
+            )
+        log.info(f"[Scheduler] Trip {trip_id}: Status updated to overdue_notified")
+    else:
+        log.info(f"[Scheduler] Trip {trip_id}: Grace period not yet expired")
 
 
 async def check_push_notifications():
@@ -454,7 +451,9 @@ async def check_push_notifications():
                     interval_min = trip.interval_min
                     cutoff = now - timedelta(minutes=interval_min)
 
-                    if trip.last_checkin_reminder is not None and trip.last_checkin_reminder > cutoff:
+                    # Parse last_checkin_reminder (may be string from DB)
+                    last_reminder = parse_datetime_robust(trip.last_checkin_reminder)
+                    if last_reminder is not None and last_reminder > cutoff:
                         continue
 
                     # Check quiet hours
@@ -471,7 +470,7 @@ async def check_push_notifications():
                         if not in_active_hours:
                             continue
 
-                    if trip.last_checkin_reminder is None:
+                    if last_reminder is None:
                         conn.execute(
                             sqlalchemy.text("UPDATE trips SET last_checkin_reminder = :now WHERE id = :id"),
                             {"now": now, "id": trip.id}
@@ -493,13 +492,13 @@ async def check_push_notifications():
                 except Exception as e:
                     log.error(f"[Push] Error sending check-in reminder for trip {trip.id}: {e}")
 
-        # 6. Grace Period Warnings
+        # 6. Grace Period Warnings (only for 'overdue' status - 'overdue_notified' means contacts were already alerted)
         with db.engine.begin() as conn:
             in_grace_period = conn.execute(
                 sqlalchemy.text("""
                     SELECT id, user_id, title, eta, grace_min, last_grace_warning, checkout_token, status
                     FROM trips
-                    WHERE status IN ('overdue', 'overdue_notified')
+                    WHERE status = 'overdue'
                     AND (last_grace_warning IS NULL OR last_grace_warning <= :cutoff)
                     FOR UPDATE SKIP LOCKED
                 """),
@@ -605,10 +604,10 @@ async def check_live_activity_transitions():
                 # Send direct Live Activity update (new approach)
                 await send_live_activity_update(
                     trip_id=trip.id,
-                    status="active",
+                    status="overdue",  # Triggers grace countdown in iOS (isPastETA=true)
                     eta=eta_dt,
                     last_checkin_time=last_checkin_dt,
-                    is_overdue=False,  # ETA warning, not yet overdue
+                    is_overdue=False,  # ETA warning, not yet past grace period
                     checkin_count=checkin_count,
                     grace_min=trip.grace_min or 15
                 )
