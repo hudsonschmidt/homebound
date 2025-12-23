@@ -553,20 +553,18 @@ async def check_live_activity_transitions():
 
         # First, fetch all trips that need processing (read-only transaction)
         with db.engine.connect() as conn:
-            # Find active trips approaching ETA (within 15 seconds)
+            # Find active trips at or past ETA that haven't been notified yet
+            # This catches ANY trip past ETA regardless of when it passed
+            # (previously used a 15-second window which caused 30s+ delays)
             approaching_eta = conn.execute(
                 sqlalchemy.text("""
                     SELECT id, user_id, eta, grace_min, status, last_checkin
                     FROM trips
                     WHERE status = 'active'
                     AND notified_eta_transition = false
-                    AND eta <= :soon
-                    AND eta > :now
+                    AND eta <= :now
                 """),
-                {
-                    "now": now,
-                    "soon": now + timedelta(seconds=15)
-                }
+                {"now": now}
             ).fetchall()
 
             # Find overdue trips approaching grace period end
@@ -648,8 +646,10 @@ async def check_live_activity_transitions():
                 grace_end = eta_dt + timedelta(minutes=trip.grace_min)
                 seconds_until_grace_end = (grace_end - now).total_seconds()
 
-                # Send push if within 15 seconds of grace ending
-                if 0 < seconds_until_grace_end <= 15:
+                # Send push if within 30 seconds of grace ending (before OR after)
+                # This catches both upcoming and recently-passed grace periods
+                # (previously only caught 0-15 seconds which caused many misses)
+                if -30 < seconds_until_grace_end <= 30:
                     # Parse last_checkin if present
                     last_checkin_dt = parse_datetime_robust(trip.last_checkin)
 
@@ -806,15 +806,15 @@ def init_scheduler() -> AsyncIOScheduler:
         next_run_time=now + timedelta(seconds=15),
     )
 
-    # Check for Live Activity countdown transitions every 30 seconds - stagger by 10s
+    # Check for Live Activity countdown transitions every 15 seconds
     scheduler.add_job(
         check_live_activity_transitions,
-        IntervalTrigger(seconds=30),
+        IntervalTrigger(seconds=15),
         id="check_live_activity_transitions",
         name="Check Live Activity countdown transitions",
         replace_existing=True,
         max_instances=1,
-        next_run_time=now + timedelta(seconds=10),
+        next_run_time=now + timedelta(seconds=5),  # Start sooner
     )
 
     return scheduler

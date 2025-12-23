@@ -197,7 +197,7 @@ struct LockScreenView: View {
                     .fill(statusColor)
                     .frame(width: 8, height: 8)
 
-                CountdownView(eta: state.eta, isOverdue: isOverdue, status: state.status, statusColor: statusColor)
+                CountdownView(eta: state.eta, graceEnd: state.graceEnd, isOverdue: isOverdue, status: state.status, statusColor: statusColor)
             }
 
             Spacer()
@@ -261,7 +261,7 @@ struct LockScreenView: View {
             }
 
             // Row 3: Countdown
-            CountdownView(eta: state.eta, isOverdue: isOverdue, status: state.status, statusColor: statusColor)
+            CountdownView(eta: state.eta, graceEnd: state.graceEnd, isOverdue: isOverdue, status: state.status, statusColor: statusColor)
 
             // Row 4: Action buttons
             actionButtons
@@ -564,6 +564,7 @@ struct LockScreenView: View {
 
 struct CountdownView: View {
     let eta: Date
+    let graceEnd: Date
     let isOverdue: Bool
     var status: String = "active"  // Server-provided status
     var statusColor: Color = .orange
@@ -573,15 +574,25 @@ struct CountdownView: View {
         status == "overdue" || status == "overdue_notified"
     }
 
+    /// Whether we're in the grace period (past ETA but not yet overdue)
+    private var isInGracePeriod: Bool {
+        serverSaysPastETA && !isOverdue
+    }
+
     var body: some View {
-        if isOverdue || serverSaysPastETA {
-            // Use server state to determine display - don't rely on local time
-            Text(isOverdue ? "OVERDUE" : "CHECK IN")
+        if isOverdue {
+            // Past grace period - contacts notified or about to be
+            Text("OVERDUE")
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundStyle(statusColor)
+        } else if isInGracePeriod {
+            // In grace period - show countdown to grace end
+            Text(timerInterval: Date()...max(graceEnd, Date()), countsDown: true)
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(statusColor)
         } else {
-            // Active trip with countdown
-            // Use max to prevent negative countdown if local clock is slightly ahead
+            // Active trip - countdown to ETA
             Text(timerInterval: Date()...max(eta, Date()), countsDown: true)
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .monospacedDigit()
@@ -936,6 +947,7 @@ struct TripLiveActivity_Previews: PreviewProvider {
             state: TripLiveActivityAttributes.ContentState(
                 status: "active",
                 eta: Date().addingTimeInterval(7200),
+                graceEnd: Date().addingTimeInterval(7200 + 30 * 60),  // ETA + 30 min grace
                 lastCheckinTime: nil,
                 isOverdue: false,
                 checkinCount: 0

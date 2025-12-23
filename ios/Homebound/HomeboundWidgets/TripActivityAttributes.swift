@@ -44,6 +44,8 @@ struct TripLiveActivityAttributes: ActivityAttributes {
         var status: String
         /// Expected arrival time
         var eta: Date
+        /// When grace period expires (ETA + grace minutes)
+        var graceEnd: Date
         /// Last check-in timestamp (if any)
         var lastCheckinTime: Date?
         /// Whether the trip is past ETA + grace period

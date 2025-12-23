@@ -56,6 +56,9 @@ final class LiveActivityManager: ObservableObject {
         setupDarwinNotificationObserver()
     }
 
+    // Store notification name as nonisolated constant for use in deinit
+    private nonisolated let darwinNotificationNameForCleanup = LiveActivityConstants.darwinNotificationName
+
     deinit {
         // Cancel all tracked tasks
         for task in tokenObservationTasks.values {
@@ -70,7 +73,7 @@ final class LiveActivityManager: ObservableObject {
         CFNotificationCenterRemoveObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             darwinObserverRef?.toOpaque(),
-            CFNotificationName(LiveActivityConstants.darwinNotificationName as CFString),
+            CFNotificationName(darwinNotificationNameForCleanup as CFString),
             nil
         )
         darwinObserverRef?.release()
@@ -190,7 +193,7 @@ final class LiveActivityManager: ObservableObject {
 
         // Check if activity for this trip already exists
         let activities = ActivityKit.Activity<TripLiveActivityAttributes>.activities
-        if let existingActivity = activities.first(where: { $0.attributes.tripId == trip.id }) {
+        if activities.contains(where: { $0.attributes.tripId == trip.id }) {
             // Activity exists, update it instead of restarting
             debugLog("[LiveActivity] Activity already exists for trip #\(trip.id), updating instead")
             await updateActivity(with: trip, checkinCount: checkinCount)
@@ -205,7 +208,7 @@ final class LiveActivityManager: ObservableObject {
                 tokenObservationTasks.removeValue(forKey: tripId)
                 await Session.shared.unregisterLiveActivityToken(tripId: tripId)
                 let finalState = TripLiveActivityAttributes.ContentState(
-                    status: "completed", eta: Date(), lastCheckinTime: nil, isOverdue: false, checkinCount: 0
+                    status: "completed", eta: Date(), graceEnd: Date(), lastCheckinTime: nil, isOverdue: false, checkinCount: 0
                 )
                 let content = ActivityKit.ActivityContent(state: finalState, staleDate: nil)
                 await activity.end(content, dismissalPolicy: .immediate)
@@ -233,9 +236,13 @@ final class LiveActivityManager: ObservableObject {
             startTime: trip.start_at
         )
 
+        // Calculate grace end time
+        let graceEnd = trip.eta_at.addingTimeInterval(Double(trip.grace_minutes) * 60)
+
         let initialState = TripLiveActivityAttributes.ContentState(
             status: trip.status,
             eta: trip.eta_at,
+            graceEnd: graceEnd,
             lastCheckinTime: parseLastCheckin(trip.last_checkin),
             isOverdue: isOverdue(trip),
             checkinCount: checkinCount
@@ -282,7 +289,7 @@ final class LiveActivityManager: ObservableObject {
                 debugLog("[LiveActivity] Push token update for trip #\(tripId): \(tokenString.prefix(20))...")
 
                 // Queue token for non-blocking registration (doesn't block the stream)
-                await self.queueTokenForRegistration(token: tokenString, tripId: tripId)
+                self.queueTokenForRegistration(token: tokenString, tripId: tripId)
             }
         }
     }
@@ -355,9 +362,13 @@ final class LiveActivityManager: ObservableObject {
         let existingCount = activity.content.state.checkinCount
         let finalCheckinCount = checkinCount > 0 ? checkinCount : existingCount
 
+        // Calculate grace end time
+        let graceEnd = trip.eta_at.addingTimeInterval(Double(trip.grace_minutes) * 60)
+
         let updatedState = TripLiveActivityAttributes.ContentState(
             status: trip.status,
             eta: trip.eta_at,
+            graceEnd: graceEnd,
             lastCheckinTime: parseLastCheckin(trip.last_checkin),
             isOverdue: isOverdue(trip),
             checkinCount: finalCheckinCount
@@ -386,9 +397,11 @@ final class LiveActivityManager: ObservableObject {
 
             // End the activity UI first
             if let trip = trip {
+                let graceEnd = trip.eta_at.addingTimeInterval(Double(trip.grace_minutes) * 60)
                 let finalState = TripLiveActivityAttributes.ContentState(
                     status: "completed",
                     eta: trip.eta_at,
+                    graceEnd: graceEnd,
                     lastCheckinTime: parseLastCheckin(trip.last_checkin),
                     isOverdue: false,
                     checkinCount: activity.content.state.checkinCount
@@ -399,6 +412,7 @@ final class LiveActivityManager: ObservableObject {
                 let finalState = TripLiveActivityAttributes.ContentState(
                     status: "completed",
                     eta: Date(),
+                    graceEnd: Date(),
                     lastCheckinTime: nil,
                     isOverdue: false,
                     checkinCount: 0
@@ -438,6 +452,7 @@ final class LiveActivityManager: ObservableObject {
             let finalState = TripLiveActivityAttributes.ContentState(
                 status: "completed",
                 eta: Date(),
+                graceEnd: Date(),
                 lastCheckinTime: nil,
                 isOverdue: false,
                 checkinCount: 0

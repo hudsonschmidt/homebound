@@ -583,10 +583,16 @@ async def send_live_activity_update(
     # CRITICAL: Keys must be camelCase to match Swift Codable
     # CRITICAL: Swift's default Codable Date strategy uses Apple's reference date
     # (Jan 1, 2001), NOT Unix epoch (Jan 1, 1970). Difference is 978307200 seconds.
+    from datetime import timedelta
     APPLE_EPOCH_OFFSET = 978307200  # Seconds between 1970-01-01 and 2001-01-01
+
+    # Calculate grace end time (ETA + grace minutes)
+    grace_end = eta + timedelta(minutes=grace_min) if eta else None
+
     content_state = {
         "status": status,
         "eta": (eta.timestamp() - APPLE_EPOCH_OFFSET) if eta else None,
+        "graceEnd": (grace_end.timestamp() - APPLE_EPOCH_OFFSET) if grace_end else None,
         "lastCheckinTime": (last_checkin_time.timestamp() - APPLE_EPOCH_OFFSET) if last_checkin_time else None,
         "isOverdue": is_overdue,
         "checkinCount": checkin_count
@@ -597,7 +603,6 @@ async def send_live_activity_update(
     # NOTE: stale-date uses Unix timestamp (seconds since 1970-01-01), NOT Apple epoch.
     # This is different from content-state dates which use Apple epoch for Swift Codable compatibility.
     # See: https://developer.apple.com/documentation/activitykit/updating-and-ending-your-live-activity-with-remote-push-notifications
-    from datetime import timedelta
     stale_date = None
     if eta:
         stale_dt = eta + timedelta(minutes=grace_min + 5)
