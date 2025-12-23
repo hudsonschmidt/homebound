@@ -64,13 +64,13 @@ struct LockScreenView: View {
     }
 
     private var isOverdue: Bool {
-        state.isOverdue || state.status == "overdue" || state.status == "overdue_notified"
+        state.isOverdue
     }
 
     private var statusColor: Color {
         if state.contactsNotified {
             return .red
-        } else if isOverdue {
+        } else if state.isPastETA {
             return .orange
         }
         return .green
@@ -581,9 +581,10 @@ struct CountdownView: View {
 
     var body: some View {
         if isOverdue {
-            // Past grace period - contacts notified or about to be
-            Text("OVERDUE")
+            // Past grace period - show time elapsed since ETA counting up
+            Text(timerInterval: eta...Date(), countsDown: false)
                 .font(.system(.title3, design: .rounded, weight: .bold))
+                .monospacedDigit()
                 .foregroundStyle(statusColor)
         } else if isInGracePeriod {
             // In grace period - show countdown to grace end
@@ -609,12 +610,12 @@ struct CompactLeadingView: View {
     let state: TripLiveActivityAttributes.ContentState
 
     private var isOverdue: Bool {
-        state.isOverdue || state.status == "overdue" || state.status == "overdue_notified"
+        state.isOverdue
     }
 
     private var statusColor: Color {
         if state.contactsNotified { return .red }
-        if isOverdue { return .orange }
+        if state.isPastETA { return .orange }
         return .green
     }
 
@@ -635,12 +636,12 @@ struct CompactTrailingView: View {
     let state: TripLiveActivityAttributes.ContentState
 
     private var isOverdue: Bool {
-        state.isOverdue || state.status == "overdue" || state.status == "overdue_notified"
+        state.isOverdue
     }
 
     private var statusColor: Color {
         if state.contactsNotified { return .red }
-        if isOverdue { return .orange }
+        if state.isPastETA { return .orange }
         return .white
     }
 
@@ -665,12 +666,12 @@ struct MinimalView: View {
     let state: TripLiveActivityAttributes.ContentState
 
     private var isOverdue: Bool {
-        state.isOverdue || state.status == "overdue" || state.status == "overdue_notified"
+        state.isOverdue
     }
 
     private var statusColor: Color {
         if state.contactsNotified { return .red }
-        if isOverdue { return .orange }
+        if state.isPastETA { return .orange }
         return .green
     }
 
@@ -693,12 +694,12 @@ struct ExpandedLeadingView: View {
     let state: TripLiveActivityAttributes.ContentState
 
     private var isOverdue: Bool {
-        state.isOverdue || state.status == "overdue" || state.status == "overdue_notified"
+        state.isOverdue
     }
 
     private var statusColor: Color {
         if state.contactsNotified { return .red }
-        if isOverdue { return .orange }
+        if state.isPastETA { return .orange }
         return .green
     }
 
@@ -752,12 +753,12 @@ struct ExpandedBottomView: View {
     let state: TripLiveActivityAttributes.ContentState
 
     private var isOverdue: Bool {
-        state.isOverdue || state.status == "overdue" || state.status == "overdue_notified"
+        state.isOverdue
     }
 
     private var statusColor: Color {
         if state.contactsNotified { return .red }
-        if isOverdue { return .orange }
+        if state.isPastETA { return .orange }
         return .green
     }
 

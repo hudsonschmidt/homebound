@@ -646,10 +646,10 @@ async def check_live_activity_transitions():
                 grace_end = eta_dt + timedelta(minutes=trip.grace_min)
                 seconds_until_grace_end = (grace_end - now).total_seconds()
 
-                # Send push if within 30 seconds of grace ending (before OR after)
-                # This catches both upcoming and recently-passed grace periods
-                # (previously only caught 0-15 seconds which caused many misses)
-                if -30 < seconds_until_grace_end <= 30:
+                # Send push if grace period is ending soon or has ended
+                # Removes lower bound to catch trips where grace ended more than 30s ago
+                # (previously -30 < x <= 30 which missed trips past the window)
+                if seconds_until_grace_end <= 30:
                     # Parse last_checkin if present
                     last_checkin_dt = parse_datetime_robust(trip.last_checkin)
 
