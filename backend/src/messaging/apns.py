@@ -27,6 +27,10 @@ class DummyPush:
         print(f"[DUMMY PUSH] token={device_token} title={title!r} body={body!r} data={data} category={category}")
         return PushResult(ok=True, status=200, detail="dummy")
 
+    async def send_background(self, device_token: str, data: dict) -> PushResult:
+        print(f"[DUMMY BACKGROUND PUSH] token={device_token} data={data}")
+        return PushResult(ok=True, status=200, detail="dummy")
+
 
 class APNsClient:
     """
@@ -120,12 +124,57 @@ class APNsClient:
                 detail = r.text or r.headers.get("apns-id", "unknown error")
         return PushResult(ok=ok, status=r.status_code, detail=detail)
 
+    async def send_background(self, device_token: str, data: dict) -> PushResult:
+        """Send a background push notification that wakes the app.
+
+        Uses apns-push-type: background with content-available: 1
+        to ensure iOS wakes the app even when it's in the background.
+
+        Args:
+            device_token: The APNs device token
+            data: Custom data payload to include
+
+        Returns:
+            PushResult with ok status and details
+        """
+        c = await self._client_ctx()
+        url = f"{self.base_url}/3/device/{device_token}"
+        headers = {
+            "authorization": f"bearer {self._provider_jwt()}",
+            "apns-topic": self.bundle_id,
+            "apns-push-type": "background",  # Critical: must be "background" not "alert"
+            "apns-priority": "5",  # Must be 5 for background pushes (not 10)
+            "content-type": "application/json",
+        }
+        payload: dict[str, Any] = {
+            "aps": {
+                "content-available": 1  # Required for background wake
+            },
+            "data": data
+        }
+
+        r = await c.post(url, headers=headers, json=payload)
+        ok = 200 <= r.status_code < 300
+        if ok:
+            detail = r.headers.get("apns-id", "success")
+            log.info(f"[APNS] Background push sent successfully (apns-id: {detail})")
+        else:
+            try:
+                error_body = r.json()
+                detail = error_body.get("reason", r.text)
+            except Exception:
+                detail = r.text or r.headers.get("apns-id", "unknown error")
+            log.warning(f"[APNS] Background push failed: status={r.status_code} detail={detail}")
+        return PushResult(ok=ok, status=r.status_code, detail=detail)
+
     async def send_live_activity_update(
         self,
         live_activity_token: str,
         content_state: dict,
         event: str = "update",
-        timestamp: int | None = None
+        timestamp: int | None = None,
+        stale_date: int | None = None,
+        relevance_score: int = 100
     ) -> PushResult:
         """
         Send a Live Activity update push notification.
@@ -155,13 +204,17 @@ class APNsClient:
         }
 
         # Live Activity payload structure per Apple docs
-        payload: dict[str, Any] = {
-            "aps": {
-                "timestamp": timestamp or int(time.time()),
-                "event": event,
-                "content-state": content_state
-            }
+        aps_payload: dict[str, Any] = {
+            "timestamp": timestamp or int(time.time()),
+            "event": event,
+            "content-state": content_state,
+            "relevance-score": relevance_score
         }
+        # Add stale-date if provided (Unix timestamp when activity should show as stale)
+        if stale_date is not None:
+            aps_payload["stale-date"] = stale_date
+
+        payload: dict[str, Any] = {"aps": aps_payload}
 
         import json
         log.info(f"[APNS] Sending Live Activity {event}: token={live_activity_token[:20]}...")

@@ -379,23 +379,78 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
             case "start_live_activity":
                 debugLog("[AppDelegate] 🚀 Silent push: starting Live Activity for new trip")
-                // Fetch trip data and start Live Activity
+                // Extract trip_id from push data
+                let tripId: Int? = {
+                    if let id = userInfo["trip_id"] as? Int { return id }
+                    if let data = userInfo["data"] as? [String: Any],
+                       let id = data["trip_id"] as? Int { return id }
+                    return nil
+                }()
+                // Use background task to ensure work completes even if app is suspended
+                var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+                backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "StartLiveActivity") {
+                    // Cleanup if we run out of time
+                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                    backgroundTaskId = .invalid
+                }
+
                 Task {
+                    defer {
+                        if backgroundTaskId != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                        }
+                    }
                     await Session.shared.loadActivePlan()
+                    // Verify the loaded trip matches the push (avoid race conditions)
                     if let trip = Session.shared.activeTrip {
-                        await LiveActivityManager.shared.startActivity(for: trip)
-                        debugLog("[AppDelegate] ✅ Live Activity started for trip #\(trip.id)")
+                        if tripId == nil || trip.id == tripId {
+                            await LiveActivityManager.shared.startActivity(for: trip)
+                            debugLog("[AppDelegate] ✅ Live Activity started for trip #\(trip.id)")
+                        } else {
+                            debugLog("[AppDelegate] ⚠️ Trip mismatch: push for #\(tripId!), loaded #\(trip.id)")
+                        }
                     }
                     completionHandler(.newData)
                 }
 
             case "live_activity_eta_warning", "live_activity_overdue", "trip_state_update":
                 debugLog("[AppDelegate] 🔄 Silent push: updating Live Activity (\(sync))")
-                // Refresh trip data and update Live Activity
+                // Use background task to ensure work completes even if app is suspended
+                var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+                backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "UpdateLiveActivity") {
+                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                    backgroundTaskId = .invalid
+                }
+
                 Task {
+                    defer {
+                        if backgroundTaskId != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                        }
+                    }
                     await Session.shared.loadActivePlan()
                     let trip = Session.shared.activeTrip
                     await LiveActivityManager.shared.restoreActivityIfNeeded(for: trip)
+                    completionHandler(.newData)
+                }
+
+            case "live_activity_end":
+                debugLog("[AppDelegate] 🛑 Silent push: ending Live Activity")
+                // Use background task to ensure work completes even if app is suspended
+                var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+                backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "EndLiveActivity") {
+                    UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                    backgroundTaskId = .invalid
+                }
+
+                Task {
+                    defer {
+                        if backgroundTaskId != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                        }
+                    }
+                    await LiveActivityManager.shared.endAllActivities()
+                    debugLog("[AppDelegate] ✅ Live Activity ended via push")
                     completionHandler(.newData)
                 }
 

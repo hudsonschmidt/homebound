@@ -41,7 +41,7 @@ struct CheckInIntent: LiveActivityIntent {
             // API succeeded - now set confirmation timestamp for visual feedback
             defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.checkinConfirmationKey)
             defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckinKey)
-            defaults?.synchronize()
+            // Note: synchronize() is deprecated - iOS handles UserDefaults synchronization automatically
 
             // Small delay to ensure UserDefaults syncs across processes
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms

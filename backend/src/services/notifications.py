@@ -449,6 +449,57 @@ async def send_push_to_user(
             log.info(f"[APNS] Removed {len(tokens_to_remove)} unregistered device(s) for user {user_id}")
 
 
+async def send_background_push_to_user(user_id: int, data: dict):
+    """Send a background push notification that wakes the app.
+
+    Uses content-available: 1 to wake the app in the background so it can
+    perform tasks like starting a Live Activity.
+
+    Args:
+        user_id: The user to send the notification to
+        data: Custom data payload to include (e.g., {"sync": "start_live_activity", "trip_id": 123})
+    """
+    import asyncio
+    from ..messaging.apns import get_push_sender
+
+    if settings.PUSH_BACKEND == "dummy":
+        log.info(f"[DUMMY BACKGROUND PUSH] User: {user_id} - data={data}")
+        return
+
+    if settings.PUSH_BACKEND != "apns":
+        log.warning(f"Unknown push backend: {settings.PUSH_BACKEND}")
+        return
+
+    # Query user's iOS devices matching current environment
+    current_env = "sandbox" if settings.APNS_USE_SANDBOX else "production"
+    with db.engine.begin() as conn:
+        devices = conn.execute(
+            sqlalchemy.text(
+                "SELECT token, env FROM devices WHERE user_id = :uid AND platform = 'ios' AND env = :env"
+            ),
+            {"uid": user_id, "env": current_env}
+        ).fetchall()
+
+    if not devices:
+        log.warning(f"[APNS] No iOS devices for user {user_id} - background push not sent")
+        return
+
+    sender = get_push_sender()
+
+    for device in devices:
+        try:
+            if hasattr(sender, 'send_background'):
+                result = await sender.send_background(device.token, data)
+                if result.ok:
+                    log.info(f"[APNS] Background push sent to user {user_id}: {data}")
+                else:
+                    log.warning(f"[APNS] Background push failed for user {user_id}: {result.detail}")
+            else:
+                log.warning(f"[APNS] Sender does not support background push")
+        except Exception as e:
+            log.error(f"[APNS] Error sending background push to user {user_id}: {e}")
+
+
 # Live Activity Updates ------------------------------------------------------------------------
 async def send_live_activity_update(
     trip_id: int,
@@ -457,12 +508,16 @@ async def send_live_activity_update(
     last_checkin_time: datetime | None,
     is_overdue: bool,
     checkin_count: int,
-    event: str = "update"
+    event: str = "update",
+    grace_min: int = 15
 ):
     """Send a Live Activity push update to the iOS lock screen widget.
 
     This sends a push notification that directly updates the Live Activity UI
     without needing to wake the app.
+
+    Includes retry logic for token lookup since iOS may take a moment to register
+    the Live Activity push token after the activity starts.
 
     Args:
         trip_id: The trip ID
@@ -472,28 +527,56 @@ async def send_live_activity_update(
         is_overdue: Whether trip is past ETA + grace period
         checkin_count: Number of check-ins performed
         event: "update" to update, "end" to dismiss the activity
+        grace_min: Grace period in minutes (default 15)
     """
+    import asyncio
     import time
     from ..messaging.apns import get_push_sender
 
-    # Get the live activity token for this trip
-    with db.engine.begin() as conn:
-        token_row = conn.execute(
-            sqlalchemy.text("""
-                SELECT token, env FROM live_activity_tokens
-                WHERE trip_id = :trip_id
-            """),
-            {"trip_id": trip_id}
-        ).fetchone()
+    log.info(f"[LiveActivity] Sending update: trip_id={trip_id}, status={status}, eta={eta}, is_overdue={is_overdue}")
+
+    # Retry logic for token lookup - iOS may take several seconds to start the Activity,
+    # receive the push token from ActivityKit, and register it with the backend.
+    # Increased from 3 retries (6s total) to 5 retries (15s total) for reliability.
+    MAX_TOKEN_RETRIES = 5
+    TOKEN_RETRY_DELAY = 3  # seconds
+
+    token_row = None
+    for attempt in range(MAX_TOKEN_RETRIES):
+        with db.engine.connect() as conn:
+            token_row = conn.execute(
+                sqlalchemy.text("""
+                    SELECT token, env FROM live_activity_tokens
+                    WHERE trip_id = :trip_id
+                """),
+                {"trip_id": trip_id}
+            ).fetchone()
+
+        if token_row:
+            break
+
+        if attempt < MAX_TOKEN_RETRIES - 1:
+            log.info(f"[LiveActivity] No token for trip {trip_id} (attempt {attempt + 1}/{MAX_TOKEN_RETRIES}), retrying in {TOKEN_RETRY_DELAY}s...")
+            await asyncio.sleep(TOKEN_RETRY_DELAY)
 
     if not token_row:
-        log.debug(f"[LiveActivity] No token registered for trip {trip_id}")
+        log.warning(f"[LiveActivity] No token found for trip {trip_id} after {MAX_TOKEN_RETRIES} attempts, skipping push update")
         return
 
     # Check environment matches
     current_env = "development" if settings.APNS_USE_SANDBOX else "production"
     if token_row.env != current_env:
-        log.debug(f"[LiveActivity] Token env mismatch for trip {trip_id}: {token_row.env} vs {current_env}")
+        log.warning(
+            f"[LiveActivity] Environment mismatch for trip {trip_id}: "
+            f"token was registered in '{token_row.env}' but server is in '{current_env}' mode. "
+            "Cleaning up stale token - device will need to re-register."
+        )
+        # Auto-cleanup the mismatched token instead of leaving it stale
+        with db.engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("DELETE FROM live_activity_tokens WHERE trip_id = :trip_id"),
+                {"trip_id": trip_id}
+            )
         return
 
     # Build content-state matching iOS ContentState struct
@@ -509,28 +592,56 @@ async def send_live_activity_update(
         "checkinCount": checkin_count
     }
 
+    # Calculate stale date: ETA + grace period + 5 minute buffer
+    # This tells iOS when the activity should be marked as stale if no updates received.
+    # NOTE: stale-date uses Unix timestamp (seconds since 1970-01-01), NOT Apple epoch.
+    # This is different from content-state dates which use Apple epoch for Swift Codable compatibility.
+    # See: https://developer.apple.com/documentation/activitykit/updating-and-ending-your-live-activity-with-remote-push-notifications
+    from datetime import timedelta
+    stale_date = None
+    if eta:
+        stale_dt = eta + timedelta(minutes=grace_min + 5)
+        stale_date = int(stale_dt.timestamp())  # Unix timestamp (correct for stale-date)
+
     sender = get_push_sender()
     if hasattr(sender, 'send_live_activity_update'):
-        result = await sender.send_live_activity_update(
-            live_activity_token=token_row.token,
-            content_state=content_state,
-            event=event,
-            timestamp=int(time.time())
-        )
+        # Retry logic for transient APNs errors
+        MAX_PUSH_RETRIES = 3
+        PUSH_RETRY_DELAYS = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
+        TERMINAL_ERRORS = ("ExpiredToken", "Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic")
 
-        if result.ok:
-            log.info(f"[LiveActivity] Update sent for trip {trip_id}: {status}")
-        else:
-            log.warning(f"[LiveActivity] Update failed for trip {trip_id}: {result.detail}")
+        result = None
+        for attempt in range(MAX_PUSH_RETRIES):
+            result = await sender.send_live_activity_update(
+                live_activity_token=token_row.token,
+                content_state=content_state,
+                event=event,
+                timestamp=int(time.time()),
+                stale_date=stale_date,
+                relevance_score=100  # Active trips are high priority
+            )
 
-            # Handle token invalidation (410 Gone or specific errors)
-            if result.status == 410 or result.detail in ("ExpiredToken", "Unregistered", "BadDeviceToken"):
-                log.info(f"[LiveActivity] Removing invalid token for trip {trip_id}")
+            if result.ok:
+                log.info(f"[LiveActivity] Update sent for trip {trip_id}: {status}")
+                break
+
+            # Terminal errors - don't retry, handle token invalidation
+            if result.status == 410 or result.detail in TERMINAL_ERRORS:
+                log.info(f"[LiveActivity] Removing invalid token for trip {trip_id} (error: {result.detail})")
                 with db.engine.begin() as conn:
                     conn.execute(
                         sqlalchemy.text("DELETE FROM live_activity_tokens WHERE trip_id = :trip_id"),
                         {"trip_id": trip_id}
                     )
+                break
+
+            # Transient error - retry with backoff if not last attempt
+            if attempt < MAX_PUSH_RETRIES - 1:
+                delay = PUSH_RETRY_DELAYS[attempt]
+                log.warning(f"[LiveActivity] Update failed for trip {trip_id} (attempt {attempt + 1}/{MAX_PUSH_RETRIES}): {result.detail}. Retrying in {delay}s...")
+                await asyncio.sleep(delay)
+            else:
+                log.error(f"[LiveActivity] Update failed for trip {trip_id} after {MAX_PUSH_RETRIES} attempts: {result.detail}")
     else:
         log.info(f"[LiveActivity] Dummy push for trip {trip_id}: {content_state}")
 

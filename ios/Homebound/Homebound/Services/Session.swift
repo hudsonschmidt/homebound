@@ -463,10 +463,11 @@ final class Session: ObservableObject {
 
     /// Register a live activity push token with the backend
     /// This token is different from the regular APNs device token
-    func registerLiveActivityToken(token: String, tripId: Int) async {
+    @discardableResult
+    func registerLiveActivityToken(token: String, tripId: Int) async -> Bool {
         guard let bearer = accessToken else {
             debugLog("[LiveActivity] Cannot register token - not authenticated")
-            return
+            return false
         }
 
         struct LiveActivityTokenRequest: Encodable {
@@ -495,8 +496,10 @@ final class Session: ObservableObject {
                 bearer: bearer
             )
             debugLog("[LiveActivity] ✅ Token registered for trip #\(tripId)")
+            return true
         } catch {
             debugLog("[LiveActivity] ❌ Failed to register token: \(error.localizedDescription)")
+            return false
         }
     }
 

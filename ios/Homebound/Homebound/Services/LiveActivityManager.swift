@@ -31,11 +31,49 @@ final class LiveActivityManager: ObservableObject {
     /// Track active token observation tasks by trip ID
     private var tokenObservationTasks: [Int: Task<Void, Never>] = [:]
 
+    /// Track delayed unregistration tasks by trip ID (for cleanup on app termination)
+    private var delayedUnregistrationTasks: [Int: Task<Void, Never>] = [:]
+
+    /// Non-blocking token registration queue to avoid blocking the push token stream
+    private var pendingTokenQueue: [(token: String, tripId: Int)] = []
+    private var tokenRegistrationTask: Task<Void, Never>?
+    private var lastRegisteredToken: [Int: String] = [:]  // Track last registered token per trip for deduplication
+
+    /// Debounce: track last update timestamp per trip to prevent rapid updates
+    private var lastUpdateTime: [Int: Date] = [:]
+    private let debounceInterval: TimeInterval = 2.0  // 2 seconds (increased from 500ms)
+
+    /// Mutex: prevent concurrent start/update operations that cause flicker
+    private var isOperationInProgress = false
+
+    /// Retained reference for Darwin notification observer (for memory safety)
+    private var darwinObserverRef: Unmanaged<LiveActivityManager>?
+
     // MARK: - Initialization
 
     private init() {
         checkSupport()
         setupDarwinNotificationObserver()
+    }
+
+    deinit {
+        // Cancel all tracked tasks
+        for task in tokenObservationTasks.values {
+            task.cancel()
+        }
+        for task in delayedUnregistrationTasks.values {
+            task.cancel()
+        }
+        tokenRegistrationTask?.cancel()
+
+        // Remove Darwin notification observer and release retained reference
+        CFNotificationCenterRemoveObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            darwinObserverRef?.toOpaque(),
+            CFNotificationName(LiveActivityConstants.darwinNotificationName as CFString),
+            nil
+        )
+        darwinObserverRef?.release()
     }
 
     private func checkSupport() {
@@ -50,9 +88,12 @@ final class LiveActivityManager: ObservableObject {
 
     private func setupDarwinNotificationObserver() {
         let name = LiveActivityConstants.darwinNotificationName as CFString
+        // Use passRetained to ensure memory safety - the observer reference is retained
+        // and will be released in deinit
+        darwinObserverRef = Unmanaged.passRetained(self)
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
+            darwinObserverRef?.toOpaque(),
             { _, observer, _, _, _ in
                 guard let observer = observer else { return }
                 let manager = Unmanaged<LiveActivityManager>.fromOpaque(observer).takeUnretainedValue()
@@ -124,6 +165,14 @@ final class LiveActivityManager: ObservableObject {
     /// - Returns: True if activity was started successfully
     @discardableResult
     func startActivity(for trip: Trip, checkinCount: Int = 0) async -> Bool {
+        // Mutex: prevent concurrent operations that cause flicker
+        guard !isOperationInProgress else {
+            debugLog("[LiveActivity] Operation already in progress, skipping start for trip #\(trip.id)")
+            return false
+        }
+        isOperationInProgress = true
+        defer { isOperationInProgress = false }
+
         guard #available(iOS 16.1, *) else {
             debugLog("[LiveActivity] iOS 16.1+ required")
             return false
@@ -139,8 +188,30 @@ final class LiveActivityManager: ObservableObject {
             return false
         }
 
-        // End any existing activity first
-        await endAllActivities()
+        // Check if activity for this trip already exists
+        let activities = ActivityKit.Activity<TripLiveActivityAttributes>.activities
+        if let existingActivity = activities.first(where: { $0.attributes.tripId == trip.id }) {
+            // Activity exists, update it instead of restarting
+            debugLog("[LiveActivity] Activity already exists for trip #\(trip.id), updating instead")
+            await updateActivity(with: trip, checkinCount: checkinCount)
+            return true
+        }
+
+        // End activities for OTHER trips (not this one)
+        for activity in activities {
+            if activity.attributes.tripId != trip.id {
+                let tripId = activity.attributes.tripId
+                tokenObservationTasks[tripId]?.cancel()
+                tokenObservationTasks.removeValue(forKey: tripId)
+                await Session.shared.unregisterLiveActivityToken(tripId: tripId)
+                let finalState = TripLiveActivityAttributes.ContentState(
+                    status: "completed", eta: Date(), lastCheckinTime: nil, isOverdue: false, checkinCount: 0
+                )
+                let content = ActivityKit.ActivityContent(state: finalState, staleDate: nil)
+                await activity.end(content, dismissalPolicy: .immediate)
+                debugLog("[LiveActivity] Ended stale activity for trip #\(tripId)")
+            }
+        }
 
         return await startActivityInternal(for: trip, checkinCount: checkinCount)
     }
@@ -170,8 +241,12 @@ final class LiveActivityManager: ObservableObject {
             checkinCount: checkinCount
         )
 
+        // Set stale date to ETA + grace period + 5 minute buffer
+        // Activity will show as stale if no updates received by this time
+        let staleDate = trip.eta_at.addingTimeInterval(Double(trip.grace_minutes + 5) * 60)
+
         do {
-            let content = ActivityKit.ActivityContent(state: initialState, staleDate: nil)
+            let content = ActivityKit.ActivityContent(state: initialState, staleDate: staleDate)
             let activity = try ActivityKit.Activity<TripLiveActivityAttributes>.request(
                 attributes: attributes,
                 content: content,
@@ -191,26 +266,75 @@ final class LiveActivityManager: ObservableObject {
         }
     }
 
-    /// Observe push token updates for an activity and send to backend
+    /// Observe push token updates for an activity and queue for non-blocking registration
     @available(iOS 16.1, *)
     private func observePushTokenUpdates(for activity: ActivityKit.Activity<TripLiveActivityAttributes>, tripId: Int) {
         // Cancel any existing observation for this trip
         tokenObservationTasks[tripId]?.cancel()
 
-        // Start new observation task
-        tokenObservationTasks[tripId] = Task { [weak self] in
+        // Start new observation task - this now queues tokens instead of blocking
+        // Note: Using strong self since this is a singleton (static let shared) and the task
+        // is tracked in tokenObservationTasks for proper cancellation in deinit.
+        tokenObservationTasks[tripId] = Task {
             for await tokenData in activity.pushTokenUpdates {
                 guard !Task.isCancelled else { break }
                 let tokenString = tokenData.map { String(format: "%02x", $0) }.joined()
                 debugLog("[LiveActivity] Push token update for trip #\(tripId): \(tokenString.prefix(20))...")
-                await self?.sendPushTokenToBackend(token: tokenString, tripId: tripId)
+
+                // Queue token for non-blocking registration (doesn't block the stream)
+                await self.queueTokenForRegistration(token: tokenString, tripId: tripId)
             }
         }
     }
 
+    /// Queue a token for async registration without blocking the push token stream
+    private func queueTokenForRegistration(token: String, tripId: Int) {
+        // Deduplicate: skip if this exact token was already registered for this trip
+        if lastRegisteredToken[tripId] == token {
+            debugLog("[LiveActivity] Skipping duplicate token for trip #\(tripId)")
+            return
+        }
+
+        // Add to queue (replacing any pending token for same trip to avoid stale registrations)
+        pendingTokenQueue.removeAll { $0.tripId == tripId }
+        pendingTokenQueue.append((token: token, tripId: tripId))
+
+        // Start registration task if not already running
+        startTokenRegistrationTaskIfNeeded()
+    }
+
+    /// Start the background token registration task if not already running
+    private func startTokenRegistrationTaskIfNeeded() {
+        guard tokenRegistrationTask == nil else { return }
+
+        tokenRegistrationTask = Task {
+            while !pendingTokenQueue.isEmpty {
+                let (token, tripId) = pendingTokenQueue.removeFirst()
+
+                // Retry up to 3 times with exponential backoff
+                var success = false
+                for attempt in 1...3 {
+                    success = await self.sendPushTokenToBackend(token: token, tripId: tripId)
+                    if success {
+                        debugLog("[LiveActivity] ✅ Token registered on attempt \(attempt)")
+                        lastRegisteredToken[tripId] = token
+                        break
+                    } else if attempt < 3 {
+                        debugLog("[LiveActivity] ⚠️ Token registration failed, retrying in \(attempt)s...")
+                        try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
+                    } else {
+                        debugLog("[LiveActivity] ❌ Token registration failed after 3 attempts")
+                    }
+                }
+            }
+            tokenRegistrationTask = nil
+        }
+    }
+
     /// Send live activity push token to backend
-    private func sendPushTokenToBackend(token: String, tripId: Int) async {
-        await Session.shared.registerLiveActivityToken(token: token, tripId: tripId)
+    /// Returns true if successful
+    private func sendPushTokenToBackend(token: String, tripId: Int) async -> Bool {
+        return await Session.shared.registerLiveActivityToken(token: token, tripId: tripId)
     }
 
     /// Update the Live Activity with new trip state
@@ -239,7 +363,9 @@ final class LiveActivityManager: ObservableObject {
             checkinCount: finalCheckinCount
         )
 
-        let content = ActivityKit.ActivityContent(state: updatedState, staleDate: nil)
+        // Update stale date to ETA + grace period + 5 minute buffer
+        let staleDate = trip.eta_at.addingTimeInterval(Double(activity.attributes.graceMinutes + 5) * 60)
+        let content = ActivityKit.ActivityContent(state: updatedState, staleDate: staleDate)
         await activity.update(content)
         debugLog("[LiveActivity] Updated state for trip #\(trip.id)")
     }
@@ -258,9 +384,7 @@ final class LiveActivityManager: ObservableObject {
             tokenObservationTasks[tripId]?.cancel()
             tokenObservationTasks.removeValue(forKey: tripId)
 
-            // Unregister token from backend
-            await Session.shared.unregisterLiveActivityToken(tripId: tripId)
-
+            // End the activity UI first
             if let trip = trip {
                 let finalState = TripLiveActivityAttributes.ContentState(
                     status: "completed",
@@ -282,6 +406,17 @@ final class LiveActivityManager: ObservableObject {
                 let content = ActivityKit.ActivityContent(state: finalState, staleDate: nil)
                 await activity.end(content, dismissalPolicy: ActivityKit.ActivityUIDismissalPolicy.immediate)
             }
+
+            // Delay token unregistration to allow backend to send final update
+            // Cancel any existing delayed task for this trip
+            delayedUnregistrationTasks[tripId]?.cancel()
+            let unregisterTask = Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)  // 3 seconds
+                guard !Task.isCancelled else { return }
+                await Session.shared.unregisterLiveActivityToken(tripId: tripId)
+                debugLog("[LiveActivity] Token unregistered for trip #\(tripId) after delay")
+            }
+            delayedUnregistrationTasks[tripId] = unregisterTask
         }
 
         debugLog("[LiveActivity] Ended activity")
@@ -299,9 +434,7 @@ final class LiveActivityManager: ObservableObject {
             tokenObservationTasks[tripId]?.cancel()
             tokenObservationTasks.removeValue(forKey: tripId)
 
-            // Unregister token from backend
-            await Session.shared.unregisterLiveActivityToken(tripId: tripId)
-
+            // End the activity UI first
             let finalState = TripLiveActivityAttributes.ContentState(
                 status: "completed",
                 eta: Date(),
@@ -311,11 +444,25 @@ final class LiveActivityManager: ObservableObject {
             )
             let content = ActivityKit.ActivityContent(state: finalState, staleDate: nil)
             await activity.end(content, dismissalPolicy: ActivityKit.ActivityUIDismissalPolicy.immediate)
+
+            // Delay token unregistration to allow backend to send final update
+            // Cancel any existing delayed task for this trip
+            delayedUnregistrationTasks[tripId]?.cancel()
+            let unregisterTask = Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)  // 3 seconds
+                guard !Task.isCancelled else { return }
+                await Session.shared.unregisterLiveActivityToken(tripId: tripId)
+                debugLog("[LiveActivity] Token unregistered for trip #\(tripId) after delay")
+            }
+            delayedUnregistrationTasks[tripId] = unregisterTask
         }
         // Clear the stored activity ID
         sharedDefaults?.removeObject(forKey: LiveActivityConstants.activityIdKey)
         debugLog("[LiveActivity] Ended all activities")
     }
+
+    /// Track last status per trip for debounce logic
+    private var lastStatus: [Int: String] = [:]
 
     /// Check and restore Live Activity for an existing active trip
     /// Call this on app launch if there's an active trip
@@ -334,6 +481,19 @@ final class LiveActivityManager: ObservableObject {
         let activities = ActivityKit.Activity<TripLiveActivityAttributes>.activities
         let existingActivity = activities.first { $0.attributes.tripId == trip.id }
 
+        // Check if status changed - always process status changes even if debounced
+        let statusChanged = lastStatus[trip.id] != trip.status
+        lastStatus[trip.id] = trip.status
+
+        // Debounce: skip if we just updated this trip recently AND status hasn't changed
+        // Status changes (e.g., active -> overdue) should always be processed immediately
+        if !statusChanged,
+           let lastUpdate = lastUpdateTime[trip.id],
+           Date().timeIntervalSince(lastUpdate) < debounceInterval {
+            debugLog("[LiveActivity] Skipping restore for trip #\(trip.id) - debounced (status unchanged)")
+            return
+        }
+
         if existingActivity != nil {
             // Update existing activity
             await updateActivity(with: trip, checkinCount: checkinCount)
@@ -341,6 +501,9 @@ final class LiveActivityManager: ObservableObject {
             // Start new activity
             await startActivity(for: trip, checkinCount: checkinCount)
         }
+
+        // Record update time
+        lastUpdateTime[trip.id] = Date()
     }
 
     // MARK: - Private Helpers

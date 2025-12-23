@@ -41,7 +41,7 @@ struct CheckOutIntent: LiveActivityIntent {
             // API succeeded - clear widget data since trip is complete
             defaults?.removeObject(forKey: LiveActivityConstants.widgetTripDataKey)
             defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckoutKey)
-            defaults?.synchronize()
+            // Note: synchronize() is deprecated - iOS handles UserDefaults synchronization automatically
 
             // Small delay to ensure UserDefaults syncs across processes
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms

@@ -197,7 +197,7 @@ struct LockScreenView: View {
                     .fill(statusColor)
                     .frame(width: 8, height: 8)
 
-                CountdownView(eta: state.eta, isOverdue: isOverdue, statusColor: statusColor)
+                CountdownView(eta: state.eta, isOverdue: isOverdue, status: state.status, statusColor: statusColor)
             }
 
             Spacer()
@@ -261,7 +261,7 @@ struct LockScreenView: View {
             }
 
             // Row 3: Countdown
-            CountdownView(eta: state.eta, isOverdue: isOverdue, statusColor: statusColor)
+            CountdownView(eta: state.eta, isOverdue: isOverdue, status: state.status, statusColor: statusColor)
 
             // Row 4: Action buttons
             actionButtons
@@ -565,21 +565,24 @@ struct LockScreenView: View {
 struct CountdownView: View {
     let eta: Date
     let isOverdue: Bool
+    var status: String = "active"  // Server-provided status
     var statusColor: Color = .orange
 
-    /// Check if ETA has passed (locally, without needing a push update)
-    private var isPastETA: Bool {
-        Date() > eta
+    /// Whether the server says we're past ETA (in grace period or beyond)
+    private var serverSaysPastETA: Bool {
+        status == "overdue" || status == "overdue_notified"
     }
 
     var body: some View {
-        if isOverdue || isPastETA {
-            // Show OVERDUE when either the server says so OR the local time is past ETA
+        if isOverdue || serverSaysPastETA {
+            // Use server state to determine display - don't rely on local time
             Text(isOverdue ? "OVERDUE" : "CHECK IN")
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundStyle(statusColor)
         } else {
-            Text(timerInterval: Date()...eta, countsDown: true)
+            // Active trip with countdown
+            // Use max to prevent negative countdown if local clock is slightly ahead
+            Text(timerInterval: Date()...max(eta, Date()), countsDown: true)
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .monospacedDigit()
                 .foregroundStyle(.white)

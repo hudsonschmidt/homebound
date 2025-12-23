@@ -1,7 +1,7 @@
 """Public check-in/check-out endpoints using tokens (no auth required)"""
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import sqlalchemy
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
@@ -39,12 +39,13 @@ def checkin_with_token(
 ):
     """Check in to a trip using a magic token. Optionally include lat/lon coordinates."""
     with db.engine.begin() as connection:
-        # Find trip by checkin_token with activity name, timezone, location, and ETA
+        # Find trip by checkin_token with activity name, timezone, location, ETA, and grace period
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       t.timezone, t.location_text, t.eta, t.notify_self, a.name as activity_name
+                       t.timezone, t.location_text, t.eta, t.notify_self, t.grace_min,
+                       a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkin_token = :token
@@ -76,19 +77,22 @@ def checkin_with_token(
         assert row is not None
         event_id = row[0]
 
-        # Update last check-in reference, reset status to active, and clear warning timestamps
+        # Update last check-in timestamp, reset status to active, and clear warning timestamps
+        # Also reset transition flags so Live Activity updates work if trip extends past new ETA
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
-                SET last_checkin = :event_id,
+                SET last_checkin = :last_checkin_time,
                     status = 'active',
                     last_grace_warning = NULL,
-                    last_checkin_reminder = :now
+                    last_checkin_reminder = :now,
+                    notified_eta_transition = false,
+                    notified_grace_transition = false
                 WHERE id = :trip_id
                 """
             ),
-            {"event_id": event_id, "trip_id": trip.id, "now": now.isoformat()}
+            {"last_checkin_time": now.isoformat(), "trip_id": trip.id, "now": now.isoformat()}
         )
 
         # Fetch user name and email for notification
@@ -155,6 +159,14 @@ def checkin_with_token(
         now_for_la = now
         checkin_count_for_la = checkin_count
 
+        # Calculate actual is_overdue state based on ETA + grace period
+        # After check-in, user is no longer overdue (trip status reset to active)
+        # But we still need to calculate if we're past ETA for display purposes
+        grace_min = trip.grace_min or 15  # Default 15 minutes if not set
+        grace_end = eta_for_la + timedelta(minutes=grace_min)
+        is_overdue_for_la = now > grace_end
+        grace_min_for_la = grace_min
+
         # Always send Live Activity update (runs in background)
         def send_live_activity_sync():
             asyncio.run(send_live_activity_update(
@@ -162,8 +174,9 @@ def checkin_with_token(
                 status="active",
                 eta=eta_for_la,
                 last_checkin_time=now_for_la,
-                is_overdue=False,
-                checkin_count=checkin_count_for_la
+                is_overdue=is_overdue_for_la,
+                checkin_count=checkin_count_for_la,
+                grace_min=grace_min_for_la
             ))
 
         background_tasks.add_task(send_live_activity_sync)
