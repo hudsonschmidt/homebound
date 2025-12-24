@@ -1,4 +1,5 @@
 """Live Activity token registration endpoints for iOS Live Activity push updates"""
+import logging
 from datetime import UTC, datetime
 
 import sqlalchemy
@@ -7,6 +8,8 @@ from pydantic import BaseModel
 
 from src import database as db
 from src.api import auth
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/live-activity-tokens",
@@ -92,6 +95,11 @@ def register_live_activity_token(
         row = result.fetchone()
         assert row is not None
 
+        log.info(
+            f"[LiveActivity] Token registered: trip_id={row.trip_id}, user_id={user_id}, "
+            f"env={row.env}, token_prefix={row.token[:20]}..."
+        )
+
         return LiveActivityTokenResponse(
             id=row.id,
             trip_id=row.trip_id,
@@ -124,8 +132,10 @@ def delete_live_activity_token(
 
         if result.rowcount == 0:
             # Token may already be deleted, don't error
+            log.info(f"[LiveActivity] Token delete requested but not found: trip_id={trip_id}, user_id={user_id}")
             return {"ok": True, "message": "Token not found or already removed"}
 
+        log.info(f"[LiveActivity] Token deleted: trip_id={trip_id}, user_id={user_id}")
         return {"ok": True, "message": "Token removed successfully"}
 
 
@@ -160,3 +170,44 @@ def get_live_activity_token(
             created_at=str(row.created_at),
             updated_at=str(row.updated_at)
         )
+
+
+@router.get("/debug/{trip_id}")
+def debug_token_status(trip_id: int):
+    """Debug endpoint to check token status for a trip (no auth required for debugging)."""
+    with db.engine.connect() as conn:
+        # Get token for this trip
+        token_row = conn.execute(
+            sqlalchemy.text("""
+                SELECT id, trip_id, user_id, token, bundle_id, env, created_at, updated_at
+                FROM live_activity_tokens
+                WHERE trip_id = :trip_id
+            """),
+            {"trip_id": trip_id}
+        ).fetchone()
+
+        # Get count of all tokens
+        total_count = conn.execute(
+            sqlalchemy.text("SELECT COUNT(*) as cnt FROM live_activity_tokens")
+        ).fetchone()
+
+        if not token_row:
+            return {
+                "found": False,
+                "trip_id": trip_id,
+                "message": f"No token found for trip {trip_id}",
+                "total_tokens_in_db": total_count.cnt if total_count else 0
+            }
+
+        return {
+            "found": True,
+            "id": token_row.id,
+            "trip_id": token_row.trip_id,
+            "user_id": token_row.user_id,
+            "env": token_row.env,
+            "bundle_id": token_row.bundle_id,
+            "token_prefix": token_row.token[:20] + "...",
+            "created_at": str(token_row.created_at),
+            "updated_at": str(token_row.updated_at),
+            "total_tokens_in_db": total_count.cnt if total_count else 0
+        }

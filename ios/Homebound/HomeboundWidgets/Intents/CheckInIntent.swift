@@ -34,27 +34,25 @@ struct CheckInIntent: LiveActivityIntent {
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier)
 
+        // Set pending flag BEFORE API call so main app knows to refresh even if widget is killed
+        defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckinKey)
+
+        // Post Darwin notification early as backup signaling
+        postDarwinNotification()
+
         do {
-            // Perform API call FIRST - only show success if it actually succeeds
+            // Perform API call
             _ = try await LiveActivityAPI.shared.checkIn(token: checkinToken)
 
-            // API succeeded - now set confirmation timestamp for visual feedback
+            // API succeeded - set confirmation timestamp for visual feedback
             defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.checkinConfirmationKey)
-            defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckinKey)
-            // Note: synchronize() is deprecated - iOS handles UserDefaults synchronization automatically
-
-            // Small delay to ensure UserDefaults syncs across processes
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-
-            // Post Darwin notification to wake main app
-            postDarwinNotification()
 
             // Refresh widgets to show updated state
             WidgetCenter.shared.reloadAllTimelines()
 
         } catch {
-            // API failed - don't show success indicators
-            // The error will propagate and the button won't show false success
+            // API failed - clear pending flag so main app doesn't show false success
+            defaults?.removeObject(forKey: LiveActivityConstants.pendingCheckinKey)
             throw error
         }
 

@@ -113,27 +113,40 @@ final class LiveActivityManager: ObservableObject {
 
     /// Handle pending actions signaled from widget extension
     func handlePendingActions() async {
-        guard let defaults = sharedDefaults else { return }
-
-        // Small delay to ensure UserDefaults is synced from widget extension
-        try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-
-        // Handle pending checkout (takes priority - ends the activity)
-        if defaults.double(forKey: LiveActivityConstants.pendingCheckoutKey) > 0 {
-            defaults.removeObject(forKey: LiveActivityConstants.pendingCheckoutKey)
-            debugLog("[LiveActivity] Handling pending checkout action")
-            // Refresh from server to get final state, then end
-            await refreshTripDataFromServer()
-            await endAllActivities()
+        guard let defaults = sharedDefaults else {
+            debugLog("[LiveActivity] handlePendingActions: No shared defaults available")
             return
         }
 
-        // Handle pending checkin
-        if defaults.double(forKey: LiveActivityConstants.pendingCheckinKey) > 0 {
+        // Longer delay to ensure UserDefaults is synced from widget extension
+        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms (was 50ms)
+
+        // Check both pending flags
+        let pendingCheckout = defaults.double(forKey: LiveActivityConstants.pendingCheckoutKey)
+        let pendingCheckin = defaults.double(forKey: LiveActivityConstants.pendingCheckinKey)
+
+        // Clear flags immediately to prevent duplicate handling
+        if pendingCheckout > 0 {
+            defaults.removeObject(forKey: LiveActivityConstants.pendingCheckoutKey)
+        }
+        if pendingCheckin > 0 {
             defaults.removeObject(forKey: LiveActivityConstants.pendingCheckinKey)
-            debugLog("[LiveActivity] Handling pending checkin action")
-            // Refresh from server - this updates both widget data and Live Activity with authoritative state
+        }
+
+        // Log what we're handling
+        if pendingCheckout > 0 || pendingCheckin > 0 {
+            debugLog("[LiveActivity] handlePendingActions: checkout=\(pendingCheckout > 0), checkin=\(pendingCheckin > 0)")
+        }
+
+        // Always refresh from server to get authoritative state
+        if pendingCheckout > 0 || pendingCheckin > 0 {
             await refreshTripDataFromServer()
+        }
+
+        // Handle checkout (ends activity) after refresh
+        if pendingCheckout > 0 {
+            debugLog("[LiveActivity] Handling pending checkout action - ending activities")
+            await endAllActivities()
         }
     }
 
@@ -278,19 +291,32 @@ final class LiveActivityManager: ObservableObject {
     private func observePushTokenUpdates(for activity: ActivityKit.Activity<TripLiveActivityAttributes>, tripId: Int) {
         // Cancel any existing observation for this trip
         tokenObservationTasks[tripId]?.cancel()
+        debugLog("[LiveActivity] Starting token observation for trip #\(tripId)")
 
         // Start new observation task - this now queues tokens instead of blocking
         // Note: Using strong self since this is a singleton (static let shared) and the task
         // is tracked in tokenObservationTasks for proper cancellation in deinit.
         tokenObservationTasks[tripId] = Task {
             for await tokenData in activity.pushTokenUpdates {
-                guard !Task.isCancelled else { break }
+                guard !Task.isCancelled else {
+                    debugLog("[LiveActivity] Token observation cancelled for trip #\(tripId)")
+                    break
+                }
+
+                // Verify activity still exists for this tripId before registering
+                let activities = ActivityKit.Activity<TripLiveActivityAttributes>.activities
+                guard activities.contains(where: { $0.attributes.tripId == tripId }) else {
+                    debugLog("[LiveActivity] Activity no longer exists for trip #\(tripId), skipping token registration")
+                    continue
+                }
+
                 let tokenString = tokenData.map { String(format: "%02x", $0) }.joined()
-                debugLog("[LiveActivity] Push token update for trip #\(tripId): \(tokenString.prefix(20))...")
+                debugLog("[LiveActivity] Push token received for trip #\(tripId): \(tokenString.prefix(20))...")
 
                 // Queue token for non-blocking registration (doesn't block the stream)
                 self.queueTokenForRegistration(token: tokenString, tripId: tripId)
             }
+            debugLog("[LiveActivity] Token observation ended for trip #\(tripId)")
         }
     }
 
@@ -302,9 +328,13 @@ final class LiveActivityManager: ObservableObject {
             return
         }
 
+        debugLog("[LiveActivity] Queuing token for trip #\(tripId): \(token.prefix(20))...")
+
         // Add to queue (replacing any pending token for same trip to avoid stale registrations)
         pendingTokenQueue.removeAll { $0.tripId == tripId }
         pendingTokenQueue.append((token: token, tripId: tripId))
+
+        debugLog("[LiveActivity] Token queue size: \(pendingTokenQueue.count)")
 
         // Start registration task if not already running
         startTokenRegistrationTaskIfNeeded()
@@ -312,28 +342,35 @@ final class LiveActivityManager: ObservableObject {
 
     /// Start the background token registration task if not already running
     private func startTokenRegistrationTaskIfNeeded() {
-        guard tokenRegistrationTask == nil else { return }
+        guard tokenRegistrationTask == nil else {
+            debugLog("[LiveActivity] Token registration task already running")
+            return
+        }
 
+        debugLog("[LiveActivity] Starting token registration task")
         tokenRegistrationTask = Task {
             while !pendingTokenQueue.isEmpty {
                 let (token, tripId) = pendingTokenQueue.removeFirst()
+
+                debugLog("[LiveActivity] Registering token for trip #\(tripId)...")
 
                 // Retry up to 3 times with exponential backoff
                 var success = false
                 for attempt in 1...3 {
                     success = await self.sendPushTokenToBackend(token: token, tripId: tripId)
                     if success {
-                        debugLog("[LiveActivity] ✅ Token registered on attempt \(attempt)")
+                        debugLog("[LiveActivity] ✅ Token registered for trip #\(tripId) on attempt \(attempt)")
                         lastRegisteredToken[tripId] = token
                         break
                     } else if attempt < 3 {
-                        debugLog("[LiveActivity] ⚠️ Token registration failed, retrying in \(attempt)s...")
+                        debugLog("[LiveActivity] ⚠️ Token registration for trip #\(tripId) failed, retrying in \(attempt)s...")
                         try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
                     } else {
-                        debugLog("[LiveActivity] ❌ Token registration failed after 3 attempts")
+                        debugLog("[LiveActivity] ❌ Token registration for trip #\(tripId) failed after 3 attempts")
                     }
                 }
             }
+            debugLog("[LiveActivity] Token registration task completed")
             tokenRegistrationTask = nil
         }
     }

@@ -484,6 +484,8 @@ final class Session: ObservableObject {
         let environment = "production"
         #endif
 
+        debugLog("[LiveActivity] Sending token registration: trip_id=\(tripId), env=\(environment), bundle_id=\(bundleId), token_prefix=\(token.prefix(20))...")
+
         do {
             let _: API.Empty = try await api.post(
                 url("/api/v1/live-activity-tokens/"),
@@ -495,10 +497,10 @@ final class Session: ObservableObject {
                 ),
                 bearer: bearer
             )
-            debugLog("[LiveActivity] ✅ Token registered for trip #\(tripId)")
+            debugLog("[LiveActivity] ✅ Token registered for trip #\(tripId) (env=\(environment))")
             return true
         } catch {
-            debugLog("[LiveActivity] ❌ Failed to register token: \(error.localizedDescription)")
+            debugLog("[LiveActivity] ❌ Failed to register token for trip #\(tripId): \(error.localizedDescription)")
             return false
         }
     }

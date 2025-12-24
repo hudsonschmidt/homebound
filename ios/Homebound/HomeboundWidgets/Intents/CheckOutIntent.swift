@@ -34,26 +34,25 @@ struct CheckOutIntent: LiveActivityIntent {
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier)
 
+        // Set pending flag BEFORE API call so main app knows to refresh even if widget is killed
+        defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckoutKey)
+
+        // Post Darwin notification early as backup signaling
+        postDarwinNotification()
+
         do {
-            // Perform API call FIRST - only signal success if it actually succeeds
+            // Perform API call
             _ = try await LiveActivityAPI.shared.checkOut(token: checkoutToken)
 
             // API succeeded - clear widget data since trip is complete
             defaults?.removeObject(forKey: LiveActivityConstants.widgetTripDataKey)
-            defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckoutKey)
-            // Note: synchronize() is deprecated - iOS handles UserDefaults synchronization automatically
-
-            // Small delay to ensure UserDefaults syncs across processes
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-
-            // Post Darwin notification to wake main app
-            postDarwinNotification()
 
             // Refresh widgets to show "No Active Trip"
             WidgetCenter.shared.reloadAllTimelines()
 
         } catch {
-            // API failed - don't signal success
+            // API failed - clear pending flag so main app doesn't act on false success
+            defaults?.removeObject(forKey: LiveActivityConstants.pendingCheckoutKey)
             throw error
         }
 

@@ -12,8 +12,9 @@ struct LiveActivityAPI {
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        // Reduced timeouts to leave more margin for widget execution time (~30s limit)
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 10
         return URLSession(configuration: config)
     }()
 

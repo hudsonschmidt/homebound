@@ -552,7 +552,19 @@ async def send_live_activity_update(
                 {"trip_id": trip_id}
             ).fetchone()
 
+            # On first attempt, log all tokens in database for debugging
+            if attempt == 0:
+                all_tokens = conn.execute(
+                    sqlalchemy.text("SELECT trip_id, env FROM live_activity_tokens ORDER BY trip_id")
+                ).fetchall()
+                if all_tokens:
+                    token_list = ", ".join([f"trip_{t.trip_id}({t.env})" for t in all_tokens])
+                    log.info(f"[LiveActivity] Tokens in DB: [{token_list}]")
+                else:
+                    log.info("[LiveActivity] No tokens in database")
+
         if token_row:
+            log.info(f"[LiveActivity] Found token for trip {trip_id}: env={token_row.env}, prefix={token_row.token[:20]}...")
             break
 
         if attempt < MAX_TOKEN_RETRIES - 1:
