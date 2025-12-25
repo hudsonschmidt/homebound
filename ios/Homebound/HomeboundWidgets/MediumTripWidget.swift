@@ -7,7 +7,6 @@
 
 import WidgetKit
 import SwiftUI
-import AppIntents
 
 // MARK: - Medium Trip Widget
 
@@ -32,7 +31,7 @@ struct MediumTripWidgetView: View {
 
     var body: some View {
         if let trip = entry.tripData {
-            ActiveTripMediumView(trip: trip, showCheckinConfirmation: entry.showCheckinConfirmation)
+            ActiveTripMediumView(trip: trip)
         } else {
             NoTripMediumView()
         }
@@ -43,7 +42,6 @@ struct MediumTripWidgetView: View {
 
 private struct ActiveTripMediumView: View {
     let trip: WidgetTripData
-    let showCheckinConfirmation: Bool
 
     private var primaryColor: Color {
         Color(hex: trip.primaryColor) ?? .blue
@@ -115,56 +113,21 @@ private struct ActiveTripMediumView: View {
 
             Spacer()
 
-            // Right side - Action buttons
-            if #available(iOS 17.0, *) {
-                HStack(spacing: 6) {
-                    // Checkmark confirmation (appears after check-in)
-                    if showCheckinConfirmation {
+            // Right side - Status display
+            VStack(spacing: 4) {
+                Text(trip.statusText)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(statusColor)
+
+                if trip.checkinCount > 0 {
+                    HStack(spacing: 2) {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.title2)
-                            .foregroundColor(.green)
-                            .transition(.opacity)
+                            .font(.caption2)
+                        Text("\(trip.checkinCount)")
+                            .font(.caption2)
                     }
-
-                    VStack(spacing: 8) {
-                        // Check In button
-                        if let token = trip.checkinToken {
-                            Button(intent: CheckInIntent(checkinToken: token, tripId: trip.id)) {
-                                Text("Check In")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .buttonStyle(WidgetButtonStyle(color: primaryColor))
-                        }
-
-                        // Complete Trip button
-                        if let token = trip.checkoutToken {
-                            Button(intent: CheckOutIntent(checkoutToken: token, tripId: trip.id)) {
-                                Text("Complete")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .buttonStyle(WidgetButtonStyle(color: .green))
-                        }
-                    }
-                    .frame(width: 100)
-                }
-            } else {
-                // Fallback for older iOS - just show status
-                VStack(spacing: 4) {
-                    Text(trip.statusText)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(statusColor)
-
-                    Text("Open app to\ncheck in")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
+                    .foregroundColor(.green)
                 }
             }
         }
@@ -197,32 +160,11 @@ private struct NoTripMediumView: View {
     }
 }
 
-// MARK: - Widget Button Style
-
-private struct WidgetButtonStyle: ButtonStyle {
-    let color: Color
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .background(color.opacity(configuration.isPressed ? 0.5 : 0.2))
-            .foregroundColor(.primary)
-            .cornerRadius(8)
-            // Note: Per CLAUDE.md, animations only allowed on Live Activity buttons
-            // Immediate press feedback without animation transition
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .opacity(configuration.isPressed ? 0.9 : 1.0)
-    }
-}
-
 // MARK: - Preview
 
 #Preview(as: .systemMedium) {
     MediumTripWidget()
 } timeline: {
-    TripWidgetEntry(date: .now, tripData: .placeholder, showCheckinConfirmation: true)
-    TripWidgetEntry(date: .now, tripData: .placeholder, showCheckinConfirmation: false)
+    TripWidgetEntry(date: .now, tripData: .placeholder)
     TripWidgetEntry(date: .now, tripData: nil)
 }

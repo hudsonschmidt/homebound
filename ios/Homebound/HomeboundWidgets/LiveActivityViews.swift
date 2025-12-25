@@ -6,7 +6,6 @@
 //
 
 import ActivityKit
-import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -168,17 +167,15 @@ struct LockScreenView: View {
     }
 
     var body: some View {
-        VStack(spacing: displayMode == .full ? 6 : 12) {
+        VStack(spacing: 12) {
             switch displayMode {
             case .minimal:
                 minimalLayout
             case .standard:
                 standardLayout
-            case .full:
-                fullLayout
             }
         }
-        .padding(displayMode == .full ? 10 : 16)
+        .padding(16)
         .background(backgroundColor)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
@@ -201,8 +198,6 @@ struct LockScreenView: View {
             }
 
             Spacer()
-
-            completeButton
         }
     }
 
@@ -262,300 +257,6 @@ struct LockScreenView: View {
 
             // Row 3: Countdown
             CountdownView(eta: state.eta, graceEnd: state.graceEnd, isOverdue: isOverdue, status: state.status, statusColor: statusColor)
-
-            // Row 4: Action buttons
-            actionButtons
-        }
-    }
-
-    // MARK: - Full Layout
-
-    private var fullLayout: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            // Row 1: Status badge + Title + Icon (combined)
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: statusBadgeSize, height: statusBadgeSize)
-                    .shadow(color: statusColor.opacity(0.6), radius: 3)
-
-                Text(attributes.title)
-                    .font(.subheadline)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if isUrgent {
-                    Image(systemName: "bell.fill")
-                        .font(.caption2)
-                        .foregroundStyle(statusColor)
-                }
-
-                Text(attributes.activityIcon)
-                    .font(.callout)
-            }
-
-            // Row 2: Activity name + Location + check-in info
-            HStack(spacing: 6) {
-                Text(attributes.activityName)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
-
-                if let location = attributes.endLocation {
-                    Text("•")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.5))
-
-                    Image(systemName: "location.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.white.opacity(0.6))
-
-                    Text(location)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-                }
-
-                if state.checkinCount > 0 {
-                    Text("•")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.5))
-
-                    HStack(spacing: 2) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 8))
-                        Text("\(state.checkinCount)")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.green)
-                }
-            }
-
-            // Row 3: Countdown
-            Text(timerInterval: Date()...(isOverdue ? Date() : state.eta), countsDown: true)
-                .font(.system(.title2, design: .rounded, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(isOverdue ? statusColor : .white)
-
-            // Row 4: Action buttons (compact)
-            fullModeButtons
-        }
-    }
-
-    private var fullModeButtons: some View {
-        Group {
-            if #available(iOS 17.0, *) {
-                fullModeButtonsWithIntents
-            } else {
-                fullModeButtonsLegacy
-            }
-        }
-    }
-
-    @available(iOS 17.0, *)
-    private var fullModeButtonsWithIntents: some View {
-        HStack(spacing: 8) {
-            if !isOverdue {
-                if let checkinToken = attributes.checkinToken {
-                    Button(intent: CheckInIntent(checkinToken: checkinToken, tripId: attributes.tripId)) {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 10))
-                            Text("Check In")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.green)
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(LiveActivityButtonStyle())
-                }
-            }
-
-            if let checkoutToken = attributes.checkoutToken {
-                Button(intent: CheckOutIntent(checkoutToken: checkoutToken, tripId: attributes.tripId)) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "house.fill")
-                            .font(.system(size: 10))
-                        Text("I'm Safe")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(isOverdue ? statusColor : brandGreen)
-                    .cornerRadius(10)
-                }
-                .buttonStyle(LiveActivityButtonStyle())
-            }
-        }
-    }
-
-    private var fullModeButtonsLegacy: some View {
-        HStack(spacing: 8) {
-            if !isOverdue {
-                if let checkinToken = attributes.checkinToken,
-                   let url = URL(string: "\(LiveActivityConstants.baseURL)/t/\(checkinToken)/checkin") {
-                    Link(destination: url) {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 10))
-                            Text("Check In")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.green)
-                        .cornerRadius(10)
-                    }
-                }
-            }
-
-            if let checkoutToken = attributes.checkoutToken,
-               let url = URL(string: "\(LiveActivityConstants.baseURL)/t/\(checkoutToken)/checkout") {
-                Link(destination: url) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "house.fill")
-                            .font(.system(size: 10))
-                        Text("I'm Safe")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(isOverdue ? statusColor : brandGreen)
-                    .cornerRadius(10)
-                }
-            }
-        }
-    }
-
-    // MARK: - Components
-
-    private var actionButtons: some View {
-        Group {
-            if #available(iOS 17.0, *) {
-                actionButtonsWithIntents
-            } else {
-                actionButtonsLegacy
-            }
-        }
-    }
-
-    @available(iOS 17.0, *)
-    private var actionButtonsWithIntents: some View {
-        HStack(spacing: 12) {
-            if !isOverdue {
-                if let checkinToken = attributes.checkinToken {
-                    Button(intent: CheckInIntent(checkinToken: checkinToken, tripId: attributes.tripId)) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption)
-                            Text("Check In")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.green)
-                        .cornerRadius(12)
-                    }
-                    .buttonStyle(LiveActivityButtonStyle())
-                }
-            }
-
-            completeButton
-        }
-    }
-
-    private var actionButtonsLegacy: some View {
-        HStack(spacing: 12) {
-            if !isOverdue {
-                if let checkinToken = attributes.checkinToken,
-                   let url = URL(string: "\(LiveActivityConstants.baseURL)/t/\(checkinToken)/checkin") {
-                    Link(destination: url) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption)
-                            Text("Check In")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.green)
-                        .cornerRadius(12)
-                    }
-                }
-            }
-
-            completeButtonLegacy
-        }
-    }
-
-    private var completeButton: some View {
-        Group {
-            if #available(iOS 17.0, *) {
-                completeButtonWithIntent
-            } else {
-                completeButtonLegacy
-            }
-        }
-    }
-
-    @available(iOS 17.0, *)
-    private var completeButtonWithIntent: some View {
-        Group {
-            if let checkoutToken = attributes.checkoutToken {
-                Button(intent: CheckOutIntent(checkoutToken: checkoutToken, tripId: attributes.tripId)) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "house.fill")
-                            .font(.caption)
-                        Text("I'm Safe")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(isOverdue ? statusColor : brandGreen)
-                    .cornerRadius(12)
-                }
-                .buttonStyle(LiveActivityButtonStyle())
-            }
-        }
-    }
-
-    private var completeButtonLegacy: some View {
-        Group {
-            if let checkoutToken = attributes.checkoutToken,
-               let url = URL(string: "\(LiveActivityConstants.baseURL)/t/\(checkoutToken)/checkout") {
-                Link(destination: url) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "house.fill")
-                            .font(.caption)
-                        Text("I'm Safe")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(isOverdue ? statusColor : brandGreen)
-                    .cornerRadius(12)
-                }
-            }
         }
     }
 }
@@ -747,7 +448,7 @@ struct ExpandedCenterView: View {
     }
 }
 
-// Expanded Bottom - Actions and Progress
+// Expanded Bottom - Progress
 struct ExpandedBottomView: View {
     let attributes: TripLiveActivityAttributes
     let state: TripLiveActivityAttributes.ContentState
@@ -774,126 +475,19 @@ struct ExpandedBottomView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            // Progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(height: 4)
+        // Progress bar
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(height: 4)
 
-                    Capsule()
-                        .fill(isOverdue ? statusColor : brandGreen)
-                        .frame(width: geo.size.width * progress, height: 4)
-                }
-            }
-            .frame(height: 4)
-
-            // Action buttons
-            actionButtons
-        }
-    }
-
-    private var actionButtons: some View {
-        Group {
-            if #available(iOS 17.0, *) {
-                actionButtonsWithIntents
-            } else {
-                actionButtonsLegacy
+                Capsule()
+                    .fill(isOverdue ? statusColor : brandGreen)
+                    .frame(width: geo.size.width * progress, height: 4)
             }
         }
-    }
-
-    @available(iOS 17.0, *)
-    private var actionButtonsWithIntents: some View {
-        HStack(spacing: 12) {
-            if !isOverdue {
-                if let checkinToken = attributes.checkinToken {
-                    Button(intent: CheckInIntent(checkinToken: checkinToken, tripId: attributes.tripId)) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption2)
-                            Text("Check In")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color.green)
-                        .cornerRadius(12)
-                    }
-                    .buttonStyle(LiveActivityButtonStyle())
-                }
-            }
-
-            if let checkoutToken = attributes.checkoutToken {
-                Button(intent: CheckOutIntent(checkoutToken: checkoutToken, tripId: attributes.tripId)) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "house.fill")
-                            .font(.caption2)
-                        Text("I'm Safe")
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(isOverdue ? statusColor : brandGreen)
-                    .cornerRadius(12)
-                }
-                .buttonStyle(LiveActivityButtonStyle())
-            }
-        }
-    }
-
-    private var actionButtonsLegacy: some View {
-        HStack(spacing: 12) {
-            if !isOverdue {
-                if let checkinToken = attributes.checkinToken,
-                   let url = URL(string: "\(LiveActivityConstants.baseURL)/t/\(checkinToken)/checkin") {
-                    Link(destination: url) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption2)
-                            Text("Check In")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color.green)
-                        .cornerRadius(12)
-                    }
-                }
-            }
-
-            if let checkoutToken = attributes.checkoutToken,
-               let url = URL(string: "\(LiveActivityConstants.baseURL)/t/\(checkoutToken)/checkout") {
-                Link(destination: url) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "house.fill")
-                            .font(.caption2)
-                        Text("I'm Safe")
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(isOverdue ? statusColor : brandGreen)
-                    .cornerRadius(12)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Live Activity Button Style
-
-private struct LiveActivityButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
-            .opacity(configuration.isPressed ? 0.7 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+        .frame(height: 4)
     }
 }
 

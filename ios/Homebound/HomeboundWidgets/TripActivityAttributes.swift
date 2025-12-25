@@ -13,13 +13,11 @@ import Foundation
 enum LiveActivityDisplayMode: String, Codable, CaseIterable {
     case minimal = "minimal"
     case standard = "standard"
-    case full = "full"
 
     var displayName: String {
         switch self {
         case .minimal: return "Minimal"
         case .standard: return "Standard"
-        case .full: return "Full"
         }
     }
 
@@ -27,7 +25,6 @@ enum LiveActivityDisplayMode: String, Codable, CaseIterable {
         switch self {
         case .minimal: return "ETA countdown only"
         case .standard: return "Countdown, activity, and title"
-        case .full: return "All trip details and locations"
         }
     }
 }
@@ -120,16 +117,8 @@ struct LiveActivityConstants {
     static let activityIdKey = "currentLiveActivityId"
     static let serverEnvironmentKey = "serverEnvironment"
 
-    // Cross-process signaling for Live Activity actions
-    static let pendingCheckinKey = "pendingCheckinAction"
-    static let pendingCheckoutKey = "pendingCheckoutAction"
-    static let darwinNotificationName = "com.homeboundapp.liveactivity.action"
-
     // Widget data sharing
     static let widgetTripDataKey = "widgetTripData"
-
-    // Check-in confirmation feedback (timestamp when check-in button was pressed)
-    static let checkinConfirmationKey = "checkinConfirmationTimestamp"
 
     // Server environment URLs
     private static let productionURL = "https://api.homeboundapp.com"

@@ -107,8 +107,7 @@ extension LiveActivityConstants {
         do {
             return try decoder.decode(WidgetTripData.self, from: data)
         } catch {
-            // Log decode failure for debugging - this can happen if schema changes
-            debugLog("[WidgetSharedData] ❌ Failed to decode WidgetTripData: \(error.localizedDescription)")
+            // Decode failure - can happen if schema changes
             return nil
         }
     }

@@ -60,18 +60,11 @@ final class LiveActivityManager: ObservableObject {
         }
     }
 
-    /// Retained reference for Darwin notification observer (for memory safety)
-    private var darwinObserverRef: Unmanaged<LiveActivityManager>?
-
     // MARK: - Initialization
 
     private init() {
         checkSupport()
-        setupDarwinNotificationObserver()
     }
-
-    // Store notification name as nonisolated constant for use in cleanup/deinit
-    private nonisolated let darwinNotificationNameForCleanup = "com.homeboundapp.liveactivity.action"
 
     /// Flag to track if cleanup has been performed
     private var hasCleanedUp = false
@@ -97,18 +90,6 @@ final class LiveActivityManager: ObservableObject {
 
         tokenRegistrationTask?.cancel()
         tokenRegistrationTask = nil
-
-        // Remove Darwin notification observer
-        if let observer = darwinObserverRef?.toOpaque() {
-            CFNotificationCenterRemoveObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                observer,
-                CFNotificationName(darwinNotificationNameForCleanup as CFString),
-                nil
-            )
-            darwinObserverRef = nil
-            debugLog("[LiveActivity] Removed Darwin notification observer")
-        }
     }
 
     deinit {
@@ -123,16 +104,6 @@ final class LiveActivityManager: ObservableObject {
                 task.cancel()
             }
             tokenRegistrationTask?.cancel()
-
-            // Remove Darwin notification observer if still registered
-            if let observer = darwinObserverRef?.toOpaque() {
-                CFNotificationCenterRemoveObserver(
-                    CFNotificationCenterGetDarwinNotifyCenter(),
-                    observer,
-                    CFNotificationName(darwinNotificationNameForCleanup as CFString),
-                    nil
-                )
-            }
         }
     }
 
@@ -142,77 +113,6 @@ final class LiveActivityManager: ObservableObject {
         } else {
             isSupported = false
         }
-    }
-
-    // MARK: - Darwin Notification Observer (Cross-Process IPC)
-
-    private func setupDarwinNotificationObserver() {
-        let name = LiveActivityConstants.darwinNotificationName as CFString
-        // Use passUnretained since this is a singleton (static let shared)
-        // The singleton exists for the app's lifetime, so no retain needed
-        darwinObserverRef = Unmanaged.passUnretained(self)
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            darwinObserverRef?.toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer = observer else { return }
-                let manager = Unmanaged<LiveActivityManager>.fromOpaque(observer).takeUnretainedValue()
-                Task { @MainActor in
-                    await manager.handlePendingActions()
-                }
-            },
-            name,
-            nil,
-            .deliverImmediately
-        )
-        debugLog("[LiveActivity] Darwin notification observer registered")
-    }
-
-    /// Handle pending actions signaled from widget extension
-    func handlePendingActions() async {
-        guard let defaults = sharedDefaults else {
-            debugLog("[LiveActivity] handlePendingActions: No shared defaults available")
-            return
-        }
-
-        // Longer delay to ensure UserDefaults is synced from widget extension
-        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms (was 50ms)
-
-        // Check both pending flags
-        let pendingCheckout = defaults.double(forKey: LiveActivityConstants.pendingCheckoutKey)
-        let pendingCheckin = defaults.double(forKey: LiveActivityConstants.pendingCheckinKey)
-
-        // Clear flags immediately to prevent duplicate handling
-        if pendingCheckout > 0 {
-            defaults.removeObject(forKey: LiveActivityConstants.pendingCheckoutKey)
-        }
-        if pendingCheckin > 0 {
-            defaults.removeObject(forKey: LiveActivityConstants.pendingCheckinKey)
-        }
-
-        // Log what we're handling
-        if pendingCheckout > 0 || pendingCheckin > 0 {
-            debugLog("[LiveActivity] handlePendingActions: checkout=\(pendingCheckout > 0), checkin=\(pendingCheckin > 0)")
-        }
-
-        // Always refresh from server to get authoritative state
-        if pendingCheckout > 0 || pendingCheckin > 0 {
-            await refreshTripDataFromServer()
-        }
-
-        // Handle checkout (ends activity) after refresh
-        if pendingCheckout > 0 {
-            debugLog("[LiveActivity] Handling pending checkout action - ending activities")
-            await endAllActivities()
-        }
-    }
-
-    /// Refresh trip data from server and update Live Activity
-    /// This ensures we have authoritative state from the backend
-    private func refreshTripDataFromServer() async {
-        debugLog("[LiveActivity] Refreshing trip data from server")
-        // Session.loadActivePlan() will fetch fresh data and call updateActivity()
-        await Session.shared.loadActivePlan()
     }
 
     // MARK: - Settings
