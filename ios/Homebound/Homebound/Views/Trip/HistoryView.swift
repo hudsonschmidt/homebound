@@ -293,8 +293,17 @@ struct TripHistoryCard: View {
     }
 
     // Helper to format date and time nicely (using the trip's stored timezone if provided)
+    // Includes timezone abbreviation if a custom timezone was used
     func formatDateTime(_ date: Date, timezone: String? = nil) -> String {
-        return DateUtils.formatDateTime(date, inTimezone: timezone)
+        let formatted = DateUtils.formatDateTime(date, inTimezone: timezone)
+        // Add timezone abbreviation if a custom timezone is specified
+        if let tzId = timezone,
+           let tz = TimeZone(identifier: tzId),
+           tz != .current,
+           let abbr = tz.abbreviation(for: date) {
+            return "\(formatted) \(abbr)"
+        }
+        return formatted
     }
 
     var body: some View {
