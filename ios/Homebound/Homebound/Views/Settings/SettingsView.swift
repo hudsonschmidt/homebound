@@ -5,7 +5,6 @@ import CoreLocation
 import UniformTypeIdentifiers
 
 // MARK: - App Preferences
-private var preferenceCancellables = Set<AnyCancellable>()
 
 enum AppColorScheme: String, CaseIterable {
     case system = "system"
@@ -81,10 +80,13 @@ class AppPreferences: ObservableObject {
 
     @Published var pinnedActivityIds: [Int] {
         didSet {
-            let limited = Array(pinnedActivityIds.prefix(3))
-            if pinnedActivityIds != limited {
-                pinnedActivityIds = limited
+            // Limit to 3 pinned activities
+            if pinnedActivityIds.count > 3 {
+                // This will trigger didSet again, so return early to avoid double-save
+                pinnedActivityIds = Array(pinnedActivityIds.prefix(3))
+                return
             }
+            // Only save when we have a valid count (avoids saving during the trim)
             if let data = try? JSONEncoder().encode(pinnedActivityIds) {
                 UserDefaults.standard.set(data, forKey: "pinnedActivityIds")
             }
@@ -111,8 +113,17 @@ class AppPreferences: ObservableObject {
     }
 
     // MARK: - Sounds & Haptics
-    @Published var hapticFeedbackEnabled: Bool = true
-    @Published var checkInSoundEnabled: Bool = true
+    @Published var hapticFeedbackEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(hapticFeedbackEnabled, forKey: "hapticFeedbackEnabled")
+        }
+    }
+
+    @Published var checkInSoundEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(checkInSoundEnabled, forKey: "checkInSoundEnabled")
+        }
+    }
 
     // MARK: - Map
     @Published var defaultMapType: MapType {
@@ -179,6 +190,13 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - Debug
+    @Published var debugUnlockAllAchievements: Bool {
+        didSet {
+            UserDefaults.standard.set(debugUnlockAllAchievements, forKey: "debugUnlockAllAchievements")
+        }
+    }
+
     var shouldShowWhatsNew: Bool {
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         // Only show if user has seen a previous version (not a fresh install) and it's different from current
@@ -226,7 +244,20 @@ class AppPreferences: ObservableObject {
 
         // Units & Formats - default to locale-appropriate
         self.useMetricUnits = UserDefaults.standard.object(forKey: "useMetricUnits") == nil ? Locale.current.measurementSystem == .metric : UserDefaults.standard.bool(forKey: "useMetricUnits")
-        self.use24HourTime = UserDefaults.standard.object(forKey: "use24HourTime") == nil ? false : UserDefaults.standard.bool(forKey: "use24HourTime")
+
+        // Detect if locale uses 24-hour time by checking the short time format for AM/PM indicator
+        let localeUses24Hour: Bool = {
+            let formatter = DateFormatter()
+            formatter.locale = Locale.current
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            let timeString = formatter.string(from: Date())
+            // If the formatted time contains AM/PM symbols, it's 12-hour format
+            let amSymbol = formatter.amSymbol ?? "AM"
+            let pmSymbol = formatter.pmSymbol ?? "PM"
+            return !timeString.contains(amSymbol) && !timeString.contains(pmSymbol)
+        }()
+        self.use24HourTime = UserDefaults.standard.object(forKey: "use24HourTime") == nil ? localeUses24Hour : UserDefaults.standard.bool(forKey: "use24HourTime")
 
         // Notifications - defaults to enabled
         self.tripRemindersEnabled = UserDefaults.standard.object(forKey: "tripRemindersEnabled") == nil ? true : UserDefaults.standard.bool(forKey: "tripRemindersEnabled")
@@ -249,18 +280,8 @@ class AppPreferences: ObservableObject {
             self.lastSeenWhatsNewVersion = storedVersion
         }
 
-        // Set up Combine subscribers to persist Sounds & Haptics changes
-        // Using Combine instead of didSet because didSet doesn't reliably fire through SwiftUI bindings
-        // Note: Must be done after all stored properties are initialized
-        $hapticFeedbackEnabled
-            .dropFirst()
-            .sink { UserDefaults.standard.set($0, forKey: "hapticFeedbackEnabled") }
-            .store(in: &preferenceCancellables)
-
-        $checkInSoundEnabled
-            .dropFirst()
-            .sink { UserDefaults.standard.set($0, forKey: "checkInSoundEnabled") }
-            .store(in: &preferenceCancellables)
+        // Debug - defaults to false
+        self.debugUnlockAllAchievements = UserDefaults.standard.bool(forKey: "debugUnlockAllAchievements")
     }
 
     // MARK: - Pinned Activities Helpers
@@ -316,6 +337,7 @@ class AppPreferences: ObservableObject {
 // MARK: - Main Settings View
 struct SettingsView: View {
     @EnvironmentObject var session: Session
+    @EnvironmentObject var preferences: AppPreferences
     @Environment(\.dismiss) var dismiss
     @State private var showingClearCacheAlert = false
     @State private var showingWhatsNew = false
@@ -428,6 +450,15 @@ struct SettingsView: View {
                             .pickerStyle(.segmented)
                         }
                         .padding(.vertical, 4)
+
+                        Toggle(isOn: $preferences.debugUnlockAllAchievements) {
+                            Label {
+                                Text("Unlock All Achievements")
+                            } icon: {
+                                Image(systemName: "trophy.fill")
+                                    .foregroundStyle(.orange)
+                            }
+                        }
                     }
                 }
 
@@ -1062,10 +1093,26 @@ struct CustomizationView: View {
 
             // MARK: - Sounds & Haptics
             Section {
-                Toggle("Haptic Feedback", isOn: $preferences.hapticFeedbackEnabled)
-                Toggle("Check-in Sound", isOn: $preferences.checkInSoundEnabled)
+                Toggle(isOn: $preferences.hapticFeedbackEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Haptic Feedback")
+                        Text("For check-ins and actions")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Toggle(isOn: $preferences.checkInSoundEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Check-in Sound")
+                        Text("Play sound on successful check-in")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } header: {
                 Text("Sounds & Haptics")
+            } footer: {
+                Text("System haptics on sliders and controls are managed in iOS Settings.")
             }
 
             // MARK: - Map

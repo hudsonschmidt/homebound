@@ -394,8 +394,10 @@ class QRCodeScannerViewController: UIViewController, AVCaptureMetadataOutputObje
            let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject,
            let stringValue = readableObject.stringValue {
 
-            // Haptic feedback
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            // Haptic feedback (respects user preference)
+            if AppPreferences.shared.hapticFeedbackEnabled {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
 
             delegate?.didScanCode(stringValue)
         }

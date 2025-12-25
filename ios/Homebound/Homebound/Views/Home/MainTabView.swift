@@ -96,6 +96,7 @@ struct NewHomeView: View {
     @EnvironmentObject var preferences: AppPreferences
     @State private var showingCreatePlan = false
     @State private var showingSettings = false
+    @State private var showingAchievements = false
     @State private var greeting = "Good morning"
     @State private var timeline: [TimelineEvent] = []
     @State private var refreshID = UUID()
@@ -135,22 +136,36 @@ struct NewHomeView: View {
 
                             Spacer()
 
-                            // Settings button
-                            Button(action: { showingSettings = true }) {
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [Color.hbBrand, Color.hbTeal],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
+                            HStack(spacing: 12) {
+                                // Achievements button
+                                Button(action: { showingAchievements = true }) {
+                                    Circle()
+                                        .fill(Color.orange.opacity(0.15))
+                                        .frame(width: 44, height: 44)
+                                        .overlay(
+                                            Image(systemName: "trophy.fill")
+                                                .foregroundStyle(.orange)
+                                                .font(.system(size: 20))
                                         )
-                                    )
-                                    .frame(width: 44, height: 44)
-                                    .overlay(
-                                        Image(systemName: "gearshape.fill")
-                                            .foregroundStyle(.white)
-                                            .font(.system(size: 20))
-                                    )
+                                }
+
+                                // Settings button
+                                Button(action: { showingSettings = true }) {
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [Color.hbBrand, Color.hbTeal],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 44, height: 44)
+                                        .overlay(
+                                            Image(systemName: "gearshape.fill")
+                                                .foregroundStyle(.white)
+                                                .font(.system(size: 20))
+                                        )
+                                }
                             }
                         }
                         .padding(.horizontal)
@@ -192,6 +207,11 @@ struct NewHomeView: View {
                 SettingsView()
                     .environmentObject(session)
                     .environmentObject(AppPreferences.shared)
+                    .preferredColorScheme(preferences.colorScheme.colorScheme)
+            }
+            .sheet(isPresented: $showingAchievements) {
+                AchievementsView()
+                    .environmentObject(session)
             }
             .task {
                 updateGreeting()

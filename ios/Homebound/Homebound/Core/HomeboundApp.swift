@@ -100,7 +100,6 @@ struct HomeboundApp: App {
             .animation(.easeInOut(duration: 0.3), value: session.isInitialDataLoaded)
             .animation(.easeInOut(duration: 0.3), value: session.profileCompleted)
             .preferredColorScheme(preferences.colorScheme.colorScheme)
-            .id(preferences.colorScheme)
         }
     }
 

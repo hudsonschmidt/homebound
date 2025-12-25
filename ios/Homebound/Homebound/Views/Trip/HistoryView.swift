@@ -468,14 +468,14 @@ struct TripStatsView: View {
     let plans: [Trip]
     @State private var preferences = StatsPreferences.load()
     @State private var showingEditStats = false
-    @State private var animatedValues: [StatType: Double] = [:]
 
     var calculator: TripStatsCalculator {
         TripStatsCalculator(trips: plans)
     }
 
     var favoriteActivity: (icon: String, name: String, count: Int)? {
-        let activityCounts = Dictionary(grouping: plans) { plan in
+        let completedPlans = plans.filter { $0.status == "completed" }
+        let activityCounts = Dictionary(grouping: completedPlans) { plan in
             plan.activity.id
         }
 
@@ -521,7 +521,6 @@ struct TripStatsView: View {
                             AnimatedStatCard(
                                 statType: statType,
                                 value: calculator.value(for: statType),
-                                badge: calculator.achievementBadge(for: statType),
                                 delay: Double(index) * 0.1
                             )
                             .frame(width: 140)
@@ -534,7 +533,6 @@ struct TripStatsView: View {
                         AnimatedStatCard(
                             statType: statType,
                             value: calculator.value(for: statType),
-                            badge: calculator.achievementBadge(for: statType),
                             delay: Double(index) * 0.1
                         )
                     }
@@ -588,7 +586,6 @@ struct TripStatsView: View {
 struct AnimatedStatCard: View {
     let statType: StatType
     let value: String
-    let badge: String?
     let delay: Double
 
     @State private var appeared = false
@@ -596,7 +593,6 @@ struct AnimatedStatCard: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // Icon
             Image(systemName: statType.icon)
                 .font(.title2)
                 .foregroundStyle(statType.color)
@@ -627,10 +623,85 @@ struct AnimatedStatCard: View {
         .cornerRadius(12)
         .scaleEffect(scale)
         .onAppear {
+            // Only animate if not already appeared (prevents flickering on scroll)
+            guard !appeared else { return }
             withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(delay)) {
                 appeared = true
                 scale = 1.0
             }
+        }
+    }
+}
+
+// MARK: - Achievement Cell
+struct AchievementCell: View {
+    let achievement: AchievementDefinition
+    let isEarned: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: isEarned ? achievement.sfSymbol : "lock.fill")
+                .font(.title2)
+                .foregroundStyle(isEarned ? achievement.category.color : .gray)
+
+            Text(achievement.title)
+                .font(.caption2)
+                .foregroundStyle(isEarned ? .primary : .secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isEarned ? achievement.category.color.opacity(0.1) : Color.gray.opacity(0.1))
+        )
+        .opacity(isEarned ? 1 : 0.5)
+    }
+}
+
+// MARK: - Achievements Grid View
+struct AchievementsGridView: View {
+    let calculator: TripStatsCalculator
+    @Binding var showingSheet: Bool
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Achievements")
+                    .font(.headline)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.orange, Color.yellow],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+
+                Spacer()
+
+                Text("\(calculator.earnedAchievementsCount)/\(AchievementDefinition.all.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(AchievementDefinition.all) { achievement in
+                    AchievementCell(
+                        achievement: achievement,
+                        isEarned: calculator.hasEarned(achievement)
+                    )
+                }
+            }
+        }
+        .padding()
+        .background(Color(.tertiarySystemBackground))
+        .cornerRadius(12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            showingSheet = true
         }
     }
 }
