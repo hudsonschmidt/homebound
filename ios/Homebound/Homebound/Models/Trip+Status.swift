@@ -15,7 +15,8 @@ enum TripStatus: String, CaseIterable {
     case overdue = "overdue"
     case overdueNotified = "overdue_notified"
     case completed = "completed"
-    case scheduled = "scheduled"
+    case planned = "planned"
+    case scheduled = "scheduled"  // Kept for backwards compatibility
     case cancelled = "cancelled"
 
     /// Whether this status represents an "in progress" trip
@@ -23,7 +24,7 @@ enum TripStatus: String, CaseIterable {
         switch self {
         case .active, .overdue, .overdueNotified:
             return true
-        case .completed, .scheduled, .cancelled:
+        case .completed, .planned, .scheduled, .cancelled:
             return false
         }
     }
@@ -44,6 +45,8 @@ enum TripStatus: String, CaseIterable {
             return "OVERDUE"
         case .completed:
             return "COMPLETED"
+        case .planned:
+            return "PLANNED"
         case .scheduled:
             return "SCHEDULED"
         case .cancelled:

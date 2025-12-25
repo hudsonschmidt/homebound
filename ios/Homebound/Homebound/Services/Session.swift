@@ -1093,15 +1093,22 @@ final class Session: ObservableObject {
                 )
             }
 
-            // Only set as active plan if the status is actually 'active'
-            // Planned trips should not appear as active
+            // Add to allTrips immediately for instant UI update
             await MainActor.run {
+                self.allTrips.append(response)
+                // Sort by start_at to maintain consistent order
+                self.allTrips.sort { $0.start_at < $1.start_at }
+
+                // Only set as active plan if the status is actually 'active'
                 if response.status == "active" {
                     self.activeTrip = response
                     // Update widget data with new active trip
                     self.updateWidgetData()
                 }
             }
+
+            // Cache updated trips for offline access
+            LocalStorage.shared.cacheTrips(self.allTrips)
 
             // Start Live Activity immediately for active trips
             if response.status == "active" {
@@ -1128,6 +1135,19 @@ final class Session: ObservableObject {
             }
 
             debugLog("[Session] Trip \(tripId) updated successfully")
+
+            // Update in allTrips immediately for instant UI update
+            await MainActor.run {
+                if let index = self.allTrips.firstIndex(where: { $0.id == tripId }) {
+                    self.allTrips[index] = response
+                    // Re-sort in case start_at changed
+                    self.allTrips.sort { $0.start_at < $1.start_at }
+                }
+            }
+
+            // Cache updated trips for offline access
+            LocalStorage.shared.cacheTrips(self.allTrips)
+
             return response
         } catch {
             // Queue for later sync when offline
