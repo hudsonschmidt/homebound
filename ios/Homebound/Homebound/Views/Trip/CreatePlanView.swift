@@ -928,11 +928,21 @@ struct Step2TimeSettings: View {
     }
 
     private var returnTimeString: String {
-        "\(returnHour):\(String(format: "%02d", returnMinute)) \(returnAMPM == 0 ? "AM" : "PM")"
+        let timeStr = "\(returnHour):\(String(format: "%02d", returnMinute)) \(returnAMPM == 0 ? "AM" : "PM")"
+        // Show timezone abbreviation if a custom timezone is selected
+        if showTimezoneOptions, let abbr = etaTimezone.abbreviation() {
+            return "\(timeStr) \(abbr)"
+        }
+        return timeStr
     }
 
     private var departureTimeString: String {
-        "\(departureHour):\(String(format: "%02d", departureMinute)) \(departureAMPM == 0 ? "AM" : "PM")"
+        let timeStr = "\(departureHour):\(String(format: "%02d", departureMinute)) \(departureAMPM == 0 ? "AM" : "PM")"
+        // Show timezone abbreviation if a custom timezone is selected
+        if showTimezoneOptions, let abbr = startTimezone.abbreviation() {
+            return "\(timeStr) \(abbr)"
+        }
+        return timeStr
     }
 
     // MARK: - Header Section
@@ -1563,9 +1573,17 @@ struct Step2TimeSettings: View {
             selectedStartDate = startTime
             selectedEndDate = etaTime
 
-            let calendar = Calendar.current
-            let startHour24 = calendar.component(.hour, from: startTime)
-            let endHour24 = calendar.component(.hour, from: etaTime)
+            // Use the stored timezones to extract time components correctly
+            // This ensures that when editing a trip, the displayed time matches
+            // what the user originally entered in their selected timezone
+            var startCalendar = Calendar(identifier: .gregorian)
+            startCalendar.timeZone = startTimezone
+
+            var etaCalendar = Calendar(identifier: .gregorian)
+            etaCalendar.timeZone = etaTimezone
+
+            let startHour24 = startCalendar.component(.hour, from: startTime)
+            let endHour24 = etaCalendar.component(.hour, from: etaTime)
 
             // Convert 24-hour to 12-hour format for departure
             if startHour24 == 0 {
@@ -1597,8 +1615,8 @@ struct Step2TimeSettings: View {
                 returnAMPM = 1
             }
 
-            departureMinute = calendar.component(.minute, from: startTime)
-            returnMinute = calendar.component(.minute, from: etaTime)
+            departureMinute = startCalendar.component(.minute, from: startTime)
+            returnMinute = etaCalendar.component(.minute, from: etaTime)
         }
         .onChange(of: isStartingNow) { _, _ in updateDates() }
         .onChange(of: departureHour) { _, _ in updateDates() }
@@ -1609,6 +1627,8 @@ struct Step2TimeSettings: View {
         .onChange(of: returnAMPM) { _, _ in updateDates() }
         .onChange(of: selectedStartDate) { _, _ in updateDates() }
         .onChange(of: selectedEndDate) { _, _ in updateDates() }
+        .onChange(of: startTimezone) { _, _ in updateDates() }
+        .onChange(of: etaTimezone) { _, _ in updateDates() }
         .onChange(of: showingTimeSelection) { _, newValue in
             if newValue {
                 // When transitioning to time selection, ensure dates are properly set
@@ -1624,10 +1644,14 @@ struct Step2TimeSettings: View {
     }
 
     private func updateDates() {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let selectedDay = calendar.startOfDay(for: selectedStartDate)
+        let deviceCalendar = Calendar.current
+        let today = deviceCalendar.startOfDay(for: Date())
+        let selectedDay = deviceCalendar.startOfDay(for: selectedStartDate)
         let isSelectedDateToday = today == selectedDay
+
+        // Create calendar with the selected start timezone
+        var startCalendar = Calendar(identifier: .gregorian)
+        startCalendar.timeZone = startTimezone
 
         // Update start time
         // Only use "Starting Now" if the selected date is today
@@ -1652,13 +1676,24 @@ struct Step2TimeSettings: View {
                 departureHour24 = departureHour + 12
             }
 
-            var startComponents = calendar.dateComponents([.year, .month, .day], from: selectedStartDate)
+            // Extract date components using device calendar (since that's how user selected the date)
+            // but create the Date using the selected timezone for the time interpretation
+            let dateComponents = deviceCalendar.dateComponents([.year, .month, .day], from: selectedStartDate)
+            var startComponents = DateComponents()
+            startComponents.year = dateComponents.year
+            startComponents.month = dateComponents.month
+            startComponents.day = dateComponents.day
             startComponents.hour = departureHour24
             startComponents.minute = departureMinute
-            if let newStart = calendar.date(from: startComponents) {
+            // Create the date in the selected timezone
+            if let newStart = startCalendar.date(from: startComponents) {
                 startTime = newStart
             }
         }
+
+        // Create calendar with the selected ETA timezone
+        var etaCalendar = Calendar(identifier: .gregorian)
+        etaCalendar.timeZone = etaTimezone
 
         // Convert 12-hour to 24-hour for return
         var returnHour24: Int
@@ -1676,11 +1711,16 @@ struct Step2TimeSettings: View {
             returnHour24 = returnHour + 12
         }
 
-        // Update end time
-        var endComponents = calendar.dateComponents([.year, .month, .day], from: selectedEndDate)
+        // Extract date components using device calendar, create Date using selected timezone
+        let endDateComponents = deviceCalendar.dateComponents([.year, .month, .day], from: selectedEndDate)
+        var endComponents = DateComponents()
+        endComponents.year = endDateComponents.year
+        endComponents.month = endDateComponents.month
+        endComponents.day = endDateComponents.day
         endComponents.hour = returnHour24
         endComponents.minute = returnMinute
-        if let newEnd = calendar.date(from: endComponents) {
+        // Create the date in the selected ETA timezone
+        if let newEnd = etaCalendar.date(from: endComponents) {
             etaTime = newEnd
         }
     }

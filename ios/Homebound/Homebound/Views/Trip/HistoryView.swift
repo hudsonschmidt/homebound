@@ -292,12 +292,9 @@ struct TripHistoryCard: View {
         }
     }
 
-    // Helper to format date and time nicely
-    func formatDateTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+    // Helper to format date and time nicely (using the trip's stored timezone if provided)
+    func formatDateTime(_ date: Date, timezone: String? = nil) -> String {
+        return DateUtils.formatDateTime(date, inTimezone: timezone)
     }
 
     var body: some View {
@@ -341,12 +338,12 @@ struct TripHistoryCard: View {
 
             // Trip Details
             VStack(alignment: .leading, spacing: 8) {
-                // Start Time
+                // Start Time (displayed in the trip's start timezone)
                 InfoRow(
                     icon: "arrow.right.circle.fill",
                     iconColor: .green,
                     label: "Started",
-                    value: formatDateTime(plan.start_at)
+                    value: formatDateTime(plan.start_at, timezone: plan.start_timezone)
                 )
 
                 // Finish Time
@@ -367,11 +364,12 @@ struct TripHistoryCard: View {
                         )
                     }
                 } else {
+                    // ETA (displayed in the trip's ETA timezone)
                     InfoRow(
                         icon: "clock.fill",
                         iconColor: .orange,
                         label: "Expected",
-                        value: formatDateTime(plan.eta_at)
+                        value: formatDateTime(plan.eta_at, timezone: plan.eta_timezone)
                     )
                 }
 

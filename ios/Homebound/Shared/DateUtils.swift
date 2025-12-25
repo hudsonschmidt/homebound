@@ -253,4 +253,76 @@ enum DateUtils {
         }
         return nil
     }
+
+    // MARK: - Timezone-Aware Display Methods
+
+    /// Format time only in a specific timezone (e.g., "2:30 PM")
+    /// If no timezone is provided, uses device's current timezone
+    /// - Parameters:
+    ///   - date: The date to format
+    ///   - timezoneIdentifier: The timezone identifier (e.g., "America/Los_Angeles")
+    /// - Returns: Formatted time string
+    static func formatTime(_ date: Date, inTimezone timezoneIdentifier: String?) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        if let tzId = timezoneIdentifier, let tz = TimeZone(identifier: tzId) {
+            formatter.timeZone = tz
+        }
+        return formatter.string(from: date)
+    }
+
+    /// Format date and time in a specific timezone (e.g., "Jan 15 at 2:30 PM")
+    /// If no timezone is provided, uses device's current timezone
+    /// - Parameters:
+    ///   - date: The date to format
+    ///   - timezoneIdentifier: The timezone identifier (e.g., "America/Los_Angeles")
+    /// - Returns: Formatted date and time string
+    static func formatDateTime(_ date: Date, inTimezone timezoneIdentifier: String?) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        if let tzId = timezoneIdentifier, let tz = TimeZone(identifier: tzId) {
+            formatter.timeZone = tz
+        }
+        return formatter.string(from: date)
+    }
+
+    /// Format time with timezone abbreviation (e.g., "2:30 PM PT")
+    /// If no timezone is provided, uses device's current timezone
+    /// - Parameters:
+    ///   - date: The date to format
+    ///   - timezoneIdentifier: The timezone identifier (e.g., "America/Los_Angeles")
+    ///   - showTimezone: Whether to append the timezone abbreviation
+    /// - Returns: Formatted time string with optional timezone abbreviation
+    static func formatTimeWithTimezone(_ date: Date, inTimezone timezoneIdentifier: String?, showTimezone: Bool = true) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+
+        var tz: TimeZone = .current
+        if let tzId = timezoneIdentifier, let customTz = TimeZone(identifier: tzId) {
+            tz = customTz
+            formatter.timeZone = customTz
+        }
+
+        let timeString = formatter.string(from: date)
+
+        // Only show timezone abbreviation if it's different from device timezone or explicitly requested
+        if showTimezone && timezoneIdentifier != nil && tz != .current {
+            let abbreviation = tz.abbreviation(for: date) ?? ""
+            return "\(timeString) \(abbreviation)"
+        }
+        return timeString
+    }
+
+    /// Get the timezone abbreviation for a given identifier (e.g., "PT" for "America/Los_Angeles")
+    /// - Parameter timezoneIdentifier: The timezone identifier
+    /// - Returns: The timezone abbreviation, or nil if invalid
+    static func timezoneAbbreviation(_ timezoneIdentifier: String?) -> String? {
+        guard let tzId = timezoneIdentifier, let tz = TimeZone(identifier: tzId) else {
+            return nil
+        }
+        return tz.abbreviation(for: Date())
+    }
 }

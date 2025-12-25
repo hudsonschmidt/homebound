@@ -526,7 +526,7 @@ struct TripDetailCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "calendar")
                         .font(.caption)
-                    Text(trip.start_at.formatted(date: .abbreviated, time: .shortened))
+                    Text(DateUtils.formatDateTime(trip.start_at, inTimezone: trip.start_timezone))
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)

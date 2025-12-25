@@ -1155,11 +1155,11 @@ struct UpcomingTripCard: View {
                     .foregroundStyle(.secondary)
                 }
 
-                // Show actual start date/time
+                // Show actual start date/time (in the trip's stored timezone)
                 HStack(spacing: 4) {
                     Image(systemName: "calendar")
                         .font(.caption2)
-                    Text(plan.start_at.formatted(date: .abbreviated, time: .shortened))
+                    Text(DateUtils.formatDateTime(plan.start_at, inTimezone: plan.start_timezone))
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)

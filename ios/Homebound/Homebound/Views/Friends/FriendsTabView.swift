@@ -398,12 +398,12 @@ struct FriendTripCardView: View {
                 .foregroundStyle(.secondary)
             }
 
-            // ETA
+            // ETA (displayed in the trip's original timezone)
             if let etaDate = trip.etaDate {
                 HStack(spacing: 4) {
                     Image(systemName: "clock")
                         .font(.caption2)
-                    Text("Expected by \(etaDate.formatted(date: .omitted, time: .shortened))")
+                    Text("Expected by \(DateUtils.formatTime(etaDate, inTimezone: trip.timezone))")
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
@@ -483,9 +483,9 @@ struct FriendPlannedTripCompact: View {
                     .foregroundStyle(.secondary)
             }
 
-            // ETA
+            // ETA (displayed in the trip's original timezone)
             if let etaDate = trip.etaDate {
-                Text(etaDate.formatted(date: .omitted, time: .shortened))
+                Text(DateUtils.formatTime(etaDate, inTimezone: trip.timezone))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -582,16 +582,16 @@ struct FriendActiveTripCardExpanded: View {
                 .foregroundStyle(.secondary)
             }
 
-            // ETA info
+            // ETA info (displayed in the trip's original timezone)
             if let etaDate = trip.etaDate {
                 HStack(spacing: 4) {
                     Image(systemName: "clock")
                         .font(.caption2)
 
                     if timeState == .onTime {
-                        Text("Expected by \(etaDate.formatted(date: .omitted, time: .shortened))")
+                        Text("Expected by \(DateUtils.formatTime(etaDate, inTimezone: trip.timezone))")
                     } else {
-                        Text("Was expected by \(etaDate.formatted(date: .omitted, time: .shortened))")
+                        Text("Was expected by \(DateUtils.formatTime(etaDate, inTimezone: trip.timezone))")
                     }
                 }
                 .font(.caption)
