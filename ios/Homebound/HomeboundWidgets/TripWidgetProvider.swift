@@ -102,9 +102,13 @@ struct TripWidgetProvider: TimelineProvider {
             entries.append(TripWidgetEntry(date: now, tripData: nil))
         }
 
-        // Remove duplicate dates and sort
-        var seenDates = Set<Date>()
-        entries = entries.filter { seenDates.insert($0.date).inserted }
+        // Remove duplicate dates (rounded to second precision) and sort
+        // Using TimeInterval instead of Date to avoid false duplicates from microsecond differences
+        var seenDates = Set<TimeInterval>()
+        entries = entries.filter { entry in
+            let roundedTime = entry.date.timeIntervalSince1970.rounded()
+            return seenDates.insert(roundedTime).inserted
+        }
         entries.sort { $0.date < $1.date }
 
         // Refresh policy: after timeline ends or in 15 minutes max
@@ -133,57 +137,14 @@ struct TripWidgetProvider: TimelineProvider {
             return (true, hideAt)
         }
 
+        // Clean up expired confirmation key to prevent stale data
+        defaults.removeObject(forKey: LiveActivityConstants.checkinConfirmationKey)
         return nil
     }
 
     private func loadTripData() -> WidgetTripData? {
-        guard let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier),
-              let jsonData = defaults.data(forKey: LiveActivityConstants.widgetTripDataKey) else {
-            return nil
-        }
-
-        guard let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
-            return nil
-        }
-
-        // Parse the dictionary into WidgetTripData
-        guard let id = dict["id"] as? Int,
-              let title = dict["title"] as? String,
-              let status = dict["status"] as? String,
-              let activityName = dict["activityName"] as? String,
-              let activityIcon = dict["activityIcon"] as? String,
-              let primaryColor = dict["primaryColor"] as? String,
-              let secondaryColor = dict["secondaryColor"] as? String,
-              let startAtInterval = dict["startAt"] as? TimeInterval,
-              let etaAtInterval = dict["etaAt"] as? TimeInterval,
-              let graceMinutes = dict["graceMinutes"] as? Int,
-              let checkinCount = dict["checkinCount"] as? Int else {
-            return nil
-        }
-
-        let locationText = dict["locationText"] as? String
-        let checkinToken = dict["checkinToken"] as? String
-        let checkoutToken = dict["checkoutToken"] as? String
-        let lastCheckinTimeInterval = dict["lastCheckinTime"] as? TimeInterval
-        let lastCheckinTime = lastCheckinTimeInterval.map { Date(timeIntervalSince1970: $0) }
-
-        return WidgetTripData(
-            id: id,
-            title: title,
-            status: status,
-            activityName: activityName,
-            activityIcon: activityIcon,
-            primaryColor: primaryColor,
-            secondaryColor: secondaryColor,
-            startAt: Date(timeIntervalSince1970: startAtInterval),
-            etaAt: Date(timeIntervalSince1970: etaAtInterval),
-            graceMinutes: graceMinutes,
-            locationText: locationText,
-            checkinToken: checkinToken,
-            checkoutToken: checkoutToken,
-            lastCheckinTime: lastCheckinTime,
-            checkinCount: checkinCount
-        )
+        // Use the proper Codable accessor that handles ISO8601 date decoding correctly
+        return LiveActivityConstants.widgetTripData
     }
 }
 

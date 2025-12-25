@@ -376,11 +376,14 @@ struct FriendTripCardView: View {
                     Circle()
                         .fill(statusColor)
                         .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
                     Text(statusText)
                         .font(.caption2)
                         .fontWeight(.bold)
                         .foregroundStyle(statusColor)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Friend's trip status: \(statusText)")
             }
 
             // Location
@@ -504,8 +507,6 @@ struct FriendActiveTripCardExpanded: View {
     @State private var timeRemaining = ""
     @State private var timeState: FriendTripTimeState = .onTime
 
-    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
     private var statusColor: Color {
         switch timeState {
         case .onTime: return .green
@@ -549,12 +550,15 @@ struct FriendActiveTripCardExpanded: View {
                             .fill(statusColor)
                             .frame(width: 8, height: 8)
                             .modifier(PulseModifier(isActive: timeState != .onTime))
+                            .accessibilityHidden(true)
 
                         Text(statusText)
                             .font(.caption2)
                             .fontWeight(.bold)
                             .foregroundStyle(statusColor)
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Trip status: \(statusText)")
 
                     // Countdown
                     Text(timeRemaining)
@@ -562,6 +566,7 @@ struct FriendActiveTripCardExpanded: View {
                         .fontWeight(.bold)
                         .foregroundStyle(statusColor)
                         .monospacedDigit()
+                        .accessibilityLabel("Time remaining: \(timeRemaining)")
                 }
             }
 
@@ -624,11 +629,14 @@ struct FriendActiveTripCardExpanded: View {
                         .strokeBorder(statusColor.opacity(0.3), lineWidth: 1)
                 )
         )
-        .onReceive(timer) { _ in
+        .task {
+            // Initial update
             updateTimeRemaining()
-        }
-        .onAppear {
-            updateTimeRemaining()
+            // Timer loop - auto-cancelled when view disappears
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                updateTimeRemaining()
+            }
         }
     }
 

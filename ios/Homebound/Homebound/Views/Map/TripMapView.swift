@@ -16,8 +16,8 @@ struct TripMapView: View {
     @State private var trips: [Trip] = []
     @State private var isLoading = false
     @State private var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
-        span: MKCoordinateSpan(latitudeDelta: 50, longitudeDelta: 50)
+        center: Constants.Map.defaultCenter,
+        span: MKCoordinateSpan(latitudeDelta: Constants.Map.defaultSpanDelta, longitudeDelta: Constants.Map.defaultSpanDelta)
     )
     @State private var mapPosition: MapCameraPosition = .automatic
     @State private var selectedActivity: String? = nil
@@ -236,6 +236,10 @@ struct TripMapView: View {
                 locationManager.startUpdatingLocation()
 
                 hasLoadedInitialView = true
+            }
+            .onDisappear {
+                // Stop location updates when view disappears to conserve battery
+                locationManager.stopUpdatingLocation()
             }
             .onChange(of: locationManager.currentLocation) { oldValue, newValue in
                 // Only zoom on first location fix after permission granted

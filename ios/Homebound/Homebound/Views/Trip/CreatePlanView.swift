@@ -28,7 +28,7 @@ struct CreatePlanView: View {
     @State private var startLocationCoordinates: CLLocationCoordinate2D?
     @State private var showingStartLocationSearch = false
     @State private var startTime = Date()
-    @State private var etaTime = Date().addingTimeInterval(7200) // 2 hours from now
+    @State private var etaTime = Date().addingTimeInterval(Constants.Time.defaultETAOffset)
     @State private var isManualETA = false
     @State private var graceMinutes: Double = Double(AppPreferences.shared.defaultGraceMinutes)
     @State private var showZeroGraceWarning = false

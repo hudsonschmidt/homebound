@@ -32,27 +32,51 @@ struct CheckInIntent: LiveActivityIntent {
     }
 
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier)
+        // Validate token before making API call
+        guard !checkinToken.isEmpty else {
+            // Invalid token - silently fail without crashing
+            return .result()
+        }
+
+        guard let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier) else {
+            // App group not available - log and fail gracefully
+            debugLog("[CheckInIntent] ❌ Failed to access app group UserDefaults")
+            return .result()
+        }
 
         // Set pending flag BEFORE API call so main app knows to refresh even if widget is killed
-        defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckinKey)
+        defaults.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.pendingCheckinKey)
 
         // Post Darwin notification early as backup signaling
         postDarwinNotification()
 
-        do {
-            // Perform API call
-            _ = try await LiveActivityAPI.shared.checkIn(token: checkinToken)
+        // Retry logic with single retry attempt
+        var lastError: Error?
+        for attempt in 1...2 {
+            do {
+                // Perform API call
+                _ = try await LiveActivityAPI.shared.checkIn(token: checkinToken)
 
-            // API succeeded - set confirmation timestamp for visual feedback
-            defaults?.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.checkinConfirmationKey)
+                // API succeeded - set confirmation timestamp for visual feedback
+                defaults.set(Date().timeIntervalSince1970, forKey: LiveActivityConstants.checkinConfirmationKey)
 
-            // Refresh widgets to show updated state
-            WidgetCenter.shared.reloadAllTimelines()
+                // Refresh widgets to show updated state
+                WidgetCenter.shared.reloadAllTimelines()
 
-        } catch {
-            // API failed - clear pending flag so main app doesn't show false success
-            defaults?.removeObject(forKey: LiveActivityConstants.pendingCheckinKey)
+                return .result()  // Success - exit early
+
+            } catch {
+                lastError = error
+                if attempt < 2 {
+                    // Wait 1 second before retry
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+            }
+        }
+
+        // All attempts failed - clear pending flag so main app doesn't show false success
+        defaults.removeObject(forKey: LiveActivityConstants.pendingCheckinKey)
+        if let error = lastError {
             throw error
         }
 

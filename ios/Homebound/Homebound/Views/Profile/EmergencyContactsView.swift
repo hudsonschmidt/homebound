@@ -11,6 +11,7 @@ struct EmergencyContactsView: View {
     @State private var errorMessage = ""
     @State private var hasLoadedInitially = false
     @State private var contactToEdit: Contact?
+    @State private var deletingContactIds: Set<Int> = []
 
     var body: some View {
         ZStack {
@@ -104,6 +105,13 @@ struct EmergencyContactsView: View {
                 }
             )
         }
+        .onChange(of: showingAddContact) { _, isShowing in
+            // Reset form state when sheet is dismissed
+            if !isShowing {
+                newContactName = ""
+                newContactEmail = ""
+            }
+        }
         .sheet(item: $contactToEdit) { contact in
             EditEmergencyContactSheet(
                 contact: contact,
@@ -155,11 +163,31 @@ struct EmergencyContactsView: View {
     }
 
     private func updateContact(contact: Contact, name: String, email: String) async {
-        let success = await session.updateContact(contactId: contact.id, name: name, email: email)
+        // Validate inputs
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedName.isEmpty else {
+            await MainActor.run {
+                errorMessage = "Contact name cannot be empty."
+                showError = true
+            }
+            return
+        }
+
+        guard !trimmedEmail.isEmpty else {
+            await MainActor.run {
+                errorMessage = "Contact email cannot be empty."
+                showError = true
+            }
+            return
+        }
+
+        let success = await session.updateContact(contactId: contact.id, name: trimmedName, email: trimmedEmail)
         if success {
             await MainActor.run {
                 if let index = savedContacts.firstIndex(where: { $0.id == contact.id }) {
-                    savedContacts[index] = Contact(id: contact.id, user_id: contact.user_id, name: name, email: email)
+                    savedContacts[index] = Contact(id: contact.id, user_id: contact.user_id, name: trimmedName, email: trimmedEmail)
                 }
                 contactToEdit = nil
             }
@@ -174,14 +202,25 @@ struct EmergencyContactsView: View {
     private func deleteContacts(at offsets: IndexSet) {
         for index in offsets {
             let contact = savedContacts[index]
+
+            // Prevent double-delete: skip if already being deleted
+            guard !deletingContactIds.contains(contact.id) else {
+                debugLog("[EmergencyContactsView] Skipping duplicate delete for contact #\(contact.id)")
+                continue
+            }
+
+            // Mark as being deleted
+            deletingContactIds.insert(contact.id)
+
             Task {
                 let success = await session.deleteContact(contact.id)
-                if success {
-                    await MainActor.run {
+                await MainActor.run {
+                    // Remove from tracking set
+                    deletingContactIds.remove(contact.id)
+
+                    if success {
                         savedContacts.removeAll { $0.id == contact.id }
-                    }
-                } else {
-                    await MainActor.run {
+                    } else {
                         errorMessage = session.lastError.isEmpty ? "Failed to delete contact." : session.lastError
                         showError = true
                     }
@@ -355,6 +394,20 @@ struct EditEmergencyContactSheet: View {
             }
         }
     }
+}
+
+// MARK: - Email Validation Helper
+
+/// Validates email format using a regex pattern
+/// Checks for: non-empty local part, @ symbol, domain with at least one dot
+private func isValidEmail(_ email: String) -> Bool {
+    let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+
+    // Basic email regex: local@domain.tld
+    // Requires: at least one char before @, @ symbol, domain with dot
+    let emailRegex = #"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"#
+    return trimmed.range(of: emailRegex, options: .regularExpression) != nil
 }
 
 #Preview {

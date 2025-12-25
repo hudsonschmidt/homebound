@@ -33,6 +33,7 @@ class ProfileResponse(BaseModel):
     profile_completed: bool
     notify_trip_reminders: bool
     notify_checkin_alerts: bool
+    created_at: str | None = None
 
 
 class ProfileUpdateResponse(BaseModel):
@@ -47,7 +48,7 @@ def get_profile(user_id: int = Depends(auth.get_current_user_id)):
         user = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, email, first_name, last_name, age, notify_trip_reminders, notify_checkin_alerts
+                SELECT id, email, first_name, last_name, age, notify_trip_reminders, notify_checkin_alerts, created_at
                 FROM users
                 WHERE id = :user_id
                 """
@@ -77,7 +78,8 @@ def get_profile(user_id: int = Depends(auth.get_current_user_id)):
             age=user.age,
             profile_completed=profile_completed,
             notify_trip_reminders=user.notify_trip_reminders,
-            notify_checkin_alerts=user.notify_checkin_alerts
+            notify_checkin_alerts=user.notify_checkin_alerts,
+            created_at=user.created_at.isoformat() if user.created_at else None
         )
 
 

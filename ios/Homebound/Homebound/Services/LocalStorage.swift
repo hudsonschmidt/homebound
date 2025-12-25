@@ -1,6 +1,28 @@
 import Foundation
 import GRDB
 
+// MARK: - Row Extension for Type-Safe Column Access
+
+extension Row {
+    /// Get an Int from a column that may be stored as Int or Int64
+    func int(_ column: String) -> Int? {
+        if let int64 = self[column] as? Int64 {
+            return Int(int64)
+        }
+        return self[column] as? Int
+    }
+
+    /// Get a String from a column
+    func string(_ column: String) -> String? {
+        self[column] as? String
+    }
+
+    /// Get a Double from a column
+    func double(_ column: String) -> Double? {
+        self[column] as? Double
+    }
+}
+
 /// Local SQLite storage for offline trip viewing and pending sync operations
 final class LocalStorage {
     static let shared = LocalStorage()
@@ -575,25 +597,13 @@ final class LocalStorage {
                         return nil
                     }
 
-                    // Parse dates - try with and without fractional seconds
-                    let dateFormatter = ISO8601DateFormatter()
-                    var startDate = dateFormatter.date(from: startStr)
-                    if startDate == nil {
-                        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        startDate = dateFormatter.date(from: startStr)
-                    }
-                    guard let startDate = startDate else {
+                    // Parse dates using shared DateUtils formatters
+                    guard let startDate = DateUtils.parseISO8601(startStr) else {
                         debugLog("[LocalStorage] ⚠️ Failed to parse start date '\(startStr)' for trip #\(id)")
                         return nil
                     }
 
-                    dateFormatter.formatOptions = [.withInternetDateTime]
-                    var etaDate = dateFormatter.date(from: etaStr)
-                    if etaDate == nil {
-                        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        etaDate = dateFormatter.date(from: etaStr)
-                    }
-                    guard let etaDate = etaDate else {
+                    guard let etaDate = DateUtils.parseISO8601(etaStr) else {
                         debugLog("[LocalStorage] ⚠️ Failed to parse eta date '\(etaStr)' for trip #\(id)")
                         return nil
                     }
@@ -601,7 +611,7 @@ final class LocalStorage {
                     // Parse optional completed_at date
                     let completedAtDate: Date? = {
                         if let completedAtStr = row["completed_at"] as? String {
-                            return ISO8601DateFormatter().date(from: completedAtStr)
+                            return DateUtils.parseISO8601(completedAtStr)
                         }
                         return nil
                     }()
@@ -720,25 +730,13 @@ final class LocalStorage {
                     return nil
                 }
 
-                // Parse dates - try with and without fractional seconds
-                let dateFormatter = ISO8601DateFormatter()
-                var startDate = dateFormatter.date(from: startStr)
-                if startDate == nil {
-                    dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                    startDate = dateFormatter.date(from: startStr)
-                }
-                guard let startDate = startDate else {
+                // Parse dates using shared DateUtils formatters
+                guard let startDate = DateUtils.parseISO8601(startStr) else {
                     debugLog("[LocalStorage] ⚠️ Failed to parse start date for trip #\(id)")
                     return nil
                 }
 
-                dateFormatter.formatOptions = [.withInternetDateTime]
-                var etaDate = dateFormatter.date(from: etaStr)
-                if etaDate == nil {
-                    dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                    etaDate = dateFormatter.date(from: etaStr)
-                }
-                guard let etaDate = etaDate else {
+                guard let etaDate = DateUtils.parseISO8601(etaStr) else {
                     debugLog("[LocalStorage] ⚠️ Failed to parse eta date for trip #\(id)")
                     return nil
                 }
@@ -746,7 +744,7 @@ final class LocalStorage {
                 // Parse optional completed_at date
                 let completedAtDate: Date? = {
                     if let completedAtStr = row["completed_at"] as? String {
-                        return ISO8601DateFormatter().date(from: completedAtStr)
+                        return DateUtils.parseISO8601(completedAtStr)
                     }
                     return nil
                 }()
@@ -857,8 +855,13 @@ final class LocalStorage {
     }
 
     /// Update specific fields of a cached trip (for offline state updates)
-    func updateCachedTripFields(tripId: Int, updates: [String: Any]) {
-        guard let dbQueue = dbQueue else { return }
+    /// Returns true if the update was successful
+    @discardableResult
+    func updateCachedTripFields(tripId: Int, updates: [String: Any]) -> Bool {
+        guard let dbQueue = dbQueue else {
+            debugLog("[LocalStorage] ⚠️ Database not available for cache update")
+            return false
+        }
 
         // Map Swift field names to SQLite column names
         let columnMapping: [String: String] = [
@@ -918,8 +921,10 @@ final class LocalStorage {
                 try db.execute(sql: sql, arguments: StatementArguments(arguments))
                 debugLog("[LocalStorage] ✅ Updated trip #\(tripId): \(updates.keys.joined(separator: ", "))")
             }
+            return true
         } catch {
-            debugLog("[LocalStorage] Failed to update cached trip fields: \(error)")
+            debugLog("[LocalStorage] ❌ Failed to update cached trip fields: \(error)")
+            return false
         }
     }
 

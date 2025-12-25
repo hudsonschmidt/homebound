@@ -90,9 +90,26 @@ final class Session: ObservableObject {
 
     // MARK: API & Base URL
 
-    static let productionURL = URL(string: "https://api.homeboundapp.com")!
-    static let devRenderURL = URL(string: "https://homebound-21l1.onrender.com")!
-    static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
+    static let productionURL: URL = {
+        guard let url = URL(string: "https://api.homeboundapp.com") else {
+            fatalError("Invalid production URL configuration")
+        }
+        return url
+    }()
+
+    static let devRenderURL: URL = {
+        guard let url = URL(string: "https://homebound-21l1.onrender.com") else {
+            fatalError("Invalid dev Render URL configuration")
+        }
+        return url
+    }()
+
+    static let localURL: URL = {
+        guard let url = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001") else {
+            fatalError("Invalid local URL configuration")
+        }
+        return url
+    }()
 
     @Published var serverEnvironment: ServerEnvironment = {
         let savedValue = UserDefaults.standard.string(forKey: "serverEnvironment") ?? "production"
@@ -105,6 +122,8 @@ final class Session: ObservableObject {
                 signOut()
             }
             UserDefaults.standard.set(serverEnvironment.rawValue, forKey: "serverEnvironment")
+            // Sync to app group for widget/live activity access
+            LiveActivityConstants.setServerEnvironment(serverEnvironment.rawValue)
         }
     }
 
@@ -136,6 +155,12 @@ final class Session: ObservableObject {
     @Published var apnsToken: String? = nil
     private var deviceRegistrationRetryCount: Int = 0
     private let maxDeviceRegistrationRetries: Int = 3
+    private var deviceRegistrationTask: Task<Void, Never>?
+
+    /// Lock to prevent concurrent token refresh operations
+    private var isRefreshingToken: Bool = false
+    private var tokenRefreshContinuations: [CheckedContinuation<Bool, Never>] = []
+    private let tokenRefreshTimeoutSeconds: TimeInterval = 30
     @Published var accessToken: String? = nil {
         didSet {
             // Save to both keychain and local storage for redundancy
@@ -146,8 +171,9 @@ final class Session: ObservableObject {
                 LocalStorage.shared.saveAuthTokens(access: token, refresh: refreshToken)
                 debugLog("[Session] ✅ Access token saved to keychain and local storage")
 
-                // Register pending APNs token if we have one
-                if let apns = apnsToken {
+                // Register pending APNs token only on initial auth (not on token refresh)
+                // This prevents redundant device registration on every token refresh
+                if oldValue == nil, let apns = apnsToken {
                     Task { @MainActor in
                         self.handleAPNsToken(apns)
                     }
@@ -174,6 +200,7 @@ final class Session: ObservableObject {
             saveUserDataToKeychain()
         }
     }
+    @Published var memberSince: Date? = nil
     @Published var profileCompleted: Bool = false {
         didSet {
             saveUserDataToKeychain()
@@ -223,6 +250,9 @@ final class Session: ObservableObject {
         // Load saved tokens and user data on init
         loadFromKeychain()
 
+        // Sync server environment to app group for widget/live activity access
+        LiveActivityConstants.setServerEnvironment(serverEnvironment.rawValue)
+
         // Log cache statistics for debugging
         let tripCount = LocalStorage.shared.getCachedTripsCount()
         let activityCount = LocalStorage.shared.getCachedActivitiesCount()
@@ -238,8 +268,7 @@ final class Session: ObservableObject {
             let cachedTrips = LocalStorage.shared.getCachedTrips()
             self.allTrips = cachedTrips
             // Include active, overdue, and overdue_notified statuses (all "in progress" trips)
-            let activeStatuses = ["active", "overdue", "overdue_notified"]
-            self.activeTrip = cachedTrips.first { activeStatuses.contains($0.status) }
+            self.activeTrip = cachedTrips.first { Constants.TripStatus.isActive($0.status) }
             self.contacts = LocalStorage.shared.getCachedContacts()
             self.activities = LocalStorage.shared.getCachedActivities()
             debugLog("[Session] ℹ️ Loaded cached data: \(cachedTrips.count) trips, \(contacts.count) contacts, \(activities.count) activities")
@@ -321,7 +350,7 @@ final class Session: ObservableObject {
 
         // Profile is completed if we have a name stored
         // This ensures existing users don't see onboarding again
-        if userName != nil && !userName!.isEmpty {
+        if let name = userName, !name.isEmpty {
             profileCompleted = true
         } else {
             profileCompleted = keychain.getProfileCompleted()
@@ -343,6 +372,34 @@ final class Session: ObservableObject {
             age: userAge,
             profileCompleted: profileCompleted
         )
+    }
+
+    // MARK: - Trip Sync Helpers
+
+    /// Updates a trip in allTrips array to keep it in sync with activeTrip changes.
+    /// Must be called from MainActor.
+    @MainActor
+    private func syncTripInAllTrips(_ trip: Trip) {
+        if let index = allTrips.firstIndex(where: { $0.id == trip.id }) {
+            allTrips[index] = trip
+            debugLog("[Session] Synced trip #\(trip.id) in allTrips")
+        }
+    }
+
+    /// Marks a trip as completed in allTrips array.
+    /// Must be called from MainActor.
+    @MainActor
+    private func markTripCompletedInAllTrips(tripId: Int) {
+        if let index = allTrips.firstIndex(where: { $0.id == tripId }) {
+            let trip = allTrips[index]
+            allTrips[index] = trip.with(
+                status: "completed",
+                completed_at: Date(),
+                checkin_token: nil,
+                checkout_token: nil
+            )
+            debugLog("[Session] Marked trip #\(tripId) as completed in allTrips")
+        }
     }
 
     // MARK: URL helper
@@ -389,6 +446,7 @@ final class Session: ObservableObject {
     }
 
     /// Register device with backend, with exponential backoff retry
+    /// The task is stored in `deviceRegistrationTask` so it can be cancelled on signOut.
     private func registerDeviceWithRetry(token: String, bearer: String) {
         debugLog("[APNs] Registering device with backend (attempt \(deviceRegistrationRetryCount + 1)/\(maxDeviceRegistrationRetries))...")
 
@@ -399,8 +457,17 @@ final class Session: ObservableObject {
             let env: String
         }
 
-        Task {
+        // Cancel any existing registration task before starting a new one
+        deviceRegistrationTask?.cancel()
+
+        deviceRegistrationTask = Task {
             do {
+                // Check for cancellation before making API call
+                guard !Task.isCancelled else {
+                    debugLog("[APNs] Registration task cancelled")
+                    return
+                }
+
                 let bundleId = Bundle.main.bundleIdentifier ?? "com.homeboundapp.Homebound"
                 #if DEBUG
                 let environment = "development"
@@ -421,8 +488,15 @@ final class Session: ObservableObject {
                 debugLog("[APNs] ✅ Device registered successfully")
                 await MainActor.run {
                     self.deviceRegistrationRetryCount = 0
+                    self.deviceRegistrationTask = nil
                 }
             } catch {
+                // Check for cancellation before retrying
+                guard !Task.isCancelled else {
+                    debugLog("[APNs] Registration task cancelled during retry")
+                    return
+                }
+
                 debugLog("[APNs] ❌ Registration failed: \(error.localizedDescription)")
 
                 await MainActor.run {
@@ -433,8 +507,13 @@ final class Session: ObservableObject {
                         let delay = pow(2.0, Double(self.deviceRegistrationRetryCount - 1))
                         debugLog("[APNs] Retrying in \(delay) seconds...")
 
-                        Task {
+                        // Store the retry task for cancellation
+                        self.deviceRegistrationTask = Task {
                             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                            guard !Task.isCancelled else {
+                                debugLog("[APNs] Retry cancelled during sleep")
+                                return
+                            }
                             await MainActor.run {
                                 if let currentBearer = self.accessToken {
                                     self.registerDeviceWithRetry(token: token, bearer: currentBearer)
@@ -445,6 +524,7 @@ final class Session: ObservableObject {
                         // All retries exhausted
                         debugLog("[APNs] ❌ All registration attempts failed")
                         self.notice = "Could not register for push notifications. Please try again later."
+                        self.deviceRegistrationTask = nil
                     }
                 }
             }
@@ -506,7 +586,9 @@ final class Session: ObservableObject {
     }
 
     /// Unregister a live activity push token when activity ends
-    func unregisterLiveActivityToken(tripId: Int) async {
+    func unregisterLiveActivityToken(tripId: Int, caller: String = #function) async {
+        debugLog("[LiveActivity] 🗑️ Unregistering token for trip #\(tripId) (called from: \(caller))")
+
         guard let bearer = accessToken else {
             debugLog("[LiveActivity] Cannot unregister token - not authenticated")
             return
@@ -606,14 +688,13 @@ final class Session: ObservableObject {
 
 
     /// Compatibility helper for older call sites
+    @MainActor
     func verifyMagic(code: String, email: String) async {
-        await MainActor.run {
-            self.email = email
-            self.code = code
-        }
-        await MainActor.run { self.error = nil }
-        await MainActor.run { self.isVerifying = true }
-        defer { Task { await MainActor.run { self.isVerifying = false } } }
+        self.email = email
+        self.code = code
+        self.error = nil
+        self.isVerifying = true
+        defer { self.isVerifying = false }
         await verify()
     }
 
@@ -798,8 +879,60 @@ final class Session: ObservableObject {
     }
 
     /// Refresh the access token using the stored refresh token
+    /// Uses a lock to prevent concurrent refresh operations - multiple callers will wait for the same refresh
     @MainActor
     func refreshAccessToken() async -> Bool {
+        // If a refresh is already in progress, wait for it to complete with timeout
+        if isRefreshingToken {
+            debugLog("[Session] Token refresh already in progress - waiting...")
+            let waiterCount = tokenRefreshContinuations.count + 1
+            if waiterCount > 10 {
+                debugLog("[Session] Warning: \(waiterCount) callers waiting for token refresh")
+            }
+
+            // Use withTaskGroup to implement timeout
+            let result = await withTaskGroup(of: Bool?.self) { group in
+                // Task 1: Wait for the continuation
+                group.addTask { @MainActor in
+                    return await withCheckedContinuation { continuation in
+                        self.tokenRefreshContinuations.append(continuation)
+                    }
+                }
+
+                // Task 2: Timeout after tokenRefreshTimeoutSeconds
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: UInt64(self.tokenRefreshTimeoutSeconds * 1_000_000_000))
+                    return nil as Bool?
+                }
+
+                // Return the first result (either continuation resumes or timeout)
+                if let first = await group.next() {
+                    group.cancelAll()
+                    return first
+                }
+                return nil
+            }
+
+            if let result = result {
+                return result
+            } else {
+                debugLog("[Session] Token refresh wait timed out")
+                return false
+            }
+        }
+
+        // Acquire lock
+        isRefreshingToken = true
+        defer {
+            // Release lock and notify all waiting callers
+            let result = accessToken != nil
+            for continuation in tokenRefreshContinuations {
+                continuation.resume(returning: result)
+            }
+            tokenRefreshContinuations.removeAll()
+            isRefreshingToken = false
+        }
+
         var refreshToken = keychain.getRefreshToken()
 
         // If keychain doesn't have it, try LocalStorage backup
@@ -828,10 +961,14 @@ final class Session: ObservableObject {
                 bearer: nil
             )
 
-            // Update access token
-            if let t = resp.access ?? resp.access_token {
-                accessToken = t
+            // Update access token - fail if no token received
+            guard let newToken = resp.access ?? resp.access_token else {
+                debugLog("[Session] ❌ Token refresh response missing access token")
+                isAuthenticated = false
+                accessToken = nil
+                return false
             }
+            accessToken = newToken
 
             // Update refresh token if a new one was provided
             if let newRefresh = resp.refresh {
@@ -902,57 +1039,17 @@ final class Session: ObservableObject {
         }
     }
 
-    // MARK: - Dev helpers
-
-    /// Dev-only: peek the current magic code for an email
-    @MainActor
-    func devPeekCode(email: String) async -> String? {
-        struct PeekResponse: Decodable {
-            let email: String?
-            let code: String?
-            let expires_at: String?
-        }
-
-        do {
-            let response: PeekResponse = try await api.get(
-                url("/api/v1/auth/_dev/peek-code/?email=\(email)"),
-                bearer: nil
-            )
-            return response.code
-        } catch {
-            await MainActor.run { self.notice = "Peek failed: \(error.localizedDescription)" }
-            return nil
-        }
-    }
-
-    /// Ping the /health endpoint
-    @MainActor
-    func ping() async {
-        struct HealthResponse: Decodable {
-            let ok: Bool
-        }
-
-        do {
-            let response: HealthResponse = try await api.get(
-                url("/health"),
-                bearer: nil
-            )
-            await MainActor.run {
-                self.notice = response.ok ? "✅ Health check OK" : "⚠️ Health check failed"
-            }
-        } catch {
-            await MainActor.run {
-                self.notice = "❌ Health check failed: \(error.localizedDescription)"
-            }
-        }
-    }
-
     // MARK: - Token Actions
     func performTokenAction(_ token: String, action: String) async {
         struct TokenResponse: Decodable { let ok: Bool }
 
         do {
-            var urlComponents = URLComponents(url: url("/t/\(token)/\(action)"), resolvingAgainstBaseURL: false)!
+            guard var urlComponents = URLComponents(url: url("/t/\(token)/\(action)"), resolvingAgainstBaseURL: false) else {
+                await MainActor.run {
+                    self.notice = "❌ Invalid URL for \(action)"
+                }
+                return
+            }
 
             // For checkin, include current location coordinates
             if action == "checkin" {
@@ -964,8 +1061,15 @@ final class Session: ObservableObject {
                 }
             }
 
+            guard let requestURL = urlComponents.url else {
+                await MainActor.run {
+                    self.notice = "❌ Invalid URL for \(action)"
+                }
+                return
+            }
+
             let _: TokenResponse = try await api.get(
-                urlComponents.url!,
+                requestURL,
                 bearer: nil
             )
             await MainActor.run {
@@ -1053,7 +1157,7 @@ final class Session: ObservableObject {
             // Update local cache with ALL changes (not just eta)
             var cacheUpdates: [String: Any] = [:]
             if let title = updates.title { cacheUpdates["title"] = title }
-            if let activity = updates.activity { cacheUpdates["activity_id"] = activity }
+            if let activity = updates.activity { cacheUpdates["activity"] = activity }
             if let eta = updates.eta { cacheUpdates["eta"] = eta }
             if let graceMin = updates.grace_min { cacheUpdates["grace_min"] = graceMin }
             if let locationText = updates.location_text { cacheUpdates["location_text"] = locationText }
@@ -1074,7 +1178,22 @@ final class Session: ObservableObject {
 
             debugLog("[Session] ℹ️ Update trip queued for offline sync")
 
-            // Return nil but UI should handle gracefully since action is queued
+            // Return the cached trip with updates applied for optimistic UI
+            // This allows callers to distinguish success (cached trip) from true failure (nil)
+            if let cachedTrip = LocalStorage.shared.getCachedTrip(id: tripId) {
+                var updatedTrip = cachedTrip
+                if let title = updates.title { updatedTrip.title = title }
+                if let eta = updates.eta { updatedTrip.eta_at = eta }
+                if let graceMin = updates.grace_min { updatedTrip.grace_minutes = graceMin }
+                if let locationText = updates.location_text { updatedTrip.location_text = locationText }
+                if let lat = updates.gen_lat { updatedTrip.location_lat = lat }
+                if let lon = updates.gen_lon { updatedTrip.location_lng = lon }
+                if let notes = updates.notes { updatedTrip.notes = notes }
+                if let contact1 = updates.contact1 { updatedTrip.contact1 = contact1 }
+                if let contact2 = updates.contact2 { updatedTrip.contact2 = contact2 }
+                if let contact3 = updates.contact3 { updatedTrip.contact3 = contact3 }
+                return updatedTrip
+            }
             return nil
         }
     }
@@ -1097,8 +1216,7 @@ final class Session: ObservableObject {
             self.activities = cachedActivities.sorted { $0.order < $1.order }
             self.contacts = cachedContacts
             // Include active, overdue, and overdue_notified statuses (all "in progress" trips)
-            let activeStatuses = ["active", "overdue", "overdue_notified"]
-            if let activeTrip = cachedTrips.first(where: { activeStatuses.contains($0.status) }) {
+            if let activeTrip = cachedTrips.first(where: { Constants.TripStatus.isActive($0.status) }) {
                 self.activeTrip = activeTrip
             }
             // Mark as loaded IMMEDIATELY so UI can render
@@ -1137,20 +1255,20 @@ final class Session: ObservableObject {
         // Show cached data immediately if we don't have an active trip yet
         // Include active, overdue, and overdue_notified statuses (all "in progress" trips)
         let cachedTrips = LocalStorage.shared.getCachedTrips()
-        let activeStatuses = ["active", "overdue", "overdue_notified"]
-        let cachedActive = cachedTrips.first { activeStatuses.contains($0.status) }
+        let cachedActive = cachedTrips.first { Constants.TripStatus.isActive($0.status) }
 
+        // Only set activeTrip from cache if we don't have one AND the cached trip is actually active
+        // (not just recently completed but still in cache)
         if self.activeTrip == nil, let cached = cachedActive {
             await MainActor.run {
                 self.activeTrip = cached
             }
+            // Start Live Activity from cache only when restoring from nil state
+            let checkinCount = getCheckinCount(tripId: cached.id)
+            await LiveActivityManager.shared.startActivity(for: cached, checkinCount: checkinCount)
         }
-
-        // Start Live Activity immediately from cache (before API call)
-        if let cachedActive = cachedActive {
-            let checkinCount = getCheckinCount(tripId: cachedActive.id)
-            await LiveActivityManager.shared.startActivity(for: cachedActive, checkinCount: checkinCount)
-        }
+        // If we already have an activeTrip, don't start a new Live Activity from cache
+        // - the API response will handle updating it
 
         // If offline, use cache and return immediately - don't wait for network timeout
         if !NetworkMonitor.shared.isConnected {
@@ -1213,11 +1331,7 @@ final class Session: ObservableObject {
             debugLog("[Session] 📦 Offline - returning \(cachedTrips.count) cached trips")
             await MainActor.run {
                 self.allTrips = cachedTrips
-                // Also update activeTrip from cached data for consistency
-                let activeStatuses = ["active", "overdue", "overdue_notified"]
-                if let active = cachedTrips.first(where: { activeStatuses.contains($0.status) }) {
-                    self.activeTrip = active
-                }
+                // Note: activeTrip is managed by loadActivePlan() to prevent race conditions
             }
             return cachedTrips
         }
@@ -1236,12 +1350,7 @@ final class Session: ObservableObject {
             // Update published properties
             await MainActor.run {
                 self.allTrips = trips
-                // Also update activeTrip from this data to prevent race condition
-                // where trip disappears from "Upcoming" but hasn't appeared in "Active" yet
-                let activeStatuses = ["active", "overdue", "overdue_notified"]
-                if let active = trips.first(where: { activeStatuses.contains($0.status) }) {
-                    self.activeTrip = active
-                }
+                // Note: activeTrip is managed by loadActivePlan() to prevent race conditions
             }
 
             return trips
@@ -1250,11 +1359,7 @@ final class Session: ObservableObject {
             let cachedTrips = LocalStorage.shared.getCachedTrips()
             await MainActor.run {
                 self.allTrips = cachedTrips
-                // Also update activeTrip from cached data for consistency
-                let activeStatuses = ["active", "overdue", "overdue_notified"]
-                if let active = cachedTrips.first(where: { activeStatuses.contains($0.status) }) {
-                    self.activeTrip = active
-                }
+                // Note: activeTrip is managed by loadActivePlan() to prevent race conditions
                 if !cachedTrips.isEmpty {
                     self.notice = "Showing cached trips (offline mode)"
                 }
@@ -1283,7 +1388,10 @@ final class Session: ObservableObject {
                 case "checkin":
                     // Use token-based checkin endpoint (no auth required)
                     if let token = action.payload["token"] as? String {
-                        var urlComponents = URLComponents(url: url("/t/\(token)/checkin"), resolvingAgainstBaseURL: false)!
+                        guard var urlComponents = URLComponents(url: url("/t/\(token)/checkin"), resolvingAgainstBaseURL: false) else {
+                            debugLog("[Session] ⚠️ checkin action has invalid URL - skipping")
+                            continue
+                        }
 
                         // Include coordinates if they were captured when queued
                         if let lat = action.payload["lat"] as? Double,
@@ -1294,8 +1402,13 @@ final class Session: ObservableObject {
                             ]
                         }
 
+                        guard let requestURL = urlComponents.url else {
+                            debugLog("[Session] ⚠️ checkin action URL construction failed - skipping")
+                            continue
+                        }
+
                         let _: GenericResponse = try await api.get(
-                            urlComponents.url!,
+                            requestURL,
                             bearer: nil
                         )
                         debugLog("[Session] ✅ Synced checkin action")
@@ -1306,12 +1419,20 @@ final class Session: ObservableObject {
                     if let tripId = action.tripId,
                        let minutes = action.payload["minutes"] as? Int {
                         // Construct URL with query parameters properly
-                        var urlComponents = URLComponents(url: url("/api/v1/trips/\(tripId)/extend"), resolvingAgainstBaseURL: false)!
+                        guard var urlComponents = URLComponents(url: url("/api/v1/trips/\(tripId)/extend"), resolvingAgainstBaseURL: false) else {
+                            debugLog("[Session] ⚠️ extend action has invalid URL - skipping")
+                            continue
+                        }
                         urlComponents.queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+
+                        guard let requestURL = urlComponents.url else {
+                            debugLog("[Session] ⚠️ extend action URL construction failed - skipping")
+                            continue
+                        }
 
                         let _: GenericResponse = try await withAuth { bearer in
                             try await self.api.post(
-                                urlComponents.url!,
+                                requestURL,
                                 body: API.Empty(),
                                 bearer: bearer
                             )
@@ -1340,10 +1461,11 @@ final class Session: ObservableObject {
                         var updates = TripUpdateRequest()
                         if let title = action.payload["title"] as? String { updates.title = title }
                         if let activity = action.payload["activity"] as? String { updates.activity = activity }
+                        // Use DateUtils for robust parsing (handles multiple date formats)
                         if let startStr = action.payload["start"] as? String,
-                           let start = ISO8601DateFormatter().date(from: startStr) { updates.start = start }
+                           let start = DateUtils.parseISO8601(startStr) { updates.start = start }
                         if let etaStr = action.payload["eta"] as? String,
-                           let eta = ISO8601DateFormatter().date(from: etaStr) { updates.eta = eta }
+                           let eta = DateUtils.parseISO8601(etaStr) { updates.eta = eta }
                         if let graceMin = action.payload["grace_min"] as? Int { updates.grace_min = graceMin }
                         if let locationText = action.payload["location_text"] as? String { updates.location_text = locationText }
                         if let lat = action.payload["gen_lat"] as? Double { updates.gen_lat = lat }
@@ -1572,7 +1694,10 @@ final class Session: ObservableObject {
 
         do {
             // Build URL with coordinates if available
-            var urlComponents = URLComponents(url: url("/t/\(token)/checkin"), resolvingAgainstBaseURL: false)!
+            guard var urlComponents = URLComponents(url: url("/t/\(token)/checkin"), resolvingAgainstBaseURL: false) else {
+                debugLog("[Session] ❌ Failed to construct check-in URL")
+                return false
+            }
             if let loc = location {
                 urlComponents.queryItems = [
                     URLQueryItem(name: "lat", value: String(loc.latitude)),
@@ -1580,9 +1705,14 @@ final class Session: ObservableObject {
                 ]
             }
 
+            guard let requestURL = urlComponents.url else {
+                debugLog("[Session] ❌ Failed to build check-in request URL")
+                return false
+            }
+
             // Use token-based checkin endpoint (no auth required)
             let _: GenericResponse = try await api.get(
-                urlComponents.url!,
+                requestURL,
                 bearer: nil
             )
 
@@ -1594,6 +1724,8 @@ final class Session: ObservableObject {
                 if var updatedTrip = self.activeTrip {
                     updatedTrip.last_checkin = checkinTimestamp
                     self.activeTrip = updatedTrip
+                    // Sync to allTrips as well
+                    self.syncTripInAllTrips(updatedTrip)
                 }
                 self.notice = "Checked in successfully!"
                 // Update widget data with new check-in
@@ -1648,6 +1780,13 @@ final class Session: ObservableObject {
         )
 
         await MainActor.run {
+            // Update local activeTrip state so UI reflects the check-in
+            if var updatedTrip = self.activeTrip {
+                updatedTrip.last_checkin = timestamp
+                self.activeTrip = updatedTrip
+                // Sync to allTrips as well
+                self.syncTripInAllTrips(updatedTrip)
+            }
             self.notice = "Check-in saved (will sync when online)"
             self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
         }
@@ -1673,6 +1812,16 @@ final class Session: ObservableObject {
                 )
             }
 
+            // Update local cache with completed status BEFORE loading other trips
+            // This prevents loadActivePlan() from finding stale "active" status in cache
+            LocalStorage.shared.updateCachedTripFields(
+                tripId: plan.id,
+                updates: [
+                    "status": "completed",
+                    "completed_at": ISO8601DateFormatter().string(from: Date())
+                ]
+            )
+
             // Clear cached timeline for this trip
             LocalStorage.shared.clearCachedTimeline(tripId: plan.id)
 
@@ -1681,6 +1830,7 @@ final class Session: ObservableObject {
 
             await MainActor.run {
                 self.activeTrip = nil
+                self.markTripCompletedInAllTrips(tripId: plan.id)
                 self.notice = "Welcome back! Trip completed safely."
                 // Update widget data (clears it since no active trip)
                 self.updateWidgetData()
@@ -1721,6 +1871,7 @@ final class Session: ObservableObject {
 
         await MainActor.run {
             self.activeTrip = nil
+            self.markTripCompletedInAllTrips(tripId: plan.id)
             self.notice = "Trip completed (will sync when online)"
             self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
         }
@@ -1757,12 +1908,20 @@ final class Session: ObservableObject {
             }
 
             // Construct URL with query parameters properly
-            var urlComponents = URLComponents(url: url("/api/v1/trips/\(plan.id)/extend"), resolvingAgainstBaseURL: false)!
+            guard var urlComponents = URLComponents(url: url("/api/v1/trips/\(plan.id)/extend"), resolvingAgainstBaseURL: false) else {
+                debugLog("[Session] ❌ Failed to construct extend URL")
+                return false
+            }
             urlComponents.queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+
+            guard let requestURL = urlComponents.url else {
+                debugLog("[Session] ❌ Failed to build extend request URL")
+                return false
+            }
 
             let _: ExtendResponse = try await withAuth { bearer in
                 try await self.api.post(
-                    urlComponents.url!,
+                    requestURL,
                     body: API.Empty(),
                     bearer: bearer
                 )
@@ -1772,6 +1931,10 @@ final class Session: ObservableObject {
             await loadActivePlan()
 
             await MainActor.run {
+                // Sync updated activeTrip to allTrips
+                if let updatedTrip = self.activeTrip {
+                    self.syncTripInAllTrips(updatedTrip)
+                }
                 self.notice = "Trip extended by \(minutes) minutes"
                 // Update widget data with new ETA
                 self.updateWidgetData()
@@ -1798,30 +1961,11 @@ final class Session: ObservableObject {
 
         // Update in-memory active trip
         await MainActor.run {
-            if var updatedTrip = self.activeTrip {
-                updatedTrip = Trip(
-                    id: updatedTrip.id,
-                    user_id: updatedTrip.user_id,
-                    title: updatedTrip.title,
-                    activity: updatedTrip.activity,
-                    start_at: updatedTrip.start_at,
-                    eta_at: newETA,
-                    grace_minutes: updatedTrip.grace_minutes,
-                    location_text: updatedTrip.location_text,
-                    location_lat: updatedTrip.location_lat,
-                    location_lng: updatedTrip.location_lng,
-                    notes: updatedTrip.notes,
-                    status: updatedTrip.status,
-                    completed_at: updatedTrip.completed_at,
-                    last_checkin: updatedTrip.last_checkin,
-                    created_at: updatedTrip.created_at,
-                    contact1: updatedTrip.contact1,
-                    contact2: updatedTrip.contact2,
-                    contact3: updatedTrip.contact3,
-                    checkin_token: updatedTrip.checkin_token,
-                    checkout_token: updatedTrip.checkout_token
-                )
+            if let currentTrip = self.activeTrip {
+                let updatedTrip = currentTrip.with(eta_at: newETA)
                 self.activeTrip = updatedTrip
+                // Sync to allTrips as well
+                self.syncTripInAllTrips(updatedTrip)
             }
             self.notice = "Trip extended (will sync when online)"
             self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
@@ -1849,28 +1993,7 @@ final class Session: ObservableObject {
 
             // Start Live Activity immediately with known trip data
             if let trip = self.allTrips.first(where: { $0.id == tripId }) {
-                let activeTrip = Trip(
-                    id: trip.id,
-                    user_id: trip.user_id,
-                    title: trip.title,
-                    activity: trip.activity,
-                    start_at: trip.start_at,
-                    eta_at: trip.eta_at,
-                    grace_minutes: trip.grace_minutes,
-                    location_text: trip.location_text,
-                    location_lat: trip.location_lat,
-                    location_lng: trip.location_lng,
-                    notes: trip.notes,
-                    status: "active",
-                    completed_at: trip.completed_at,
-                    last_checkin: trip.last_checkin,
-                    created_at: trip.created_at,
-                    contact1: trip.contact1,
-                    contact2: trip.contact2,
-                    contact3: trip.contact3,
-                    checkin_token: trip.checkin_token,
-                    checkout_token: trip.checkout_token
-                )
+                let activeTrip = trip.with(status: "active")
                 let checkinCount = getCheckinCount(tripId: tripId)
                 await LiveActivityManager.shared.startActivity(for: activeTrip, checkinCount: checkinCount)
             }
@@ -1908,28 +2031,7 @@ final class Session: ObservableObject {
         if let trip = cachedTrips.first(where: { $0.id == tripId }) {
             await MainActor.run {
                 // Create an updated version with active status
-                self.activeTrip = Trip(
-                    id: trip.id,
-                    user_id: trip.user_id,
-                    title: trip.title,
-                    activity: trip.activity,
-                    start_at: trip.start_at,
-                    eta_at: trip.eta_at,
-                    grace_minutes: trip.grace_minutes,
-                    location_text: trip.location_text,
-                    location_lat: trip.location_lat,
-                    location_lng: trip.location_lng,
-                    notes: trip.notes,
-                    status: "active",
-                    completed_at: trip.completed_at,
-                    last_checkin: trip.last_checkin,
-                    created_at: trip.created_at,
-                    contact1: trip.contact1,
-                    contact2: trip.contact2,
-                    contact3: trip.contact3,
-                    checkin_token: trip.checkin_token,
-                    checkout_token: trip.checkout_token
-                )
+                self.activeTrip = trip.with(status: "active")
                 self.notice = "Trip started (will sync when online)"
                 self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
             }
@@ -2141,6 +2243,7 @@ final class Session: ObservableObject {
             let last_name: String?
             let age: Int?
             let profile_completed: Bool?
+            let created_at: String?
         }
 
         do {
@@ -2161,6 +2264,9 @@ final class Session: ObservableObject {
                 }
                 if let email = response.email {
                     self.userEmail = email
+                }
+                if let createdAt = response.created_at {
+                    self.memberSince = DateUtils.parseISO8601(createdAt)
                 }
                 self.profileCompleted = response.profile_completed ?? false
 
@@ -2624,30 +2730,28 @@ final class Session: ObservableObject {
                 bearer: nil  // Activities endpoint doesn't require auth
             )
 
-            await MainActor.run {
-                self.activities = response.sorted { $0.order < $1.order }
-                debugLog("[Session] ✅ Loaded \(response.count) activities from backend")
+            // Already on MainActor - update state directly
+            self.activities = response.sorted { $0.order < $1.order }
+            debugLog("[Session] ✅ Loaded \(response.count) activities from backend")
 
-                // Cache for offline access
-                LocalStorage.shared.cacheActivities(response)
-                debugLog("[Session] 💾 Activities cached to local storage")
-            }
+            // Cache for offline access
+            LocalStorage.shared.cacheActivities(response)
+            debugLog("[Session] 💾 Activities cached to local storage")
         } catch {
             debugLog("[Session] ❌ Failed to load activities from backend: \(error)")
 
             // Fall back to cached activities on error
+            // Already on MainActor - update state directly
             let cachedActivities = LocalStorage.shared.getCachedActivities()
-            await MainActor.run {
-                if !cachedActivities.isEmpty {
-                    self.activities = cachedActivities
-                    self.notice = "Showing cached activities (offline mode)"
-                    debugLog("[Session] 📦 Using \(cachedActivities.count) cached activities")
-                } else {
-                    // No activities available - user needs internet connection
-                    self.activities = []
-                    self.lastError = "Unable to load activities. Please check your internet connection."
-                    debugLog("[Session] ❌ No activities available (no backend or cache)")
-                }
+            if !cachedActivities.isEmpty {
+                self.activities = cachedActivities
+                self.notice = "Showing cached activities (offline mode)"
+                debugLog("[Session] 📦 Using \(cachedActivities.count) cached activities")
+            } else {
+                // No activities available - user needs internet connection
+                self.activities = []
+                self.lastError = "Unable to load activities. Please check your internet connection."
+                debugLog("[Session] ❌ No activities available (no backend or cache)")
             }
         }
     }
@@ -2702,16 +2806,9 @@ final class Session: ObservableObject {
     /// Call this whenever activeTrip changes to keep widgets in sync
     @MainActor
     func updateWidgetData() {
-        guard let defaults = UserDefaults(suiteName: LiveActivityConstants.appGroupIdentifier) else {
-            debugLog("[Session] ⚠️ Failed to access app group defaults for widget")
-            return
-        }
-
         guard let trip = activeTrip else {
             // Clear widget data when no active trip
-            defaults.removeObject(forKey: LiveActivityConstants.widgetTripDataKey)
-            defaults.synchronize()
-            WidgetCenter.shared.reloadAllTimelines()
+            TripStateManager.shared.clearTripState()
             debugLog("[Session] 📱 Cleared widget data (no active trip)")
             return
         }
@@ -2719,53 +2816,20 @@ final class Session: ObservableObject {
         // Get check-in count from timeline
         let checkinCount = getCheckinCount(tripId: trip.id)
 
-        // Parse last check-in time if available
-        var lastCheckinTime: Date? = nil
-        if let lastCheckin = trip.last_checkin {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            lastCheckinTime = formatter.date(from: lastCheckin)
-            if lastCheckinTime == nil {
-                // Try without fractional seconds
-                formatter.formatOptions = [.withInternetDateTime]
-                lastCheckinTime = formatter.date(from: lastCheckin)
-            }
-        }
-
-        // Create widget data structure
-        let widgetData = [
-            "id": trip.id,
-            "title": trip.title,
-            "status": trip.status,
-            "activityName": trip.activity.name,
-            "activityIcon": trip.activity.icon,
-            "primaryColor": trip.activity.colors.primary,
-            "secondaryColor": trip.activity.colors.secondary,
-            "startAt": trip.start_at.timeIntervalSince1970,
-            "etaAt": trip.eta_at.timeIntervalSince1970,
-            "graceMinutes": trip.grace_minutes,
-            "locationText": trip.location_text as Any,
-            "checkinToken": trip.checkin_token as Any,
-            "checkoutToken": trip.checkout_token as Any,
-            "lastCheckinTime": lastCheckinTime?.timeIntervalSince1970 as Any,
-            "checkinCount": checkinCount
-        ] as [String: Any]
-
-        // Encode as JSON data for reliable cross-process sharing
-        if let jsonData = try? JSONSerialization.data(withJSONObject: widgetData) {
-            defaults.set(jsonData, forKey: LiveActivityConstants.widgetTripDataKey)
-            defaults.synchronize()
-            WidgetCenter.shared.reloadAllTimelines()
-            debugLog("[Session] 📱 Updated widget data for trip: \(trip.title)")
-        } else {
-            debugLog("[Session] ⚠️ Failed to encode widget data")
-        }
+        // Use TripStateManager to update widget data with proper Codable encoding
+        TripStateManager.shared.updateTripState(trip: trip, checkinCount: checkinCount)
+        debugLog("[Session] 📱 Updated widget data for trip: \(trip.title)")
     }
 
     // MARK: - Sign Out
     @MainActor
     func signOut() {
         debugLog("[Session] 🔒 Signing out - clearing all data")
+
+        // Cancel pending device registration retries
+        deviceRegistrationTask?.cancel()
+        deviceRegistrationTask = nil
+        deviceRegistrationRetryCount = 0
 
         // End all Live Activities
         Task {

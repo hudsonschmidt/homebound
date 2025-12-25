@@ -85,7 +85,7 @@ struct API {
         req.httpBody = try encoder.encode(body)
         let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
-        if T.self == Empty.self { return Empty() as! T }
+        if T.self == Empty.self, let empty = Empty() as? T { return empty }
         return try decoder.decode(T.self, from: data)
     }
 
@@ -103,7 +103,7 @@ struct API {
         req.httpBody = try encoder.encode(body)
         let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
-        if T.self == Empty.self { return Empty() as! T }
+        if T.self == Empty.self, let empty = Empty() as? T { return empty }
         return try decoder.decode(T.self, from: data)
     }
 
@@ -117,7 +117,7 @@ struct API {
         req.httpBody = try encoder.encode(body)
         let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
-        if T.self == Empty.self { return Empty() as! T }
+        if T.self == Empty.self, let empty = Empty() as? T { return empty }
         return try decoder.decode(T.self, from: data)
     }
 
@@ -129,7 +129,7 @@ struct API {
         }
         let (data, resp) = try await session.data(for: req)
         try check(resp: resp, data: data)
-        if T.self == Empty.self { return Empty() as! T }
+        if T.self == Empty.self, let empty = Empty() as? T { return empty }
         return try decoder.decode(T.self, from: data)
     }
 

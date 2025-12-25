@@ -118,6 +118,7 @@ struct LiveActivityConstants {
     static let displayModeKey = "liveActivityDisplayMode"
     static let enabledKey = "liveActivityEnabled"
     static let activityIdKey = "currentLiveActivityId"
+    static let serverEnvironmentKey = "serverEnvironment"
 
     // Cross-process signaling for Live Activity actions
     static let pendingCheckinKey = "pendingCheckinAction"
@@ -130,8 +131,34 @@ struct LiveActivityConstants {
     // Check-in confirmation feedback (timestamp when check-in button was pressed)
     static let checkinConfirmationKey = "checkinConfirmationTimestamp"
 
-    /// Base URL for deep links
-    static let baseURL = "https://api.homeboundapp.com"
+    // Server environment URLs
+    private static let productionURL = "https://api.homeboundapp.com"
+    private static let devRenderURL = "https://homebound-21l1.onrender.com"
+    private static let localURL = "http://localhost:3001"
+
+    /// Base URL for API calls - reads from shared defaults to match main app's environment
+    static var baseURL: String {
+        guard let defaults = sharedDefaults,
+              let environment = defaults.string(forKey: serverEnvironmentKey) else {
+            return productionURL  // Default to production
+        }
+
+        switch environment {
+        case "production":
+            return productionURL
+        case "devRender":
+            return devRenderURL
+        case "local":
+            return localURL
+        default:
+            return productionURL
+        }
+    }
+
+    /// Set server environment (called by main app when environment changes)
+    static func setServerEnvironment(_ environment: String) {
+        sharedDefaults?.set(environment, forKey: serverEnvironmentKey)
+    }
 
     /// Get the shared UserDefaults for app group
     static var sharedDefaults: UserDefaults? {

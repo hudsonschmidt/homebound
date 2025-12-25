@@ -77,7 +77,7 @@ struct ProfileView: View {
                             // Member Since
                             InfoField(
                                 label: "Member Since",
-                                value: memberSinceDate(),
+                                value: formatMemberSince(session.memberSince),
                                 icon: "clock.fill"
                             )
 
@@ -189,10 +189,13 @@ struct ProfileView: View {
 
     // MARK: - Helper Functions
 
-    private func memberSinceDate() -> String {
+    private func formatMemberSince(_ date: Date?) -> String {
+        guard let date = date else {
+            return "Unknown"
+        }
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM yyyy"
-        return formatter.string(from: Date())
+        return formatter.string(from: date)
     }
 
     func updateName() async {
@@ -220,8 +223,16 @@ struct ProfileView: View {
     }
 
     func updateAge() async {
-        guard let age = Int(editAge), age > 0, age < 150 else {
-            editingAge = false
+        // Validate age input
+        guard let age = Int(editAge) else {
+            errorMessage = "Please enter a valid number for age"
+            showError = true
+            return
+        }
+
+        guard age > 0 && age < 150 else {
+            errorMessage = "Please enter a valid age (1-149)"
+            showError = true
             return
         }
 

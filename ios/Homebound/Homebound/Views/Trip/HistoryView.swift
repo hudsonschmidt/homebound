@@ -35,11 +35,12 @@ struct OfflineDisclaimerBanner: View {
 struct HistoryView: View {
     @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
-    @StateObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @State private var isLoading = false
     @State private var searchText = ""
     @State private var errorMessage: String?
     @State private var tripToEdit: Trip?
+    @State private var deletingPlanIds: Set<Int> = []  // Track plans being deleted
 
     // Presentation mode - controls whether this is shown as a tab or modal
     var showAsTab: Bool = false
@@ -218,9 +219,23 @@ struct HistoryView: View {
     }
 
     func deletePlan(_ plan: Trip) async {
+        // Prevent double-delete: skip if already being deleted
+        guard !deletingPlanIds.contains(plan.id) else {
+            debugLog("[HistoryView] Skipping duplicate delete for trip #\(plan.id)")
+            return
+        }
+
+        // Mark as being deleted
+        await MainActor.run {
+            deletingPlanIds.insert(plan.id)
+            errorMessage = nil  // Clear any previous error
+        }
+
         let success = await session.deletePlan(plan.id)
-        if !success {
-            await MainActor.run {
+
+        await MainActor.run {
+            deletingPlanIds.remove(plan.id)
+            if !success {
                 errorMessage = "Failed to delete trip"
             }
         }
@@ -464,11 +479,12 @@ struct TripStatsView: View {
             plan.activity.id
         }
 
-        guard let mostCommon = activityCounts.max(by: { $0.value.count < $1.value.count }) else {
+        guard let mostCommon = activityCounts.max(by: { $0.value.count < $1.value.count }),
+              let firstTrip = mostCommon.value.first else {
             return nil
         }
 
-        let activity = mostCommon.value.first!.activity
+        let activity = firstTrip.activity
         return (activity.icon, activity.name, mostCommon.value.count)
     }
 

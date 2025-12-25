@@ -43,7 +43,7 @@ struct MainTabView: View {
 // MARK: - Offline Status Banner
 struct OfflineStatusBanner: View {
     @EnvironmentObject var session: Session
-    @StateObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var isVisible: Bool {
         !networkMonitor.isConnected || session.pendingActionsCount > 0
@@ -99,6 +99,8 @@ struct NewHomeView: View {
     @State private var greeting = "Good morning"
     @State private var timeline: [TimelineEvent] = []
     @State private var refreshID = UUID()
+    @State private var lastSyncTime: Date?
+    private let syncDebounceInterval: TimeInterval = 2.0  // Minimum 2 seconds between syncs
 
     var firstName: String? {
         session.userName?.components(separatedBy: " ").first
@@ -196,6 +198,21 @@ struct NewHomeView: View {
                 // Sync all data on app open
                 await syncData()
             }
+            .onChange(of: session.activeTrip?.id) { oldId, newId in
+                // Clear timeline when active trip changes to prevent stale data display
+                if oldId != newId {
+                    timeline = []
+                    // If there's a new active trip, reload its timeline
+                    if let tripId = newId {
+                        Task {
+                            let events = await session.loadTimeline(planId: tripId)
+                            await MainActor.run {
+                                self.timeline = events
+                            }
+                        }
+                    }
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 Task {
                     // Sync when app comes to foreground
@@ -211,6 +228,16 @@ struct NewHomeView: View {
     }
 
     func syncData() async {
+        // Debounce: skip if we synced recently
+        // Use a single Date instance to avoid timing gaps between check and set
+        let now = Date()
+        if let lastSync = lastSyncTime,
+           now.timeIntervalSince(lastSync) < syncDebounceInterval {
+            debugLog("[NewHomeView] Skipping syncData - debounced (last sync: \(now.timeIntervalSince(lastSync))s ago)")
+            return
+        }
+        lastSyncTime = now
+
         // Load all necessary data in parallel
         async let loadActive: Void = session.loadActivePlan()
         async let loadProfile: Void = session.loadUserProfile()
@@ -302,7 +329,7 @@ struct BigNewTripCard: View {
     }
 }
 
-// MARK: - Feature Row
+/// MARK: - Feature Row
 struct FeatureRow: View {
     let icon: String
     let text: String
@@ -313,6 +340,7 @@ struct FeatureRow: View {
                 .font(.system(size: 18))
                 .foregroundStyle(Color.hbBrand)
                 .frame(width: 24)
+                .accessibilityHidden(true)  // Icon is decorative, text provides meaning
 
             Text(text)
                 .font(.subheadline)
@@ -320,6 +348,8 @@ struct FeatureRow: View {
 
             Spacer()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text)
     }
 }
 
@@ -342,8 +372,9 @@ struct ActivePlanCardCompact: View {
     @State private var showingExtendOptions = false
     @State private var selectedExtendMinutes = 30
     @State private var pulseAnimation = false
+    @State private var showingError = false
+    @State private var errorMessage = ""
 
-    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let extendOptions = [
         (15, "15 min"),
         (30, "30 min"),
@@ -473,15 +504,25 @@ struct ActivePlanCardCompact: View {
             radius: isUrgent ? 15 : 12,
             y: 6
         )
-        .onReceive(timer) { _ in
-            updateTimeRemaining()
-        }
-        .onAppear {
+        .task {
+            // Initial update
             updateTimeRemaining()
             // Start pulse animation for the dot and glow only
             withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
                 pulseAnimation = true
             }
+            // Timer loop - auto-cancelled when view disappears
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                updateTimeRemaining()
+            }
+        }
+        .alert("Action Failed", isPresented: $showingError) {
+            Button("OK", role: .cancel) {
+                errorMessage = ""
+            }
+        } message: {
+            Text(errorMessage)
         }
     }
 
@@ -532,11 +573,13 @@ struct ActivePlanCardCompact: View {
                 )
                 .scaleEffect(pulseAnimation && isUrgent ? 1.1 : 1.0)
                 .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseAnimation)
+                .accessibilityHidden(true) // Status is conveyed by text, hide decorative dot
 
             Text(statusText)
                 .font(statusFont)
                 .fontWeight(.bold)
                 .foregroundStyle(statusForeground)
+                .accessibilityLabel("Trip status: \(statusText)")
 
             Spacer()
 
@@ -638,7 +681,8 @@ struct ActivePlanCardCompact: View {
                         let success = await session.checkIn()
 
                         if success {
-                            // Reload timeline to show updated check-in count
+                            // Reload timeline using current activeTrip (not stale reference)
+                            // If trip changed during checkIn, the onChange handler will clear timeline
                             if let tripId = session.activeTrip?.id {
                                 let events = await session.loadTimeline(planId: tripId)
                                 await MainActor.run {
@@ -649,9 +693,13 @@ struct ActivePlanCardCompact: View {
                                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                             }
                         } else {
-                            // Show error haptic on failure
+                            // Show error haptic and alert on failure
                             if preferences.hapticFeedbackEnabled {
                                 UINotificationFeedbackGenerator().notificationOccurred(.error)
+                            }
+                            await MainActor.run {
+                                errorMessage = session.lastError.isEmpty ? "Check-in failed. Please try again." : session.lastError
+                                showingError = true
                             }
                         }
 
@@ -687,7 +735,9 @@ struct ActivePlanCardCompact: View {
                     }
                     // Note: completePlan() already calls loadActivePlan() internally
                     // and sets activeTrip to nil, so no need to call it again here
-                    isPerformingAction = false
+                    await MainActor.run {
+                        isPerformingAction = false
+                    }
                 }
             }) {
                 Label("I'm Safe", systemImage: "house.fill")
@@ -723,8 +773,10 @@ struct ActivePlanCardCompact: View {
                                 Task {
                                     isPerformingAction = true
                                     _ = await session.extendPlan(minutes: minutes)
-                                    showingExtendOptions = false
-                                    isPerformingAction = false
+                                    await MainActor.run {
+                                        showingExtendOptions = false
+                                        isPerformingAction = false
+                                    }
                                 }
                             }) {
                                 Text(label)
@@ -828,7 +880,8 @@ struct UpcomingTripsSection: View {
     @State private var startingTripId: Int? = nil
     @State private var failedTripIds: Set<Int> = [] // Track trips that failed to start
     @State private var tripToEdit: Trip? = nil
-    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var showingError = false
+    @State private var errorMessage = ""
 
     // Computed property from session state for reactive updates
     var upcomingPlans: [Trip] {
@@ -898,15 +951,17 @@ struct UpcomingTripsSection: View {
                 .scrollDisabled(true)
             }
         }
-        .onReceive(timer) { time in
-            currentTime = time
-            // Check if auto-start is enabled in preferences
-            if preferences.autoStartTrips {
-                checkForTripsToAutoStart()
-            }
-        }
         .task {
             await loadUpcomingPlans()
+            // Timer loop for auto-start - auto-cancelled when view disappears
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                currentTime = Date()
+                // Check if auto-start is enabled in preferences
+                if preferences.autoStartTrips {
+                    checkForTripsToAutoStart()
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task {
@@ -930,6 +985,13 @@ struct UpcomingTripsSection: View {
                         }
                     }
             }
+        }
+        .alert("Failed to Start Trip", isPresented: $showingError) {
+            Button("OK", role: .cancel) {
+                errorMessage = ""
+            }
+        } message: {
+            Text(errorMessage)
         }
     }
 
@@ -972,6 +1034,9 @@ struct UpcomingTripsSection: View {
                 if !success {
                     // Mark as failed so we don't retry automatically
                     failedTripIds.insert(tripId)
+                    // Show error to user
+                    errorMessage = session.lastError.isEmpty ? "Unable to start trip. Please try again." : session.lastError
+                    showingError = true
                 }
             }
         }

@@ -108,6 +108,7 @@ struct PendingInvitesView: View {
 // MARK: - Invite Row View
 
 struct InviteRowView: View {
+    @EnvironmentObject var session: Session
     let invite: PendingInvite
 
     var statusColor: Color {
@@ -163,7 +164,7 @@ struct InviteRowView: View {
 
                 // Expiration info for pending invites
                 if invite.isPending, let expiresAt = invite.expiresAtDate {
-                    let isExpiringSoon = expiresAt.timeIntervalSinceNow < 86400 // Less than 24 hours
+                    let isExpiringSoon = expiresAt.timeIntervalSinceNow < Constants.Time.oneDay
 
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
@@ -178,9 +179,9 @@ struct InviteRowView: View {
             Spacer()
 
             // Share button for pending invites
-            if invite.isPending {
+            if invite.isPending, let shareURL = URL(string: "\(session.baseURL)/f/\(invite.token)") {
                 ShareLink(
-                    item: URL(string: "https://api.homeboundapp.com/f/\(invite.token)")!,
+                    item: shareURL,
                     message: Text("Be my friend on Homebound!")
                 ) {
                     Image(systemName: "square.and.arrow.up")

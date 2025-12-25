@@ -210,9 +210,10 @@ private struct WidgetButtonStyle: ButtonStyle {
             .background(color.opacity(configuration.isPressed ? 0.5 : 0.2))
             .foregroundColor(.primary)
             .cornerRadius(8)
-            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
-            .opacity(configuration.isPressed ? 0.8 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+            // Note: Per CLAUDE.md, animations only allowed on Live Activity buttons
+            // Immediate press feedback without animation transition
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
     }
 }
 

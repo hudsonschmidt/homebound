@@ -1,7 +1,9 @@
 import Foundation
 import Security
 
-class KeychainHelper {
+/// Thread-safe keychain helper using internal locking.
+/// Uses NSLock to prevent race conditions during save operations.
+final class KeychainHelper {
     static let shared = KeychainHelper()
 
     private let service = "com.hudsonschmidt.Homebound"
@@ -11,6 +13,9 @@ class KeychainHelper {
     private let userEmailKey = "userEmail"
     private let userAgeKey = "userAge"
     private let profileCompletedKey = "profileCompleted"
+
+    /// Lock for thread-safe keychain operations
+    private let lock = NSLock()
 
     private init() {}
 
@@ -25,16 +30,19 @@ class KeychainHelper {
     }
 
     func saveUserData(name: String?, email: String?, age: Int?, profileCompleted: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+
         if let name = name {
-            save(name, for: userNameKey)
+            saveUnlocked(name, for: userNameKey)
         }
         if let email = email {
-            save(email, for: userEmailKey)
+            saveUnlocked(email, for: userEmailKey)
         }
         if let age = age {
-            save("\(age)", for: userAgeKey)
+            saveUnlocked("\(age)", for: userAgeKey)
         }
-        save(profileCompleted ? "true" : "false", for: profileCompletedKey)
+        saveUnlocked(profileCompleted ? "true" : "false", for: profileCompletedKey)
     }
 
     // MARK: - Load Methods
@@ -68,38 +76,80 @@ class KeychainHelper {
     // MARK: - Clear All
 
     func clearAll() {
-        delete(for: accessTokenKey)
-        delete(for: refreshTokenKey)
-        delete(for: userNameKey)
-        delete(for: userEmailKey)
-        delete(for: userAgeKey)
-        delete(for: profileCompletedKey)
+        lock.lock()
+        defer { lock.unlock() }
+
+        deleteUnlocked(for: accessTokenKey)
+        deleteUnlocked(for: refreshTokenKey)
+        deleteUnlocked(for: userNameKey)
+        deleteUnlocked(for: userEmailKey)
+        deleteUnlocked(for: userAgeKey)
+        deleteUnlocked(for: profileCompletedKey)
     }
 
-    // MARK: - Private Helper Methods
+    // MARK: - Private Helper Methods (Thread-Safe)
 
-    private func save(_ value: String, for key: String) {
-        let data = value.data(using: .utf8)!
+    /// Save a value to the keychain with thread safety.
+    /// Uses atomic update pattern with retry logic to handle race conditions.
+    @discardableResult
+    private func save(_ value: String, for key: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return saveUnlocked(value, for: key)
+    }
 
-        let query: [String: Any] = [
+    /// Internal save without locking - caller must hold lock
+    @discardableResult
+    private func saveUnlocked(_ value: String, for key: String) -> Bool {
+        guard let data = value.data(using: .utf8) else {
+            debugLog("[Keychain] Failed to encode value for key: \(key)")
+            return false
+        }
+
+        // Query to find existing item
+        let searchQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
+            kSecAttrAccount as String: key
+        ]
+
+        // Attributes to update
+        let updateAttributes: [String: Any] = [
             kSecValueData as String: data
         ]
 
-        // Delete any existing item
-        SecItemDelete(query as CFDictionary)
+        // Try to update existing item first (atomic operation)
+        var status = SecItemUpdate(searchQuery as CFDictionary, updateAttributes as CFDictionary)
 
-        // Add new item
-        let status = SecItemAdd(query as CFDictionary, nil)
+        if status == errSecItemNotFound {
+            // Item doesn't exist, add it
+            let addQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: key,
+                kSecValueData as String: data
+            ]
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+
+            // Handle race condition: if another thread added the item between our
+            // SecItemUpdate check and SecItemAdd, retry the update
+            if status == errSecDuplicateItem {
+                status = SecItemUpdate(searchQuery as CFDictionary, updateAttributes as CFDictionary)
+            }
+        }
 
         if status != errSecSuccess {
-            debugLog("Error saving to keychain: \(status)")
+            debugLog("[Keychain] Error saving to keychain for key '\(key)': \(status)")
+            return false
         }
+
+        return true
     }
 
     private func load(for key: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -121,6 +171,13 @@ class KeychainHelper {
     }
 
     private func delete(for key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        deleteUnlocked(for: key)
+    }
+
+    /// Internal delete without locking - caller must hold lock
+    private func deleteUnlocked(for key: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

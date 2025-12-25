@@ -1,15 +1,14 @@
 //
-//  WidgetSharedData.swift
-//  HomeboundWidgets
+//  WidgetTripData.swift
+//  Homebound
 //
-//  Helper extensions for accessing shared widget data.
+//  Shared trip data model for widget and live activity display.
+//  Add this file to BOTH the main app target AND the widget extension target.
 //
 
 import Foundation
 
 // MARK: - Widget Trip Data
-// Note: This struct must match the one in the main app (TripStateManager.swift)
-// If you modify this, update both locations.
 
 /// Simplified trip data for widget display.
 /// Stored in shared UserDefaults (App Group) by main app.
@@ -89,42 +88,5 @@ struct WidgetTripData: Codable {
         if contactsNotified { return "OVERDUE" }
         if isOverdue { return "CHECK IN NOW" }
         return "ACTIVE"
-    }
-}
-
-// MARK: - LiveActivityConstants Extension
-
-extension LiveActivityConstants {
-    /// Get current widget trip data from shared defaults
-    static var widgetTripData: WidgetTripData? {
-        guard let defaults = sharedDefaults,
-              let data = defaults.data(forKey: widgetTripDataKey) else {
-            return nil
-        }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        do {
-            return try decoder.decode(WidgetTripData.self, from: data)
-        } catch {
-            // Log decode failure for debugging - this can happen if schema changes
-            debugLog("[WidgetSharedData] ❌ Failed to decode WidgetTripData: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    /// Save widget trip data to shared defaults
-    static func saveWidgetTripData(_ tripData: WidgetTripData?) {
-        guard let defaults = sharedDefaults else { return }
-
-        if let tripData = tripData {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            if let data = try? encoder.encode(tripData) {
-                defaults.set(data, forKey: widgetTripDataKey)
-            }
-        } else {
-            defaults.removeObject(forKey: widgetTripDataKey)
-        }
     }
 }
