@@ -197,6 +197,15 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - Achievements
+    @Published var seenAchievementIds: Set<String> {
+        didSet {
+            if let data = try? JSONEncoder().encode(Array(seenAchievementIds)) {
+                UserDefaults.standard.set(data, forKey: "seenAchievementIds")
+            }
+        }
+    }
+
     var shouldShowWhatsNew: Bool {
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         // Only show if user has seen a previous version (not a fresh install) and it's different from current
@@ -282,6 +291,14 @@ class AppPreferences: ObservableObject {
 
         // Debug - defaults to false
         self.debugUnlockAllAchievements = UserDefaults.standard.bool(forKey: "debugUnlockAllAchievements")
+
+        // Achievements - load seen achievement IDs
+        if let data = UserDefaults.standard.data(forKey: "seenAchievementIds"),
+           let ids = try? JSONDecoder().decode([String].self, from: data) {
+            self.seenAchievementIds = Set(ids)
+        } else {
+            self.seenAchievementIds = []
+        }
     }
 
     // MARK: - Pinned Activities Helpers

@@ -1834,6 +1834,8 @@ final class Session: ObservableObject {
                 self.notice = "Welcome back! Trip completed safely."
                 // Update widget data (clears it since no active trip)
                 self.updateWidgetData()
+                // Check for new achievements after trip completion
+                AchievementNotificationManager.shared.checkForNewAchievements(trips: self.allTrips)
             }
 
             // Reload to check for any other active plans
@@ -1874,6 +1876,8 @@ final class Session: ObservableObject {
             self.markTripCompletedInAllTrips(tripId: plan.id)
             self.notice = "Trip completed (will sync when online)"
             self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+            // Check for new achievements after trip completion
+            AchievementNotificationManager.shared.checkForNewAchievements(trips: self.allTrips)
         }
 
         debugLog("[Session] ℹ️ Complete trip queued for offline sync")

@@ -94,9 +94,11 @@ struct OfflineStatusBanner: View {
 struct NewHomeView: View {
     @EnvironmentObject var session: Session
     @EnvironmentObject var preferences: AppPreferences
+    @StateObject private var achievementManager = AchievementNotificationManager.shared
     @State private var showingCreatePlan = false
     @State private var showingSettings = false
     @State private var showingAchievements = false
+    @State private var showingCelebration = false
     @State private var greeting = "Good morning"
     @State private var timeline: [TimelineEvent] = []
     @State private var refreshID = UUID()
@@ -137,16 +139,32 @@ struct NewHomeView: View {
                             Spacer()
 
                             HStack(spacing: 12) {
-                                // Achievements button
-                                Button(action: { showingAchievements = true }) {
-                                    Circle()
-                                        .fill(Color.orange.opacity(0.15))
-                                        .frame(width: 44, height: 44)
-                                        .overlay(
-                                            Image(systemName: "trophy.fill")
-                                                .foregroundStyle(.orange)
-                                                .font(.system(size: 20))
-                                        )
+                                // Achievements button with notification dot
+                                Button(action: {
+                                    if achievementManager.hasUnseenAchievements {
+                                        showingCelebration = true
+                                    } else {
+                                        showingAchievements = true
+                                    }
+                                }) {
+                                    ZStack(alignment: .topTrailing) {
+                                        Circle()
+                                            .fill(Color.orange.opacity(0.15))
+                                            .frame(width: 44, height: 44)
+                                            .overlay(
+                                                Image(systemName: "trophy.fill")
+                                                    .foregroundStyle(.orange)
+                                                    .font(.system(size: 20))
+                                            )
+
+                                        // Red notification dot
+                                        if achievementManager.hasUnseenAchievements {
+                                            Circle()
+                                                .fill(Color.red)
+                                                .frame(width: 12, height: 12)
+                                                .offset(x: 2, y: -2)
+                                        }
+                                    }
                                 }
 
                                 // Settings button
@@ -213,10 +231,23 @@ struct NewHomeView: View {
                 AchievementsView()
                     .environmentObject(session)
             }
+            .fullScreenCover(isPresented: $showingCelebration) {
+                AchievementCelebrationView(
+                    achievements: achievementManager.unseenAchievements,
+                    onDismiss: {
+                        achievementManager.markAllAsSeen()
+                        showingCelebration = false
+                        // Optionally show full achievements view after celebration
+                        showingAchievements = true
+                    }
+                )
+            }
             .task {
                 updateGreeting()
                 // Sync all data on app open
                 await syncData()
+                // Check for new achievements after data sync
+                achievementManager.checkForNewAchievements(trips: session.allTrips)
             }
             .onChange(of: session.activeTrip?.id) { oldId, newId in
                 // Clear timeline when active trip changes to prevent stale data display
@@ -237,6 +268,8 @@ struct NewHomeView: View {
                 Task {
                     // Sync when app comes to foreground
                     await syncData()
+                    // Check for new achievements after sync
+                    achievementManager.checkForNewAchievements(trips: session.allTrips)
                 }
             }
         }
