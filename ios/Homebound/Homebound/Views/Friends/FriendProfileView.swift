@@ -9,6 +9,7 @@ struct FriendProfileView: View {
 
     @State private var showingRemoveConfirmation = false
     @State private var isRemoving = false
+    @State private var showingRemoveError = false
 
     var body: some View {
         NavigationStack {
@@ -29,6 +30,7 @@ struct FriendProfileView: View {
                 }
                 .padding()
             }
+            .scrollIndicators(.hidden)
             .background(Color(.systemBackground))
             .navigationTitle("Friend Profile")
             .navigationBarTitleDisplayMode(.inline)
@@ -51,18 +53,27 @@ struct FriendProfileView: View {
             } message: {
                 Text("Are you sure you want to remove \(friend.fullName) as a friend? They will no longer receive push notifications as your safety contact.")
             }
+            .alert("Unable to Remove Friend", isPresented: $showingRemoveError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Something went wrong. Please check your connection and try again.")
+            }
         }
     }
 
-    // MARK: - Check if any stats are visible
+    // MARK: - Check if any stats are visible (checks both preferences AND data availability)
 
     private var hasVisibleStats: Bool {
-        preferences.showFriendJoinDate ||
-        preferences.showFriendAge ||
-        preferences.showFriendAchievements ||
-        preferences.showFriendTotalTrips ||
-        preferences.showFriendAdventureTime ||
-        preferences.showFriendFavoriteActivity
+        // Check each stat type: preference must be enabled AND data must exist and be non-zero
+        let hasJoinDate = preferences.showFriendJoinDate && friend.memberSinceDate != nil
+        let hasAge = preferences.showFriendAge && (friend.age ?? 0) > 0
+        let hasAchievements = preferences.showFriendAchievements && (friend.achievements_count ?? 0) > 0
+        let hasTotalTrips = preferences.showFriendTotalTrips && (friend.total_trips ?? 0) > 0
+        let hasAdventureTime = preferences.showFriendAdventureTime && friend.formattedAdventureTime != nil
+        let hasFavoriteActivity = preferences.showFriendFavoriteActivity &&
+            friend.favorite_activity_name != nil && friend.favorite_activity_icon != nil
+
+        return hasJoinDate || hasAge || hasAchievements || hasTotalTrips || hasAdventureTime || hasFavoriteActivity
     }
 
     // MARK: - Profile Header (always shown: name, profile photo, friends since)
@@ -123,67 +134,76 @@ struct FriendProfileView: View {
             )
     }
 
-    // MARK: - Stats Grid (conditional)
+    // MARK: - Stats Grid (conditional, respects user order)
 
     var statsGridView: some View {
         VStack(spacing: 12) {
-            // Member since
+            ForEach(preferences.friendStatOrder) { statType in
+                statView(for: statType)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func statView(for statType: FriendStatType) -> some View {
+        switch statType {
+        case .joinDate:
             if preferences.showFriendJoinDate, let memberDate = friend.memberSinceDate {
                 statCard(
-                    icon: "calendar.badge.clock",
-                    iconColor: .blue,
-                    title: "Member Since",
+                    icon: statType.icon,
+                    iconColor: statType.iconColor,
+                    title: statType.displayName,
                     value: memberDate.formatted(date: .abbreviated, time: .omitted)
                 )
             }
 
-            // Age
+        case .age:
             if preferences.showFriendAge, let age = friend.age, age > 0 {
                 statCard(
-                    icon: "number",
-                    iconColor: .purple,
-                    title: "Age",
+                    icon: statType.icon,
+                    iconColor: statType.iconColor,
+                    title: statType.displayName,
                     value: "\(age) years old"
                 )
             }
 
-            // Achievements
-            if preferences.showFriendAchievements, let count = friend.achievements_count {
+        case .achievements:
+            if preferences.showFriendAchievements, let count = friend.achievements_count, count > 0 {
                 statCard(
-                    icon: "trophy.fill",
-                    iconColor: .orange,
-                    title: "Achievements",
+                    icon: statType.icon,
+                    iconColor: statType.iconColor,
+                    title: statType.displayName,
                     value: "\(count) unlocked"
                 )
             }
 
-            // Total trips
-            if preferences.showFriendTotalTrips, let trips = friend.total_trips {
+        case .totalTrips:
+            if preferences.showFriendTotalTrips, let trips = friend.total_trips, trips > 0 {
                 statCard(
-                    icon: "figure.walk",
-                    iconColor: .red,
-                    title: "Total Trips",
-                    value: "\(trips) trips"
+                    icon: statType.icon,
+                    iconColor: statType.iconColor,
+                    title: statType.displayName,
+                    value: "\(trips) trip\(trips == 1 ? "" : "s")"
                 )
             }
 
-            // Adventure time
+        case .adventureTime:
             if preferences.showFriendAdventureTime, let formatted = friend.formattedAdventureTime {
                 statCard(
-                    icon: "hourglass",
-                    iconColor: .green,
-                    title: "Adventure Time",
+                    icon: statType.icon,
+                    iconColor: statType.iconColor,
+                    title: statType.displayName,
                     value: formatted
                 )
             }
 
-            // Favorite activity
+        case .favoriteActivity:
             if preferences.showFriendFavoriteActivity,
                let activityName = friend.favorite_activity_name,
                let activityIcon = friend.favorite_activity_icon {
                 statCardWithEmoji(
                     emoji: activityIcon,
-                    title: "Favorite Activity",
+                    title: statType.displayName,
                     value: activityName
                 )
             }
@@ -269,6 +289,8 @@ struct FriendProfileView: View {
                 isRemoving = false
                 if success {
                     dismiss()
+                } else {
+                    showingRemoveError = true
                 }
             }
         }

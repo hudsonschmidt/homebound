@@ -2694,9 +2694,11 @@ final class Session: ObservableObject {
                 )
             }
 
-            // Remove from local list
+            // Remove from local lists
             await MainActor.run {
                 self.friends.removeAll { $0.user_id == userId }
+                // Also remove any active trips from this friend
+                self.friendActiveTrips.removeAll { $0.owner.user_id == userId }
                 self.notice = "Friend removed"
             }
 

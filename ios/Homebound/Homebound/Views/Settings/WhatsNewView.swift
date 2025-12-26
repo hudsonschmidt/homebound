@@ -21,37 +21,25 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 0.4.0",
+        title: "Update 0.5.0",
         features: [
             WhatsNewFeature(
-                icon: "livephoto",
+                icon: "person.2",
                 iconColor: .white,
-                title: "Live Activity",
-                description: "Three versions of live activity available."
+                title: "Friends",
+                description: "Add friends to share your adventures and achievements with them."
             ),
             WhatsNewFeature(
-                icon: "widget.small.badge.plus",
+                icon: "trophy",
                 iconColor: .white,
-                title: "Widgets",
-                description: "Widgets for both home and lock screen."
-            ),
-            WhatsNewFeature(
-                icon: "pin",
-                iconColor: .white,
-                title: "Pin Three Activities",
-                description: "Pin your top 3 favorite activities for easier selection."
-            ),
-            WhatsNewFeature(
-                icon: "square.and.arrow.down",
-                iconColor: .white,
-                title: "Trip Saving",
-                description: "Trip templates can be created and selected for easier trip creation."
+                title: "Achievements",
+                description: "Earn achievements based on your adventure stats and show them off to your friends."
             ),
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .white,
                 title: "Bug Fixes",
-                description: "Contact delete fix, theme switching fix, map coordinate fix, checkin via notification rework, improved location description when selecting via map."
+                description: "Lots of performance improvements and bug fixes to make experience smoother. Time zone handling has been fixed."
             )
         ]
     )

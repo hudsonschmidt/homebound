@@ -50,12 +50,16 @@ struct Friend: Codable, Identifiable, Hashable {
         DateUtils.parseISO8601(friendship_since)
     }
 
-    /// Formatted adventure time (e.g., "5d 3h" or "12h")
+    /// Formatted adventure time (e.g., "5d 3h", "2d", or "12h")
+    /// Returns nil if hours is 0 or nil
     var formattedAdventureTime: String? {
-        guard let hours = total_adventure_hours else { return nil }
+        guard let hours = total_adventure_hours, hours > 0 else { return nil }
         if hours >= 24 {
             let days = hours / 24
             let remainingHours = hours % 24
+            if remainingHours == 0 {
+                return "\(days)d"
+            }
             return "\(days)d \(remainingHours)h"
         }
         return "\(hours)h"

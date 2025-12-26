@@ -45,6 +45,50 @@ enum MapType: String, CaseIterable {
 // LiveActivityDisplayMode is defined in TripActivityAttributes.swift
 // (shared between main app and widget extension targets)
 
+enum FriendStatType: String, CaseIterable, Codable, Identifiable {
+    case joinDate = "joinDate"
+    case age = "age"
+    case achievements = "achievements"
+    case totalTrips = "totalTrips"
+    case adventureTime = "adventureTime"
+    case favoriteActivity = "favoriteActivity"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .joinDate: return "Member Since"
+        case .age: return "Age"
+        case .achievements: return "Achievements"
+        case .totalTrips: return "Total Trips"
+        case .adventureTime: return "Adventure Time"
+        case .favoriteActivity: return "Favorite Activity"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .joinDate: return "calendar.badge.clock"
+        case .age: return "number"
+        case .achievements: return "trophy.fill"
+        case .totalTrips: return "figure.walk"
+        case .adventureTime: return "hourglass"
+        case .favoriteActivity: return "star.fill"
+        }
+    }
+
+    var iconColor: Color {
+        switch self {
+        case .joinDate: return .blue
+        case .age: return .purple
+        case .achievements: return .orange
+        case .totalTrips: return .red
+        case .adventureTime: return .green
+        case .favoriteActivity: return .yellow
+        }
+    }
+}
+
 class AppPreferences: ObservableObject {
     static let shared = AppPreferences()
 
@@ -243,6 +287,14 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    @Published var friendStatOrder: [FriendStatType] {
+        didSet {
+            if let data = try? JSONEncoder().encode(friendStatOrder) {
+                UserDefaults.standard.set(data, forKey: "friendStatOrder")
+            }
+        }
+    }
+
     var shouldShowWhatsNew: Bool {
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         // Only show if user has seen a previous version (not a fresh install) and it's different from current
@@ -344,6 +396,14 @@ class AppPreferences: ObservableObject {
         self.showFriendTotalTrips = UserDefaults.standard.object(forKey: "showFriendTotalTrips") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendTotalTrips")
         self.showFriendAdventureTime = UserDefaults.standard.object(forKey: "showFriendAdventureTime") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendAdventureTime")
         self.showFriendFavoriteActivity = UserDefaults.standard.object(forKey: "showFriendFavoriteActivity") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendFavoriteActivity")
+
+        // Friend stat order - load or use default order
+        if let data = UserDefaults.standard.data(forKey: "friendStatOrder"),
+           let order = try? JSONDecoder().decode([FriendStatType].self, from: data) {
+            self.friendStatOrder = order
+        } else {
+            self.friendStatOrder = FriendStatType.allCases
+        }
     }
 
     // MARK: - Pinned Activities Helpers
@@ -1575,11 +1635,12 @@ struct AboutView: View {
 
 struct FriendsSettingsView: View {
     @EnvironmentObject var preferences: AppPreferences
+    @State private var isEditing = false
 
     var body: some View {
         List {
             Section {
-                Text("Choose what information is visible when viewing a friend's profile.")
+                Text("Choose what information is visible when viewing a friend's profile. Drag to reorder.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -1609,65 +1670,47 @@ struct FriendsSettingsView: View {
                 }
             }
 
-            Section("Visibility Toggles") {
-                Toggle(isOn: $preferences.showFriendJoinDate) {
+            Section("Stats") {
+                ForEach(preferences.friendStatOrder) { statType in
                     HStack {
-                        Image(systemName: "calendar.badge.clock")
-                            .foregroundStyle(.blue)
+                        Image(systemName: statType.icon)
+                            .foregroundStyle(statType.iconColor)
                             .frame(width: 24)
-                        Text("Member Since")
+
+                        Text(statType.displayName)
+
+                        Spacer()
+
+                        Toggle("", isOn: binding(for: statType))
+                            .labelsHidden()
                     }
                 }
-
-                Toggle(isOn: $preferences.showFriendAge) {
-                    HStack {
-                        Image(systemName: "number")
-                            .foregroundStyle(.purple)
-                            .frame(width: 24)
-                        Text("Age")
-                    }
-                }
-
-                Toggle(isOn: $preferences.showFriendAchievements) {
-                    HStack {
-                        Image(systemName: "trophy.fill")
-                            .foregroundStyle(.orange)
-                            .frame(width: 24)
-                        Text("Achievements")
-                    }
-                }
-
-                Toggle(isOn: $preferences.showFriendTotalTrips) {
-                    HStack {
-                        Image(systemName: "figure.walk")
-                            .foregroundStyle(.red)
-                            .frame(width: 24)
-                        Text("Total Trips")
-                    }
-                }
-
-                Toggle(isOn: $preferences.showFriendAdventureTime) {
-                    HStack {
-                        Image(systemName: "hourglass")
-                            .foregroundStyle(.green)
-                            .frame(width: 24)
-                        Text("Adventure Time")
-                    }
-                }
-
-                Toggle(isOn: $preferences.showFriendFavoriteActivity) {
-                    HStack {
-                        Image(systemName: "star.fill")
-                            .foregroundStyle(.yellow)
-                            .frame(width: 24)
-                        Text("Favorite Activity")
-                    }
+                .onMove { from, to in
+                    preferences.friendStatOrder.move(fromOffsets: from, toOffset: to)
                 }
             }
         }
         .scrollIndicators(.hidden)
         .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
+        .environment(\.editMode, .constant(.active))
+    }
+
+    private func binding(for statType: FriendStatType) -> Binding<Bool> {
+        switch statType {
+        case .joinDate:
+            return $preferences.showFriendJoinDate
+        case .age:
+            return $preferences.showFriendAge
+        case .achievements:
+            return $preferences.showFriendAchievements
+        case .totalTrips:
+            return $preferences.showFriendTotalTrips
+        case .adventureTime:
+            return $preferences.showFriendAdventureTime
+        case .favoriteActivity:
+            return $preferences.showFriendFavoriteActivity
+        }
     }
 }
 
