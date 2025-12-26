@@ -47,6 +47,7 @@ struct FriendsTabView: View {
             .sheet(item: $selectedFriend) { friend in
                 FriendProfileView(friend: friend)
                     .environmentObject(session)
+                    .environmentObject(AppPreferences.shared)
             }
             .task {
                 await loadData()
@@ -243,16 +244,6 @@ struct FriendRowView: View {
             }
 
             Spacer()
-
-            // Push notification indicator
-            HStack(spacing: 4) {
-                Image(systemName: "bell.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                Text("Push")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
 
             Image(systemName: "chevron.right")
                 .font(.caption)

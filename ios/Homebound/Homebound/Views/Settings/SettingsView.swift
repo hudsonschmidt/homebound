@@ -206,6 +206,43 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - Friends Mini Profile
+    @Published var showFriendJoinDate: Bool {
+        didSet {
+            UserDefaults.standard.set(showFriendJoinDate, forKey: "showFriendJoinDate")
+        }
+    }
+
+    @Published var showFriendAge: Bool {
+        didSet {
+            UserDefaults.standard.set(showFriendAge, forKey: "showFriendAge")
+        }
+    }
+
+    @Published var showFriendAchievements: Bool {
+        didSet {
+            UserDefaults.standard.set(showFriendAchievements, forKey: "showFriendAchievements")
+        }
+    }
+
+    @Published var showFriendTotalTrips: Bool {
+        didSet {
+            UserDefaults.standard.set(showFriendTotalTrips, forKey: "showFriendTotalTrips")
+        }
+    }
+
+    @Published var showFriendAdventureTime: Bool {
+        didSet {
+            UserDefaults.standard.set(showFriendAdventureTime, forKey: "showFriendAdventureTime")
+        }
+    }
+
+    @Published var showFriendFavoriteActivity: Bool {
+        didSet {
+            UserDefaults.standard.set(showFriendFavoriteActivity, forKey: "showFriendFavoriteActivity")
+        }
+    }
+
     var shouldShowWhatsNew: Bool {
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         // Only show if user has seen a previous version (not a fresh install) and it's different from current
@@ -299,6 +336,14 @@ class AppPreferences: ObservableObject {
         } else {
             self.seenAchievementIds = []
         }
+
+        // Friends Mini Profile - defaults (join date true, age false, rest true)
+        self.showFriendJoinDate = UserDefaults.standard.object(forKey: "showFriendJoinDate") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendJoinDate")
+        self.showFriendAge = UserDefaults.standard.object(forKey: "showFriendAge") == nil ? false : UserDefaults.standard.bool(forKey: "showFriendAge")
+        self.showFriendAchievements = UserDefaults.standard.object(forKey: "showFriendAchievements") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendAchievements")
+        self.showFriendTotalTrips = UserDefaults.standard.object(forKey: "showFriendTotalTrips") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendTotalTrips")
+        self.showFriendAdventureTime = UserDefaults.standard.object(forKey: "showFriendAdventureTime") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendAdventureTime")
+        self.showFriendFavoriteActivity = UserDefaults.standard.object(forKey: "showFriendFavoriteActivity") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendFavoriteActivity")
     }
 
     // MARK: - Pinned Activities Helpers
@@ -435,6 +480,15 @@ struct SettingsView: View {
                         } icon: {
                             Image(systemName: "lock.fill")
                                 .foregroundStyle(.blue)
+                        }
+                    }
+
+                    NavigationLink(destination: FriendsSettingsView()) {
+                        Label {
+                            Text("Friends")
+                        } icon: {
+                            Image(systemName: "person.2.fill")
+                                .foregroundStyle(.green)
                         }
                     }
 
@@ -1513,6 +1567,106 @@ struct AboutView: View {
         }
         .scrollIndicators(.hidden)
         .navigationTitle("About")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Friends Settings View
+
+struct FriendsSettingsView: View {
+    @EnvironmentObject var preferences: AppPreferences
+
+    var body: some View {
+        List {
+            Section {
+                Text("Choose what information is visible when viewing a friend's profile.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .listRowBackground(Color.clear)
+
+            Section("Always Shown") {
+                HStack {
+                    Image(systemName: "person.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24)
+                    Text("Name")
+                    Spacer()
+                    Image(systemName: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                HStack {
+                    Image(systemName: "heart.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24)
+                    Text("Friends Since")
+                    Spacer()
+                    Image(systemName: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Section("Visibility Toggles") {
+                Toggle(isOn: $preferences.showFriendJoinDate) {
+                    HStack {
+                        Image(systemName: "calendar.badge.clock")
+                            .foregroundStyle(.blue)
+                            .frame(width: 24)
+                        Text("Member Since")
+                    }
+                }
+
+                Toggle(isOn: $preferences.showFriendAge) {
+                    HStack {
+                        Image(systemName: "number")
+                            .foregroundStyle(.purple)
+                            .frame(width: 24)
+                        Text("Age")
+                    }
+                }
+
+                Toggle(isOn: $preferences.showFriendAchievements) {
+                    HStack {
+                        Image(systemName: "trophy.fill")
+                            .foregroundStyle(.orange)
+                            .frame(width: 24)
+                        Text("Achievements")
+                    }
+                }
+
+                Toggle(isOn: $preferences.showFriendTotalTrips) {
+                    HStack {
+                        Image(systemName: "figure.walk")
+                            .foregroundStyle(.red)
+                            .frame(width: 24)
+                        Text("Total Trips")
+                    }
+                }
+
+                Toggle(isOn: $preferences.showFriendAdventureTime) {
+                    HStack {
+                        Image(systemName: "hourglass")
+                            .foregroundStyle(.green)
+                            .frame(width: 24)
+                        Text("Adventure Time")
+                    }
+                }
+
+                Toggle(isOn: $preferences.showFriendFavoriteActivity) {
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .frame(width: 24)
+                        Text("Favorite Activity")
+                    }
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

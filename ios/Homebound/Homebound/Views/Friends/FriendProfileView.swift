@@ -3,6 +3,7 @@ import SwiftUI
 /// View showing a friend's profile details with option to remove
 struct FriendProfileView: View {
     @EnvironmentObject var session: Session
+    @EnvironmentObject var preferences: AppPreferences
     @Environment(\.dismiss) var dismiss
     let friend: Friend
 
@@ -13,14 +14,13 @@ struct FriendProfileView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Profile header
+                    // Profile header (always shown)
                     profileHeaderView
 
-                    // Info cards
-                    infoCardsView
-
-                    // Safety contact info
-                    safetyContactInfoView
+                    // Stats grid (conditional based on preferences)
+                    if hasVisibleStats {
+                        statsGridView
+                    }
 
                     Spacer(minLength: 40)
 
@@ -54,7 +54,18 @@ struct FriendProfileView: View {
         }
     }
 
-    // MARK: - Profile Header
+    // MARK: - Check if any stats are visible
+
+    private var hasVisibleStats: Bool {
+        preferences.showFriendJoinDate ||
+        preferences.showFriendAge ||
+        preferences.showFriendAchievements ||
+        preferences.showFriendTotalTrips ||
+        preferences.showFriendAdventureTime ||
+        preferences.showFriendFavoriteActivity
+    }
+
+    // MARK: - Profile Header (always shown: name, profile photo, friends since)
 
     var profileHeaderView: some View {
         VStack(spacing: 16) {
@@ -78,9 +89,17 @@ struct FriendProfileView: View {
                     .font(.title2)
                     .fontWeight(.bold)
 
-                Text("Homebound Member")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                // Friends since (always shown)
+                if let friendshipDate = friend.friendshipSinceDate {
+                    HStack(spacing: 4) {
+                        Image(systemName: "heart.fill")
+                            .font(.caption)
+                            .foregroundStyle(.pink)
+                        Text("Friends since \(friendshipDate.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .padding(.top, 20)
@@ -104,35 +123,78 @@ struct FriendProfileView: View {
             )
     }
 
-    // MARK: - Info Cards
+    // MARK: - Stats Grid (conditional)
 
-    var infoCardsView: some View {
+    var statsGridView: some View {
         VStack(spacing: 12) {
             // Member since
-            if let memberDate = friend.memberSinceDate {
-                infoCard(
-                    icon: "person.badge.clock",
+            if preferences.showFriendJoinDate, let memberDate = friend.memberSinceDate {
+                statCard(
+                    icon: "calendar.badge.clock",
+                    iconColor: .blue,
                     title: "Member Since",
-                    value: memberDate.formatted(date: .long, time: .omitted)
+                    value: memberDate.formatted(date: .abbreviated, time: .omitted)
                 )
             }
 
-            // Friends since
-            if let friendshipDate = friend.friendshipSinceDate {
-                infoCard(
-                    icon: "heart.fill",
-                    title: "Friends Since",
-                    value: friendshipDate.formatted(date: .long, time: .omitted)
+            // Age
+            if preferences.showFriendAge, let age = friend.age, age > 0 {
+                statCard(
+                    icon: "number",
+                    iconColor: .purple,
+                    title: "Age",
+                    value: "\(age) years old"
+                )
+            }
+
+            // Achievements
+            if preferences.showFriendAchievements, let count = friend.achievements_count {
+                statCard(
+                    icon: "trophy.fill",
+                    iconColor: .orange,
+                    title: "Achievements",
+                    value: "\(count) unlocked"
+                )
+            }
+
+            // Total trips
+            if preferences.showFriendTotalTrips, let trips = friend.total_trips {
+                statCard(
+                    icon: "figure.walk",
+                    iconColor: .red,
+                    title: "Total Trips",
+                    value: "\(trips) trips"
+                )
+            }
+
+            // Adventure time
+            if preferences.showFriendAdventureTime, let formatted = friend.formattedAdventureTime {
+                statCard(
+                    icon: "hourglass",
+                    iconColor: .green,
+                    title: "Adventure Time",
+                    value: formatted
+                )
+            }
+
+            // Favorite activity
+            if preferences.showFriendFavoriteActivity,
+               let activityName = friend.favorite_activity_name,
+               let activityIcon = friend.favorite_activity_icon {
+                statCardWithEmoji(
+                    emoji: activityIcon,
+                    title: "Favorite Activity",
+                    value: activityName
                 )
             }
         }
     }
 
-    func infoCard(icon: String, title: String, value: String) -> some View {
+    func statCard(icon: String, iconColor: Color, title: String, value: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.title3)
-                .foregroundStyle(Color.hbBrand)
+                .foregroundStyle(iconColor)
                 .frame(width: 32)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -151,66 +213,26 @@ struct FriendProfileView: View {
         .cornerRadius(12)
     }
 
-    // MARK: - Safety Contact Info
+    func statCardWithEmoji(emoji: String, title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(emoji)
+                .font(.title3)
+                .frame(width: 32)
 
-    var safetyContactInfoView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("As Safety Contact")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 12) {
-                    Image(systemName: "bell.badge.fill")
-                        .font(.title3)
-                        .foregroundStyle(.green)
-                        .frame(width: 32)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Push Notifications")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Text("Gets instant alerts on their phone")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    Image(systemName: "bolt.fill")
-                        .font(.title3)
-                        .foregroundStyle(.orange)
-                        .frame(width: 32)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Faster Response")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Text("No email delays - immediate notification")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    Image(systemName: "shield.checkered")
-                        .font(.title3)
-                        .foregroundStyle(.blue)
-                        .frame(width: 32)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Trip Updates")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Text("Notified when you start, complete, or are overdue")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
             }
-            .padding()
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(12)
+
+            Spacer()
         }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
     }
 
     // MARK: - Remove Button
@@ -260,7 +282,14 @@ struct FriendProfileView: View {
         last_name: "Doe",
         profile_photo_url: nil,
         member_since: "2024-01-15T00:00:00",
-        friendship_since: "2024-06-01T00:00:00"
+        friendship_since: "2024-06-01T00:00:00",
+        age: 28,
+        achievements_count: 12,
+        total_trips: 45,
+        total_adventure_hours: 120,
+        favorite_activity_name: "Hiking",
+        favorite_activity_icon: "🥾"
     ))
     .environmentObject(Session())
+    .environmentObject(AppPreferences.shared)
 }

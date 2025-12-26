@@ -29,6 +29,13 @@ class FriendResponse(BaseModel):
     profile_photo_url: str | None
     member_since: str
     friendship_since: str
+    # Mini profile stats
+    age: int | None = None
+    achievements_count: int | None = None
+    total_trips: int | None = None
+    total_adventure_hours: int | None = None
+    favorite_activity_name: str | None = None
+    favorite_activity_icon: str | None = None
 
 
 class FriendInviteResponse(BaseModel):
@@ -88,6 +95,137 @@ def _create_friendship(connection, user_id: int, other_user_id: int) -> None:
         ),
         {"id1": id1, "id2": id2}
     )
+
+
+def _compute_friend_stats(connection, friend_user_id: int) -> dict:
+    """Compute stats for a friend's mini profile.
+
+    Returns dict with: age, achievements_count, total_trips,
+    total_adventure_hours, favorite_activity_name, favorite_activity_icon
+    """
+    # Get user age
+    user = connection.execute(
+        sqlalchemy.text("SELECT age FROM users WHERE id = :user_id"),
+        {"user_id": friend_user_id}
+    ).fetchone()
+    age = user.age if user and user.age and user.age > 0 else None
+
+    # Get total completed trips count
+    trips_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(*) as count
+            FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            """
+        ),
+        {"user_id": friend_user_id}
+    ).fetchone()
+    total_trips = trips_result.count if trips_result else 0
+
+    # Get total adventure hours (sum of trip durations for completed trips)
+    hours_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COALESCE(
+                SUM(EXTRACT(EPOCH FROM (completed_at - start)) / 3600),
+                0
+            ) as total_hours
+            FROM trips
+            WHERE user_id = :user_id
+            AND status = 'completed'
+            AND completed_at IS NOT NULL
+            """
+        ),
+        {"user_id": friend_user_id}
+    ).fetchone()
+    total_adventure_hours = int(hours_result.total_hours) if hours_result else 0
+
+    # Calculate achievements count based on trip thresholds
+    achievements_count = _calculate_achievements_count(
+        total_trips, total_adventure_hours, connection, friend_user_id
+    )
+
+    # Get favorite activity (most common for completed trips)
+    favorite_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT a.name, a.icon, COUNT(*) as trip_count
+            FROM trips t
+            JOIN activities a ON t.activity = a.id
+            WHERE t.user_id = :user_id AND t.status = 'completed'
+            GROUP BY a.id, a.name, a.icon
+            ORDER BY trip_count DESC
+            LIMIT 1
+            """
+        ),
+        {"user_id": friend_user_id}
+    ).fetchone()
+    favorite_activity_name = favorite_result.name if favorite_result else None
+    favorite_activity_icon = favorite_result.icon if favorite_result else None
+
+    return {
+        "age": age,
+        "achievements_count": achievements_count,
+        "total_trips": total_trips,
+        "total_adventure_hours": total_adventure_hours,
+        "favorite_activity_name": favorite_activity_name,
+        "favorite_activity_icon": favorite_activity_icon,
+    }
+
+
+def _calculate_achievements_count(
+    total_trips: int, total_hours: int, connection, user_id: int
+) -> int:
+    """Calculate achievements earned based on trip data (mirrors iOS logic)."""
+    count = 0
+
+    # Total Trips achievements
+    for threshold in [1, 5, 10, 25, 50, 100, 150, 200, 250, 500, 1000]:
+        if total_trips >= threshold:
+            count += 1
+
+    # Adventure Time achievements (hours)
+    for threshold in [1, 10, 50, 100, 250, 500, 1000, 2500]:
+        if total_hours >= threshold:
+            count += 1
+
+    # Activities tried achievements
+    activities_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(DISTINCT activity) as count
+            FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    unique_activities = activities_result.count if activities_result else 0
+    for threshold in [1, 3, 5, 10, 15, 20]:
+        if unique_activities >= threshold:
+            count += 1
+
+    # Locations achievements
+    locations_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(DISTINCT location_text) as count
+            FROM trips
+            WHERE user_id = :user_id
+            AND status = 'completed'
+            AND location_text IS NOT NULL
+            AND location_text != ''
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    unique_locations = locations_result.count if locations_result else 0
+    for threshold in [1, 5, 10, 25, 50, 100, 250]:
+        if unique_locations >= threshold:
+            count += 1
+
+    return count
 
 
 # ==================== Invite Endpoints ====================
@@ -291,13 +429,22 @@ def accept_invite(
 
         background_tasks.add_task(send_push_sync)
 
+        # Compute stats for the inviter
+        stats = _compute_friend_stats(connection, inviter_id)
+
         return FriendResponse(
             user_id=inviter.id,
             first_name=inviter.first_name or "",
             last_name=inviter.last_name or "",
             profile_photo_url=inviter.profile_photo_url,
             member_since=inviter.created_at.isoformat() if inviter.created_at else "",
-            friendship_since=friendship.created_at.isoformat() if friendship else ""
+            friendship_since=friendship.created_at.isoformat() if friendship else "",
+            age=stats["age"],
+            achievements_count=stats["achievements_count"],
+            total_trips=stats["total_trips"],
+            total_adventure_hours=stats["total_adventure_hours"],
+            favorite_activity_name=stats["favorite_activity_name"],
+            favorite_activity_icon=stats["favorite_activity_icon"],
         )
 
 
@@ -353,7 +500,7 @@ def get_pending_invites(user_id: int = Depends(auth.get_current_user_id)):
 
 @router.get("/", response_model=list[FriendResponse])
 def get_friends(user_id: int = Depends(auth.get_current_user_id)):
-    """Get all friends for the current user."""
+    """Get all friends for the current user with their stats."""
     with db.engine.begin() as connection:
         # Query friendships where user is either user_id_1 or user_id_2
         friends = connection.execute(
@@ -377,17 +524,24 @@ def get_friends(user_id: int = Depends(auth.get_current_user_id)):
             {"user_id": user_id}
         ).fetchall()
 
-        return [
-            FriendResponse(
+        result = []
+        for f in friends:
+            stats = _compute_friend_stats(connection, f.user_id)
+            result.append(FriendResponse(
                 user_id=f.user_id,
                 first_name=f.first_name or "",
                 last_name=f.last_name or "",
                 profile_photo_url=f.profile_photo_url,
                 member_since=f.member_since.isoformat() if f.member_since else "",
-                friendship_since=f.friendship_since.isoformat() if f.friendship_since else ""
-            )
-            for f in friends
-        ]
+                friendship_since=f.friendship_since.isoformat() if f.friendship_since else "",
+                age=stats["age"],
+                achievements_count=stats["achievements_count"],
+                total_trips=stats["total_trips"],
+                total_adventure_hours=stats["total_adventure_hours"],
+                favorite_activity_name=stats["favorite_activity_name"],
+                favorite_activity_icon=stats["favorite_activity_icon"],
+            ))
+        return result
 
 
 # ==================== Friend's Active Trips ====================
@@ -512,7 +666,7 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
 
 @router.get("/{friend_user_id}", response_model=FriendResponse)
 def get_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_user_id)):
-    """Get a specific friend's profile."""
+    """Get a specific friend's profile with stats."""
     with db.engine.begin() as connection:
         # Verify they are friends
         friendship = _get_friendship(connection, user_id, friend_user_id)
@@ -540,13 +694,21 @@ def get_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_user
                 detail="User not found"
             )
 
+        stats = _compute_friend_stats(connection, friend_user_id)
+
         return FriendResponse(
             user_id=friend.id,
             first_name=friend.first_name or "",
             last_name=friend.last_name or "",
             profile_photo_url=friend.profile_photo_url,
             member_since=friend.created_at.isoformat() if friend.created_at else "",
-            friendship_since=friendship.created_at.isoformat() if friendship.created_at else ""
+            friendship_since=friendship.created_at.isoformat() if friendship.created_at else "",
+            age=stats["age"],
+            achievements_count=stats["achievements_count"],
+            total_trips=stats["total_trips"],
+            total_adventure_hours=stats["total_adventure_hours"],
+            favorite_activity_name=stats["favorite_activity_name"],
+            favorite_activity_icon=stats["favorite_activity_icon"],
         )
 
 

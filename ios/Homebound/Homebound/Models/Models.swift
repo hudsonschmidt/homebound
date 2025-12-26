@@ -25,6 +25,14 @@ struct Friend: Codable, Identifiable, Hashable {
     let member_since: String
     let friendship_since: String
 
+    // Mini profile stats
+    let age: Int?
+    let achievements_count: Int?
+    let total_trips: Int?
+    let total_adventure_hours: Int?
+    let favorite_activity_name: String?
+    let favorite_activity_icon: String?
+
     var id: Int { user_id }
 
     var fullName: String {
@@ -40,6 +48,17 @@ struct Friend: Codable, Identifiable, Hashable {
 
     var friendshipSinceDate: Date? {
         DateUtils.parseISO8601(friendship_since)
+    }
+
+    /// Formatted adventure time (e.g., "5d 3h" or "12h")
+    var formattedAdventureTime: String? {
+        guard let hours = total_adventure_hours else { return nil }
+        if hours >= 24 {
+            let days = hours / 24
+            let remainingHours = hours % 24
+            return "\(days)d \(remainingHours)h"
+        }
+        return "\(hours)h"
     }
 }
 
