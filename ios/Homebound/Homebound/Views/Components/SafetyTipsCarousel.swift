@@ -11,10 +11,10 @@ struct SafetyTipsCarousel: View {
                 HStack {
                     Image(systemName: "shield.checkered")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.primary)
                     Text("Safety Tips")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.primary)
                     Spacer()
                 }
                 .padding(.bottom, 4)
@@ -25,12 +25,12 @@ struct SafetyTipsCarousel: View {
                         HStack(alignment: .top, spacing: 8) {
                             Text("•")
                                 .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.8))
+                                .foregroundStyle(.secondary)
                                 .frame(width: 12, alignment: .leading)
 
                             Text(tip)
                                 .font(.system(size: 12, weight: .regular))
-                                .foregroundStyle(.white.opacity(0.85))
+                                .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }

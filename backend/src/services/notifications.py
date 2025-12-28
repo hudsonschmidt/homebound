@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -753,6 +754,7 @@ async def send_overdue_notifications(
         )
 
         log.info(f"Sent overdue notification to {recipient_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
 
     # Send push notification to user with checkout action
     trip_id = get_attr(trip, 'id')
@@ -832,6 +834,7 @@ async def send_trip_created_emails(
         )
 
         log.info(f"Sent trip created notification to {recipient_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
 
 # Trip starting --------------------------------------------------------------------------------
 async def send_trip_starting_now_emails(
@@ -894,6 +897,7 @@ async def send_trip_starting_now_emails(
         )
 
         log.info(f"Sent trip starting now notification to {recipient_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
 
 # Check in --------------------------------------------------------------------------------
 async def send_checkin_update_emails(
@@ -960,6 +964,7 @@ async def send_checkin_update_emails(
         )
 
         log.info(f"Sent checkin update to {recipient_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
 
 # Trip extended --------------------------------------------------------------------------------
 async def send_trip_extended_emails(
@@ -1022,6 +1027,7 @@ async def send_trip_extended_emails(
         )
 
         log.info(f"Sent trip extended notification to {recipient_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
 
 # Trip completed --------------------------------------------------------------------------------
 async def send_trip_completed_emails(
@@ -1078,6 +1084,7 @@ async def send_trip_completed_emails(
         )
 
         log.info(f"Sent trip completed notification to {recipient_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
 
 # Overdue resolved --------------------------------------------------------------------------------
 async def send_overdue_resolved_emails(
@@ -1131,4 +1138,5 @@ async def send_overdue_resolved_emails(
         )
 
         log.info(f"Sent overdue resolved notification to {recipient_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
 

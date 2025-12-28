@@ -477,7 +477,7 @@ struct ActivePlanCardCompact: View {
     }
 
     var statusForeground: Color {
-        timeState == .onTime ? .white.opacity(0.9) : statusColor
+        timeState == .onTime ? .primary : statusColor
     }
 
     var bannerOpacity: Double {
@@ -660,7 +660,7 @@ struct ActivePlanCardCompact: View {
     }
 
     var timeLabelColor: Color {
-        isUrgent ? statusColor.opacity(0.9) : .white.opacity(0.7)
+        isUrgent ? statusColor.opacity(0.9) : .secondary
     }
 
     var timeFont: Font {
@@ -671,7 +671,7 @@ struct ActivePlanCardCompact: View {
         switch timeState {
         case .overdue: return .red
         case .graceWarning: return .orange
-        case .onTime: return .white
+        case .onTime: return .primary
         }
     }
 
@@ -685,12 +685,12 @@ struct ActivePlanCardCompact: View {
                     Text(plan.title)
                         .font(.title2)
                         .fontWeight(.bold)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
 
                     Text(plan.activity.name)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -703,7 +703,7 @@ struct ActivePlanCardCompact: View {
                     Text(location)
                         .font(.subheadline)
                 }
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -812,7 +812,7 @@ struct ActivePlanCardCompact: View {
             VStack(spacing: 8) {
                 Text("Extend trip by:")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -833,7 +833,7 @@ struct ActivePlanCardCompact: View {
                                 Text(label)
                                     .font(.caption)
                                     .fontWeight(.medium)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
                                     .glassmorphicButton(cornerRadius: 8)
@@ -854,7 +854,7 @@ struct ActivePlanCardCompact: View {
                 Label("Extend Time", systemImage: "clock.arrow.circlepath")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -869,13 +869,13 @@ struct ActivePlanCardCompact: View {
                     Text("\(checkinCount) check-in\(checkinCount == 1 ? "" : "s")")
                         .font(.caption)
                 }
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.secondary)
 
                 Spacer()
 
                 Text("Last: \(relativeTimeString(from: lastCheckin))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
             }
         }
     }
