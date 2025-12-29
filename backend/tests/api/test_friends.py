@@ -824,3 +824,353 @@ def test_friends_list_ordered_by_friendship_date():
             _cleanup_user(connection, friend1_id)
             _cleanup_user(connection, friend2_id)
             _cleanup_user(connection, friend3_id)
+
+
+# ==================== Request Update Tests ====================
+
+from src.api.friends import request_trip_update, get_friend_active_trips
+
+
+def _create_trip_for_user(connection, user_id: int, title: str = "Test Trip", status: str = "active") -> int:
+    """Helper to create a trip for testing."""
+    now = datetime.utcnow()
+    result = connection.execute(
+        sqlalchemy.text(
+            """
+            INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text,
+                              gen_lat, gen_lon, status, created_at)
+            VALUES (:user_id, :title, 1, :start, :eta, 30, 'Test Location',
+                   37.7749, -122.4194, :status, :created_at)
+            RETURNING id
+            """
+        ),
+        {
+            "user_id": user_id,
+            "title": title,
+            "start": now,
+            "eta": now + timedelta(hours=2),
+            "status": status,
+            "created_at": now
+        }
+    )
+    return result.fetchone()[0]
+
+
+def _add_friend_to_trip(connection, trip_id: int, friend_user_id: int):
+    """Helper to add a friend as a safety contact for a trip."""
+    connection.execute(
+        sqlalchemy.text(
+            """
+            INSERT INTO trip_safety_contacts (trip_id, friend_user_id)
+            VALUES (:trip_id, :friend_user_id)
+            """
+        ),
+        {"trip_id": trip_id, "friend_user_id": friend_user_id}
+    )
+
+
+def _cleanup_trip(connection, trip_id: int):
+    """Helper to clean up a trip."""
+    connection.execute(
+        sqlalchemy.text("DELETE FROM update_requests WHERE trip_id = :trip_id"),
+        {"trip_id": trip_id}
+    )
+    connection.execute(
+        sqlalchemy.text("DELETE FROM trip_safety_contacts WHERE trip_id = :trip_id"),
+        {"trip_id": trip_id}
+    )
+    connection.execute(
+        sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE id = :trip_id"),
+        {"trip_id": trip_id}
+    )
+    connection.execute(
+        sqlalchemy.text("DELETE FROM events WHERE trip_id = :trip_id"),
+        {"trip_id": trip_id}
+    )
+    connection.execute(
+        sqlalchemy.text("DELETE FROM live_locations WHERE trip_id = :trip_id"),
+        {"trip_id": trip_id}
+    )
+    connection.execute(
+        sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
+        {"trip_id": trip_id}
+    )
+
+
+def test_request_update_success():
+    """Test successfully requesting an update from trip owner."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "tripowner@test.com", "Trip", "Owner")
+        friend_id = _create_test_user(connection, "tripfriend@test.com", "Trip", "Friend")
+
+    trip_id = None
+    try:
+        # Create friendship
+        invite = create_invite(user_id=owner_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=friend_id)
+
+        # Create trip and add friend as safety contact
+        with db.engine.begin() as connection:
+            trip_id = _create_trip_for_user(connection, owner_id, "Mountain Hike")
+            _add_friend_to_trip(connection, trip_id, friend_id)
+
+        # Request update
+        result = request_trip_update(trip_id, BackgroundTasks(), user_id=friend_id)
+
+        assert result.ok is True
+        # On success, cooldown_remaining_seconds shows the 10min cooldown for next request
+    finally:
+        with db.engine.begin() as connection:
+            if trip_id:
+                _cleanup_trip(connection, trip_id)
+            _cleanup_user(connection, owner_id)
+            _cleanup_user(connection, friend_id)
+
+
+def test_request_update_not_friend():
+    """Test that non-friend cannot request update."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "notfriendowner@test.com", "Not", "Friend")
+        stranger_id = _create_test_user(connection, "stranger@test.com", "Random", "Stranger")
+
+    trip_id = None
+    try:
+        # Create trip (no friendship, stranger not a safety contact)
+        with db.engine.begin() as connection:
+            trip_id = _create_trip_for_user(connection, owner_id, "Solo Trip")
+
+        # Stranger tries to request update - should fail
+        with pytest.raises(HTTPException) as exc_info:
+            request_trip_update(trip_id, BackgroundTasks(), user_id=stranger_id)
+        assert exc_info.value.status_code == 403
+    finally:
+        with db.engine.begin() as connection:
+            if trip_id:
+                _cleanup_trip(connection, trip_id)
+            _cleanup_user(connection, owner_id)
+            _cleanup_user(connection, stranger_id)
+
+
+def test_request_update_cooldown():
+    """Test that request update has a cooldown period."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "cooldownowner@test.com", "Cooldown", "Owner")
+        friend_id = _create_test_user(connection, "cooldownfriend@test.com", "Cooldown", "Friend")
+
+    trip_id = None
+    try:
+        # Create friendship
+        invite = create_invite(user_id=owner_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=friend_id)
+
+        # Create trip and add friend as safety contact
+        with db.engine.begin() as connection:
+            trip_id = _create_trip_for_user(connection, owner_id, "Cooldown Trip")
+            _add_friend_to_trip(connection, trip_id, friend_id)
+
+        # First request - should succeed
+        result1 = request_trip_update(trip_id, BackgroundTasks(), user_id=friend_id)
+        assert result1.ok is True
+
+        # Second request immediately - should fail with cooldown
+        result2 = request_trip_update(trip_id, BackgroundTasks(), user_id=friend_id)
+        assert result2.ok is False
+        assert result2.cooldown_remaining_seconds is not None
+        assert result2.cooldown_remaining_seconds > 0
+    finally:
+        with db.engine.begin() as connection:
+            if trip_id:
+                _cleanup_trip(connection, trip_id)
+            _cleanup_user(connection, owner_id)
+            _cleanup_user(connection, friend_id)
+
+
+def test_request_update_trip_not_found():
+    """Test request update for non-existent trip."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "notfoundtrip@test.com", "NotFound", "Trip")
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            request_trip_update(999999, BackgroundTasks(), user_id=user_id)
+        # API returns 403 (not a safety contact) for non-existent trips
+        assert exc_info.value.status_code == 403
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_request_update_completed_trip():
+    """Test that cannot request update for completed trip."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "completedowner@test.com", "Completed", "Owner")
+        friend_id = _create_test_user(connection, "completedfriend@test.com", "Completed", "Friend")
+
+    trip_id = None
+    try:
+        # Create friendship
+        invite = create_invite(user_id=owner_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=friend_id)
+
+        # Create completed trip and add friend
+        with db.engine.begin() as connection:
+            trip_id = _create_trip_for_user(connection, owner_id, "Done Trip", status="completed")
+            _add_friend_to_trip(connection, trip_id, friend_id)
+
+        # Request update for completed trip - should fail
+        with pytest.raises(HTTPException) as exc_info:
+            request_trip_update(trip_id, BackgroundTasks(), user_id=friend_id)
+        # API returns 404 for non-active trips ("Trip not found or not active")
+        assert exc_info.value.status_code == 404
+    finally:
+        with db.engine.begin() as connection:
+            if trip_id:
+                _cleanup_trip(connection, trip_id)
+            _cleanup_user(connection, owner_id)
+            _cleanup_user(connection, friend_id)
+
+
+# ==================== Active Trips with Check-in Locations Tests ====================
+
+def test_get_active_friend_trips_basic():
+    """Test getting active trips for friends."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "activeowner@test.com", "Active", "Owner")
+        friend_id = _create_test_user(connection, "activefriend@test.com", "Active", "Friend")
+
+    trip_id = None
+    try:
+        # Create friendship
+        invite = create_invite(user_id=owner_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=friend_id)
+
+        # Create active trip and add friend as safety contact
+        with db.engine.begin() as connection:
+            trip_id = _create_trip_for_user(connection, owner_id, "Active Trip")
+            _add_friend_to_trip(connection, trip_id, friend_id)
+
+        # Get active trips as friend
+        trips = get_friend_active_trips(user_id=friend_id)
+
+        assert len(trips) >= 1
+        trip = next((t for t in trips if t.id == trip_id), None)
+        assert trip is not None
+        assert trip.title == "Active Trip"
+        assert trip.owner.first_name == "Active"
+    finally:
+        with db.engine.begin() as connection:
+            if trip_id:
+                _cleanup_trip(connection, trip_id)
+            _cleanup_user(connection, owner_id)
+            _cleanup_user(connection, friend_id)
+
+
+def test_get_active_friend_trips_with_checkin_locations():
+    """Test that active trips include check-in locations when owner allows."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "checkinowner@test.com", "Checkin", "Owner")
+        friend_id = _create_test_user(connection, "checkinfriend@test.com", "Checkin", "Friend")
+
+    trip_id = None
+    try:
+        # Create friendship
+        invite = create_invite(user_id=owner_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=friend_id)
+
+        # Create active trip with friend as safety contact
+        with db.engine.begin() as connection:
+            trip_id = _create_trip_for_user(connection, owner_id, "Checkin Trip")
+            _add_friend_to_trip(connection, trip_id, friend_id)
+
+            # Add a check-in event with location
+            now = datetime.utcnow()
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO events (user_id, trip_id, what, timestamp, lat, lon)
+                    VALUES (:user_id, :trip_id, 'checkin', :timestamp, :lat, :lon)
+                    """
+                ),
+                {
+                    "user_id": owner_id,
+                    "trip_id": trip_id,
+                    "timestamp": now,
+                    "lat": 37.7749,
+                    "lon": -122.4194
+                }
+            )
+
+        # Get active trips as friend
+        trips = get_friend_active_trips(user_id=friend_id)
+
+        trip = next((t for t in trips if t.id == trip_id), None)
+        assert trip is not None
+
+        # Check that check-in locations are included
+        assert trip.checkin_locations is not None
+        assert len(trip.checkin_locations) >= 1
+        assert trip.checkin_locations[0].latitude == 37.7749
+        assert trip.checkin_locations[0].longitude == -122.4194
+    finally:
+        with db.engine.begin() as connection:
+            if trip_id:
+                _cleanup_trip(connection, trip_id)
+            _cleanup_user(connection, owner_id)
+            _cleanup_user(connection, friend_id)
+
+
+def test_get_active_friend_trips_no_trips():
+    """Test getting active trips when no friends have active trips."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "noactivetrips@test.com", "NoActive", "Trips")
+
+    try:
+        trips = get_friend_active_trips(user_id=user_id)
+        assert trips == []
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_get_active_friend_trips_only_active_status():
+    """Test that active and planned trips are returned, but not completed."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "statusowner@test.com", "Status", "Owner")
+        friend_id = _create_test_user(connection, "statusfriend@test.com", "Status", "Friend")
+
+    active_trip_id = None
+    planned_trip_id = None
+    completed_trip_id = None
+    try:
+        # Create friendship
+        invite = create_invite(user_id=owner_id)
+        accept_invite(invite.token, BackgroundTasks(), user_id=friend_id)
+
+        # Create trips with different statuses
+        with db.engine.begin() as connection:
+            active_trip_id = _create_trip_for_user(connection, owner_id, "Active Trip", status="active")
+            _add_friend_to_trip(connection, active_trip_id, friend_id)
+
+            planned_trip_id = _create_trip_for_user(connection, owner_id, "Planned Trip", status="planned")
+            _add_friend_to_trip(connection, planned_trip_id, friend_id)
+
+            completed_trip_id = _create_trip_for_user(connection, owner_id, "Completed Trip", status="completed")
+            _add_friend_to_trip(connection, completed_trip_id, friend_id)
+
+        # Get active trips - should see active and planned, but not completed
+        trips = get_friend_active_trips(user_id=friend_id)
+
+        trip_ids = [t.id for t in trips]
+        assert active_trip_id in trip_ids
+        assert planned_trip_id in trip_ids  # Planned trips are included for friends
+        assert completed_trip_id not in trip_ids
+    finally:
+        with db.engine.begin() as connection:
+            if active_trip_id:
+                _cleanup_trip(connection, active_trip_id)
+            if planned_trip_id:
+                _cleanup_trip(connection, planned_trip_id)
+            if completed_trip_id:
+                _cleanup_trip(connection, completed_trip_id)
+            _cleanup_user(connection, owner_id)
+            _cleanup_user(connection, friend_id)

@@ -1647,3 +1647,191 @@ def test_export_user_data_full():
             sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id}
         )
+
+
+# ==================== Friend Visibility Settings Tests ====================
+
+from src.api.profile import (
+    FriendVisibilitySettings,
+    get_friend_visibility,
+    update_friend_visibility,
+)
+
+
+def test_get_friend_visibility_defaults():
+    """Test that friend visibility settings have correct defaults."""
+    test_email = "friend-visibility-defaults@test.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user with default settings
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Visibility",
+                "last_name": "Test",
+                "age": 25
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    try:
+        settings = get_friend_visibility(user_id=user_id)
+
+        assert isinstance(settings, FriendVisibilitySettings)
+        # Check defaults
+        assert settings.friend_share_checkin_locations is True
+        assert settings.friend_share_live_location is False
+        assert settings.friend_share_notes is True
+        assert settings.friend_allow_update_requests is True
+    finally:
+        with db.engine.begin() as connection:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
+
+
+def test_update_friend_visibility():
+    """Test updating friend visibility settings."""
+    test_email = "friend-visibility-update@test.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Update",
+                "last_name": "Visibility",
+                "age": 30
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    try:
+        # Update all settings
+        new_settings = FriendVisibilitySettings(
+            friend_share_checkin_locations=False,
+            friend_share_live_location=True,
+            friend_share_notes=False,
+            friend_allow_update_requests=False
+        )
+        result = update_friend_visibility(new_settings, user_id=user_id)
+
+        assert result.friend_share_checkin_locations is False
+        assert result.friend_share_live_location is True
+        assert result.friend_share_notes is False
+        assert result.friend_allow_update_requests is False
+
+        # Verify changes persisted
+        settings = get_friend_visibility(user_id=user_id)
+        assert settings.friend_share_checkin_locations is False
+        assert settings.friend_share_live_location is True
+        assert settings.friend_share_notes is False
+        assert settings.friend_allow_update_requests is False
+    finally:
+        with db.engine.begin() as connection:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
+
+
+def test_update_friend_visibility_partial():
+    """Test that updating some settings doesn't affect others."""
+    test_email = "friend-visibility-partial@test.com"
+
+    with db.engine.begin() as connection:
+        # Clean up
+        connection.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES (:email, :first_name, :last_name, :age)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Partial",
+                "last_name": "Update",
+                "age": 28
+            }
+        )
+        user_id = result.fetchone()[0]
+
+    try:
+        # First update - disable checkin locations
+        settings1 = FriendVisibilitySettings(
+            friend_share_checkin_locations=False,
+            friend_share_live_location=False,
+            friend_share_notes=True,
+            friend_allow_update_requests=True
+        )
+        update_friend_visibility(settings1, user_id=user_id)
+
+        # Verify
+        result = get_friend_visibility(user_id=user_id)
+        assert result.friend_share_checkin_locations is False
+        assert result.friend_share_live_location is False
+        assert result.friend_share_notes is True
+        assert result.friend_allow_update_requests is True
+
+        # Second update - enable live location, disable notes
+        settings2 = FriendVisibilitySettings(
+            friend_share_checkin_locations=False,
+            friend_share_live_location=True,
+            friend_share_notes=False,
+            friend_allow_update_requests=True
+        )
+        update_friend_visibility(settings2, user_id=user_id)
+
+        # Verify all settings are as expected
+        result = get_friend_visibility(user_id=user_id)
+        assert result.friend_share_checkin_locations is False
+        assert result.friend_share_live_location is True
+        assert result.friend_share_notes is False
+        assert result.friend_allow_update_requests is True
+    finally:
+        with db.engine.begin() as connection:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
+
+
+def test_get_friend_visibility_nonexistent_user():
+    """Test getting visibility settings for non-existent user returns 404."""
+    with pytest.raises(HTTPException) as exc_info:
+        get_friend_visibility(user_id=999999)
+    assert exc_info.value.status_code == 404
+    assert "not found" in exc_info.value.detail.lower()

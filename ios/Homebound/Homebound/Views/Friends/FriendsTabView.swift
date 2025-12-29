@@ -493,10 +493,17 @@ struct FriendPlannedTripCompact: View {
 /// Expanded card for active/overdue trips with live timer
 struct FriendActiveTripCardExpanded: View {
     let trip: FriendActiveTrip
+    @EnvironmentObject var session: Session
 
     // Timer state
     @State private var timeRemaining = ""
     @State private var timeState: FriendTripTimeState = .onTime
+
+    // Map and request update state
+    @State private var showingMap = false
+    @State private var isRequestingUpdate = false
+    @State private var updateRequestCooldown: Int? = nil
+    @State private var cooldownTimer: Timer? = nil
 
     private var statusColor: Color {
         switch timeState {
@@ -589,8 +596,27 @@ struct FriendActiveTripCardExpanded: View {
                 .foregroundStyle(.secondary)
             }
 
-            // Last check-in (if available)
-            if let lastCheckin = trip.lastCheckinDate {
+            // Last check-in with location (enhanced for friends)
+            if let lastCheckin = trip.lastCheckinLocation {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                    if let locationName = lastCheckin.location_name {
+                        Text("Last seen: \(locationName)")
+                    } else if let date = lastCheckin.timestampDate {
+                        Text("Last check-in: \(date.formatted(.relative(presentation: .named)))")
+                    }
+                    Spacer()
+                    if let date = lastCheckin.timestampDate {
+                        Text(date.formatted(.relative(presentation: .named)))
+                            .font(.caption2)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if let lastCheckin = trip.lastCheckinDate {
+                // Fallback for trips without location data
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption2)
@@ -599,6 +625,18 @@ struct FriendActiveTripCardExpanded: View {
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
+            }
+
+            // Live location indicator
+            if trip.live_location != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "location.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                    Text("Live location sharing enabled")
+                        .font(.caption)
+                }
+                .foregroundStyle(.blue)
             }
 
             // Full notes (no line limit for expanded view)
@@ -610,6 +648,60 @@ struct FriendActiveTripCardExpanded: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            // Action buttons row
+            Divider()
+
+            HStack(spacing: 12) {
+                // View on Map button (if there's location data)
+                if trip.hasLocationData {
+                    Button {
+                        showingMap = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "map.fill")
+                            Text("View Map")
+                        }
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.blue)
+                        .clipShape(Capsule())
+                    }
+                }
+
+                Spacer()
+
+                // Request Update button (always visible)
+                Button {
+                    requestUpdate()
+                } label: {
+                    HStack(spacing: 4) {
+                        if isRequestingUpdate {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "bell.badge")
+                        }
+                        if let cooldown = updateRequestCooldown, cooldown > 0 {
+                            Text("Wait \(cooldown)s")
+                        } else {
+                            Text("Request Update")
+                        }
+                    }
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(updateRequestCooldown != nil ? Color.gray : Color.orange)
+                    .clipShape(Capsule())
+                }
+                .disabled(isRequestingUpdate || (updateRequestCooldown ?? 0) > 0)
+            }
         }
         .padding()
         .background(
@@ -620,6 +712,21 @@ struct FriendActiveTripCardExpanded: View {
                         .strokeBorder(statusColor.opacity(0.3), lineWidth: 1)
                 )
         )
+        .sheet(isPresented: $showingMap) {
+            FriendTripMapView(trip: trip)
+        }
+        .onAppear {
+            // Calculate time state immediately so button visibility is correct
+            updateTimeRemaining()
+            // Check if there's already a pending request (from has_pending_update_request)
+            if trip.has_pending_update_request == true {
+                updateRequestCooldown = 600 // Assume full cooldown if pending
+                startCooldownTimer()
+            }
+        }
+        .onDisappear {
+            cooldownTimer?.invalidate()
+        }
         .task {
             // Initial update
             updateTimeRemaining()
@@ -627,6 +734,32 @@ struct FriendActiveTripCardExpanded: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 updateTimeRemaining()
+            }
+        }
+    }
+
+    private func requestUpdate() {
+        isRequestingUpdate = true
+        Task {
+            let result = await session.requestTripUpdate(tripId: trip.id)
+            await MainActor.run {
+                isRequestingUpdate = false
+                if let cooldown = result.cooldown_remaining_seconds {
+                    updateRequestCooldown = cooldown
+                    startCooldownTimer()
+                }
+            }
+        }
+    }
+
+    private func startCooldownTimer() {
+        cooldownTimer?.invalidate()
+        cooldownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            if let current = updateRequestCooldown, current > 0 {
+                updateRequestCooldown = current - 1
+            } else {
+                updateRequestCooldown = nil
+                cooldownTimer?.invalidate()
             }
         }
     }

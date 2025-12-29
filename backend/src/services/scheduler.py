@@ -751,6 +751,33 @@ async def clean_stale_live_activity_tokens():
         log.error(f"Error cleaning stale Live Activity tokens: {e}", exc_info=True)
 
 
+async def clean_old_live_locations():
+    """Clean up old live location records older than 7 days.
+
+    The live_locations table can grow indefinitely from active trips sharing
+    their location. This job prevents unbounded table growth by removing
+    stale location data that's no longer useful for monitoring.
+    """
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=7)
+
+        with db.engine.begin() as conn:
+            result = conn.execute(
+                sqlalchemy.text("""
+                    DELETE FROM live_locations
+                    WHERE timestamp < :cutoff
+                """),
+                {"cutoff": cutoff}
+            )
+            deleted = result.rowcount
+
+            if deleted > 0:
+                log.info(f"[Scheduler] Cleaned {deleted} old live location records (older than 7 days)")
+
+    except Exception as e:
+        log.error(f"Error cleaning old live locations: {e}", exc_info=True)
+
+
 def init_scheduler() -> AsyncIOScheduler:
     """Initialize and configure the scheduler."""
     global scheduler
@@ -790,6 +817,16 @@ def init_scheduler() -> AsyncIOScheduler:
         IntervalTrigger(hours=24),
         id="clean_live_activity_tokens",
         name="Clean stale Live Activity tokens",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    # Clean old live location records daily (older than 7 days)
+    scheduler.add_job(
+        clean_old_live_locations,
+        IntervalTrigger(hours=24),
+        id="clean_live_locations",
+        name="Clean old live location records",
         replace_existing=True,
         max_instances=1,
     )

@@ -1689,11 +1689,26 @@ struct FriendsSettingsView: View {
                     preferences.friendStatOrder.move(fromOffsets: from, toOffset: to)
                 }
             }
+            .environment(\.editMode, .constant(.active))
+
+            Section {
+                NavigationLink(destination: FriendVisibilitySettingsView()) {
+                    HStack {
+                        Image(systemName: "eye.fill")
+                            .foregroundStyle(.blue)
+                            .frame(width: 24)
+                        Text("What Friends See About You")
+                    }
+                }
+            } header: {
+                Text("Trip Visibility")
+            } footer: {
+                Text("Control what information friends can see when they're your safety contacts.")
+            }
         }
         .scrollIndicators(.hidden)
         .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
-        .environment(\.editMode, .constant(.active))
     }
 
     private func binding(for statType: FriendStatType) -> Binding<Bool> {
@@ -1710,6 +1725,149 @@ struct FriendsSettingsView: View {
             return $preferences.showFriendAdventureTime
         case .favoriteActivity:
             return $preferences.showFriendFavoriteActivity
+        }
+    }
+}
+
+// MARK: - Friend Visibility Settings View
+
+struct FriendVisibilitySettingsView: View {
+    @EnvironmentObject var session: Session
+    @State private var settings: FriendVisibilitySettings = .defaults
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var showLocationPermissionAlert = false
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(isOn: $settings.friend_share_checkin_locations) {
+                    Label("Share check-in locations", systemImage: "mappin.circle.fill")
+                }
+                .onChange(of: settings.friend_share_checkin_locations) { _, _ in saveSettings() }
+
+                Toggle(isOn: $settings.friend_share_live_location) {
+                    Label("Allow live location sharing", systemImage: "location.fill")
+                }
+                .onChange(of: settings.friend_share_live_location) { _, newValue in
+                    if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
+                        // Request permission upgrade - don't reset toggle yet
+                        LiveLocationManager.shared.requestPermissionIfNeeded()
+                        // Show alert explaining they may need to go to Settings
+                        showLocationPermissionAlert = true
+                        // Don't save yet - wait for permission check on app active
+                        return
+                    }
+                    saveSettings()
+                }
+
+                Toggle(isOn: $settings.friend_share_notes) {
+                    Label("Share trip notes", systemImage: "note.text")
+                }
+                .onChange(of: settings.friend_share_notes) { _, _ in saveSettings() }
+
+                Toggle(isOn: $settings.friend_allow_update_requests) {
+                    Label("Allow update requests", systemImage: "bell.badge.fill")
+                }
+                .onChange(of: settings.friend_allow_update_requests) { _, _ in saveSettings() }
+            } header: {
+                Text("What friends can see")
+            } footer: {
+                Text("These settings apply when friends are your safety contacts. Friends get richer information than email contacts to help monitor your safety.")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Friends vs Email Contacts", systemImage: "person.2.fill")
+                        .font(.headline)
+
+                    Text("Friends (app users) receive:")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        BulletPoint("Check-in locations on a map")
+                        BulletPoint("Real-time location (if enabled)")
+                        BulletPoint("Rich overdue alerts with last known location")
+                        BulletPoint("Ability to request updates")
+                    }
+
+                    Text("Email contacts only receive basic notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Why share more with friends?")
+            }
+        }
+        .navigationTitle("Friend Visibility")
+        .navigationBarTitleDisplayMode(.inline)
+        .overlay {
+            if isLoading {
+                ProgressView()
+            }
+        }
+        .disabled(isSaving)
+        .task {
+            await loadSettings()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // Re-check permission when app becomes active (after returning from Settings)
+            if settings.friend_share_live_location && !LiveLocationManager.shared.hasRequiredAuthorization {
+                settings.friend_share_live_location = false
+            } else if settings.friend_share_live_location {
+                // Permission was granted, now save the setting
+                saveSettings()
+            }
+        }
+        .alert("Location Permission Required", isPresented: $showLocationPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Live location sharing requires 'Always Allow' location permission so your friends can see your location even when the app is in the background. Please enable it in Settings.")
+        }
+    }
+
+    private func loadSettings() async {
+        isLoading = true
+        settings = await session.loadFriendVisibilitySettings()
+        isLoading = false
+    }
+
+    private func saveSettings() {
+        isSaving = true
+        Task {
+            let success = await session.saveFriendVisibilitySettings(settings)
+            await MainActor.run {
+                isSaving = false
+                if !success {
+                    // Settings will be reloaded on next view appearance
+                }
+            }
+        }
+    }
+}
+
+private struct BulletPoint: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+            Text(text)
+                .font(.caption)
         }
     }
 }

@@ -195,6 +195,7 @@ class TripCreate(BaseModel):
     notify_start_hour: int | None = None  # Hour (0-23) when notifications start
     notify_end_hour: int | None = None  # Hour (0-23) when notifications end
     notify_self: bool = False  # Send copy of all emails to trip owner
+    share_live_location: bool = False  # Share live location with friends during trip
 
 
 class TripUpdate(BaseModel):
@@ -225,6 +226,7 @@ class TripUpdate(BaseModel):
     notify_start_hour: int | None = None
     notify_end_hour: int | None = None
     notify_self: bool | None = None  # Send copy of all emails to trip owner
+    share_live_location: bool | None = None  # Share live location with friends during trip
 
 
 class TripResponse(BaseModel):
@@ -262,6 +264,7 @@ class TripResponse(BaseModel):
     start_timezone: str | None
     eta_timezone: str | None
     notify_self: bool
+    share_live_location: bool
 
 
 class TimelineEvent(BaseModel):
@@ -445,7 +448,8 @@ def create_trip(
                     notes, status,
                     contact1, contact2, contact3, created_at,
                     checkin_token, checkout_token, timezone, start_timezone, eta_timezone,
-                    checkin_interval_min, notify_start_hour, notify_end_hour, notify_self
+                    checkin_interval_min, notify_start_hour, notify_end_hour, notify_self,
+                    share_live_location
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
                     :location_text, :gen_lat, :gen_lon,
@@ -453,7 +457,8 @@ def create_trip(
                     :notes, :status,
                     :contact1, :contact2, :contact3, :created_at,
                     :checkin_token, :checkout_token, :timezone, :start_timezone, :eta_timezone,
-                    :checkin_interval_min, :notify_start_hour, :notify_end_hour, :notify_self
+                    :checkin_interval_min, :notify_start_hour, :notify_end_hour, :notify_self,
+                    :share_live_location
                 )
                 RETURNING id
                 """
@@ -486,7 +491,8 @@ def create_trip(
                 "checkin_interval_min": body.checkin_interval_min,
                 "notify_start_hour": body.notify_start_hour,
                 "notify_end_hour": body.notify_end_hour,
-                "notify_self": body.notify_self
+                "notify_self": body.notify_self,
+                "share_live_location": body.share_live_location
             }
         )
         row = result.fetchone()
@@ -512,7 +518,7 @@ def create_trip(
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -678,7 +684,8 @@ def create_trip(
             timezone=trip["timezone"],
             start_timezone=trip["start_timezone"],
             eta_timezone=trip["eta_timezone"],
-            notify_self=trip["notify_self"]
+            notify_self=trip["notify_self"],
+            share_live_location=trip.get("share_live_location", False)
         )
 
 
@@ -696,7 +703,7 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -761,7 +768,8 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     timezone=trip["timezone"],
                     start_timezone=trip["start_timezone"],
                     eta_timezone=trip["eta_timezone"],
-                    notify_self=trip["notify_self"]
+                    notify_self=trip["notify_self"],
+                    share_live_location=trip.get("share_live_location", False)
                 )
             )
 
@@ -785,7 +793,7 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -851,7 +859,8 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             timezone=trip["timezone"],
             start_timezone=trip["start_timezone"],
             eta_timezone=trip["eta_timezone"],
-            notify_self=trip["notify_self"]
+            notify_self=trip["notify_self"],
+            share_live_location=trip.get("share_live_location", False)
         )
 
 
@@ -869,7 +878,7 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -936,7 +945,8 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             timezone=trip["timezone"],
             start_timezone=trip["start_timezone"],
             eta_timezone=trip["eta_timezone"],
-            notify_self=trip["notify_self"]
+            notify_self=trip["notify_self"],
+            share_live_location=trip.get("share_live_location", False)
         )
 
 
@@ -1051,6 +1061,7 @@ def update_trip(
             "notify_start_hour": body.notify_start_hour,
             "notify_end_hour": body.notify_end_hour,
             "notify_self": body.notify_self,
+            "share_live_location": body.share_live_location,
         }
 
         for field, value in simple_fields.items():
@@ -1123,7 +1134,7 @@ def update_trip(
                        t.last_checkin, t.created_at, t.contact1, t.contact2, t.contact3,
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
-                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self,
+                       t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -1185,7 +1196,8 @@ def update_trip(
             timezone=updated_trip["timezone"],
             start_timezone=updated_trip["start_timezone"],
             eta_timezone=updated_trip["eta_timezone"],
-            notify_self=updated_trip["notify_self"]
+            notify_self=updated_trip["notify_self"],
+            share_live_location=updated_trip.get("share_live_location", False)
         )
 
 
@@ -1708,6 +1720,117 @@ def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user
             )
             for e in events
         ]
+
+
+# ==================== Live Location Sharing ====================
+
+class LiveLocationUpdate(BaseModel):
+    """Request body for updating live location during a trip."""
+    latitude: float
+    longitude: float
+    altitude: float | None = None
+    horizontal_accuracy: float | None = None
+    speed: float | None = None
+
+
+class LiveLocationResponse(BaseModel):
+    ok: bool
+    message: str
+
+
+@router.post("/{trip_id}/live-location", response_model=LiveLocationResponse)
+def update_live_location(
+    trip_id: int,
+    body: LiveLocationUpdate,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Update live location during an active trip.
+
+    This endpoint is called periodically by the iOS app when live location
+    sharing is enabled for a trip. Friends who are safety contacts can see
+    the latest location on their map view.
+
+    Requirements:
+    - Trip must belong to the user
+    - Trip must be active (active, overdue, or overdue_notified status)
+    - Trip must have share_live_location enabled
+    """
+    with db.engine.begin() as connection:
+        # Verify trip belongs to user and has live sharing enabled
+        trip = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT id, share_live_location, status
+                FROM trips
+                WHERE id = :trip_id AND user_id = :user_id
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if not trip:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trip not found"
+            )
+
+        # Check if trip is in an active state
+        active_statuses = ('active', 'overdue', 'overdue_notified')
+        if trip.status not in active_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Trip is not active (status: {trip.status})"
+            )
+
+        # Check if live location sharing is enabled for this trip
+        if not trip.share_live_location:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Live location sharing is not enabled for this trip"
+            )
+
+        now = datetime.now(UTC)
+
+        # Insert the new location
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO live_locations
+                (trip_id, user_id, latitude, longitude, altitude, horizontal_accuracy, speed, timestamp)
+                VALUES (:trip_id, :user_id, :lat, :lon, :alt, :acc, :speed, :ts)
+                """
+            ),
+            {
+                "trip_id": trip_id,
+                "user_id": user_id,
+                "lat": body.latitude,
+                "lon": body.longitude,
+                "alt": body.altitude,
+                "acc": body.horizontal_accuracy,
+                "speed": body.speed,
+                "ts": now.isoformat()
+            }
+        )
+
+        # Clean up old locations (keep last 100 per trip)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                DELETE FROM live_locations
+                WHERE trip_id = :trip_id AND id NOT IN (
+                    SELECT id FROM live_locations
+                    WHERE trip_id = :trip_id
+                    ORDER BY timestamp DESC
+                    LIMIT 100
+                )
+                """
+            ),
+            {"trip_id": trip_id}
+        )
+
+        log.info(f"[LiveLocation] Updated location for trip {trip_id}: {body.latitude}, {body.longitude}")
+
+        return LiveLocationResponse(ok=True, message="Location updated")
 
 
 @router.post("/debug/check-overdue")

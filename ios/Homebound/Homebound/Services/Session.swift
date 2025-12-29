@@ -236,6 +236,7 @@ final class Session: ObservableObject {
     @Published var friends: [Friend] = []
     @Published var pendingInvites: [PendingInvite] = []
     @Published var friendActiveTrips: [FriendActiveTrip] = []
+    @Published var friendVisibilitySettings: FriendVisibilitySettings = .defaults
 
     // Saved trip templates (local-only)
     @Published var savedTemplates: [SavedTripTemplate] = []
@@ -1286,6 +1287,13 @@ final class Session: ObservableObject {
             // Start Live Activity from cache only when restoring from nil state
             let checkinCount = getCheckinCount(tripId: cached.id)
             await LiveActivityManager.shared.startActivity(for: cached, checkinCount: checkinCount)
+
+            // Auto-start live location sharing if enabled for this trip
+            if cached.share_live_location {
+                await MainActor.run {
+                    LiveLocationManager.shared.startSharing(forTripId: cached.id)
+                }
+            }
         }
         // If we already have an activeTrip, don't start a new Live Activity from cache
         // - the API response will handle updating it
@@ -1325,6 +1333,13 @@ final class Session: ObservableObject {
             // Update Live Activity
             let checkinCount = response != nil ? getCheckinCount(tripId: response!.id) : 0
             await LiveActivityManager.shared.restoreActivityIfNeeded(for: response, checkinCount: checkinCount)
+
+            // Auto-start live location sharing if enabled for this trip
+            if let trip = response, trip.share_live_location {
+                await MainActor.run {
+                    LiveLocationManager.shared.startSharing(forTripId: trip.id)
+                }
+            }
         } catch {
             // Network failed - already showing cached data, just stop loading
             await MainActor.run {
@@ -1338,6 +1353,13 @@ final class Session: ObservableObject {
             // Update Live Activity with cached data
             let checkinCount = cachedActive != nil ? getCheckinCount(tripId: cachedActive!.id) : 0
             await LiveActivityManager.shared.restoreActivityIfNeeded(for: cachedActive, checkinCount: checkinCount)
+
+            // Auto-start live location sharing if enabled for this trip
+            if let trip = cachedActive, trip.share_live_location {
+                await MainActor.run {
+                    LiveLocationManager.shared.startSharing(forTripId: trip.id)
+                }
+            }
         }
     }
 
@@ -1848,7 +1870,9 @@ final class Session: ObservableObject {
             // End Live Activity
             await LiveActivityManager.shared.endActivity(for: plan)
 
+            // Stop live location sharing and update UI state in a single dispatch
             await MainActor.run {
+                LiveLocationManager.shared.stopSharing()
                 self.activeTrip = nil
                 self.markTripCompletedInAllTrips(tripId: plan.id)
                 self.notice = "Welcome back! Trip completed safely."
@@ -1891,7 +1915,9 @@ final class Session: ObservableObject {
         // End Live Activity
         await LiveActivityManager.shared.endActivity(for: plan)
 
+        // Stop live location sharing and update UI state in a single dispatch
         await MainActor.run {
+            LiveLocationManager.shared.stopSharing()
             self.activeTrip = nil
             self.markTripCompletedInAllTrips(tripId: plan.id)
             self.notice = "Trip completed (will sync when online)"
@@ -2602,6 +2628,115 @@ final class Session: ObservableObject {
         } catch {
             debugLog("[Session] ❌ Failed to load friend active trips: \(error.localizedDescription)")
             return []
+        }
+    }
+
+    /// Request an update from a trip owner (friend ping feature)
+    /// Returns the response with cooldown info if rate limited
+    func requestTripUpdate(tripId: Int) async -> UpdateRequestResponse {
+        do {
+            let response: UpdateRequestResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/friends/trips/\(tripId)/request-update"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+            if response.ok {
+                debugLog("[Session] ✅ Sent update request for trip \(tripId)")
+            } else {
+                debugLog("[Session] ⏳ Update request rate limited: \(response.cooldown_remaining_seconds ?? 0)s remaining")
+            }
+            return response
+        } catch {
+            debugLog("[Session] ❌ Failed to send update request: \(error.localizedDescription)")
+            return UpdateRequestResponse(ok: false, message: "Failed to send request", cooldown_remaining_seconds: nil)
+        }
+    }
+
+    /// Update live location for a trip
+    /// Sends the current location to the server for friends to see
+    func updateLiveLocation(
+        tripId: Int,
+        latitude: Double,
+        longitude: Double,
+        altitude: Double?,
+        horizontalAccuracy: Double?,
+        speed: Double?
+    ) async throws -> Bool {
+        struct LiveLocationBody: Encodable {
+            let latitude: Double
+            let longitude: Double
+            let altitude: Double?
+            let horizontal_accuracy: Double?
+            let speed: Double?
+        }
+
+        struct LiveLocationResponse: Decodable {
+            let ok: Bool
+            let message: String
+        }
+
+        let body = LiveLocationBody(
+            latitude: latitude,
+            longitude: longitude,
+            altitude: altitude,
+            horizontal_accuracy: horizontalAccuracy,
+            speed: speed
+        )
+
+        let response: LiveLocationResponse = try await withAuth { bearer in
+            try await self.api.post(
+                self.url("/api/v1/trips/\(tripId)/live-location"),
+                body: body,
+                bearer: bearer
+            )
+        }
+
+        return response.ok
+    }
+
+    /// Load friend visibility settings
+    func loadFriendVisibilitySettings() async -> FriendVisibilitySettings {
+        do {
+            let settings: FriendVisibilitySettings = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/profile/friend-visibility"),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Loaded friend visibility settings")
+            await MainActor.run {
+                self.friendVisibilitySettings = settings
+            }
+            return settings
+        } catch {
+            debugLog("[Session] ❌ Failed to load friend visibility settings: \(error.localizedDescription)")
+            return .defaults
+        }
+    }
+
+    /// Save friend visibility settings
+    func saveFriendVisibilitySettings(_ settings: FriendVisibilitySettings) async -> Bool {
+        do {
+            let _: FriendVisibilitySettings = try await withAuth { bearer in
+                try await self.api.put(
+                    self.url("/api/v1/profile/friend-visibility"),
+                    body: settings,
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Saved friend visibility settings")
+            await MainActor.run {
+                self.friendVisibilitySettings = settings
+            }
+            return true
+        } catch {
+            debugLog("[Session] ❌ Failed to save friend visibility settings: \(error.localizedDescription)")
+            await MainActor.run {
+                self.lastError = "Failed to save settings"
+            }
+            return false
         }
     }
 

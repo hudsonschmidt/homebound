@@ -55,6 +55,7 @@ struct CreatePlanView: View {
     @State private var notifySelf = false  // Send copy of all emails to account email
     @State private var savedContacts: [Contact] = []  // Persisted contacts from server
     @State private var selectedFriends: [Friend] = []  // Friends as safety contacts (push notifications)
+    @State private var shareLiveLocation = false  // Share live location with friends
 
     // UI State
     @State private var isCreating = false
@@ -133,11 +134,14 @@ struct CreatePlanView: View {
                         case 4:
                             Step4AdditionalNotes(
                                 notes: $notes,
+                                shareLiveLocation: $shareLiveLocation,
                                 isCreating: $isCreating,
                                 isEditMode: isEditMode,
+                                hasFriendContacts: !selectedFriends.isEmpty,
                                 onSubmit: createPlan,
                                 onSaveAsTemplate: { showSaveTemplateSheet = true }
                             )
+                            .environmentObject(session)
                         default:
                             EmptyView()
                         }
@@ -568,14 +572,19 @@ struct CreatePlanView: View {
                     checkin_interval_min: checkinIntervalMinutes,
                     notify_start_hour: useNotificationHours ? notifyStartHour : nil,
                     notify_end_hour: useNotificationHours ? notifyEndHour : nil,
-                    notify_self: notifySelf
+                    notify_self: notifySelf,
+                    share_live_location: shareLiveLocation
                 )
 
                 let createdPlan = await session.createPlan(plan)
 
                 await MainActor.run {
                     isCreating = false
-                    if createdPlan != nil {
+                    if let trip = createdPlan {
+                        // Start live location sharing if enabled and trip is active
+                        if trip.share_live_location && trip.status == "active" {
+                            LiveLocationManager.shared.startSharing(forTripId: trip.id)
+                        }
                         // Notify that a trip was created so UpcomingTripsSection can refresh
                         NotificationCenter.default.post(name: .tripCreated, object: nil)
                         dismiss()
@@ -2339,12 +2348,17 @@ struct FriendSelectionRow: View {
 
 // MARK: - Step 4: Additional Notes
 struct Step4AdditionalNotes: View {
+    @EnvironmentObject var session: Session
     @Binding var notes: String
+    @Binding var shareLiveLocation: Bool
     @Binding var isCreating: Bool
     var isEditMode: Bool = false
+    var hasFriendContacts: Bool = false  // Show live location only if friends are selected
     let onSubmit: () -> Void
     var onSaveAsTemplate: (() -> Void)? = nil
     @State private var showNotesHelp = false
+    @State private var showLiveLocationInfo = false
+    @State private var showLocationPermissionAlert = false
 
     var body: some View {
         ScrollView {
@@ -2384,6 +2398,86 @@ struct Step4AdditionalNotes: View {
                     Text("Add any additional information that might be helpful to you planning or to your emergency contacts if needed.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+
+                // Live Location Sharing Toggle (only if friend contacts are selected)
+                if hasFriendContacts {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label("Friend Features", systemImage: "person.2.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button(action: { showLiveLocationInfo = true }) {
+                                Image(systemName: "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.hbBrand.opacity(0.7))
+                            }
+                        }
+
+                        Toggle(isOn: $shareLiveLocation) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "location.fill")
+                                    .foregroundStyle(shareLiveLocation ? Color.hbBrand : .secondary)
+                                    .frame(width: 24)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Share Live Location")
+                                        .font(.subheadline)
+                                    Text("Friends can see your location during this trip")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .cornerRadius(12)
+                        .onChange(of: shareLiveLocation) { _, newValue in
+                            if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                // Request permission upgrade - don't reset toggle yet
+                                LiveLocationManager.shared.requestPermissionIfNeeded()
+                                // Show alert explaining they may need to go to Settings
+                                showLocationPermissionAlert = true
+                            }
+                        }
+                        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                            // Re-check permission when app becomes active (after returning from Settings)
+                            if shareLiveLocation && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                shareLiveLocation = false
+                            }
+                        }
+
+                        // Warning if global friend visibility setting is off
+                        if shareLiveLocation && !session.friendVisibilitySettings.friend_share_live_location {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text("Global sharing is off. Enable in Settings > Friends for friends to see your location.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .alert("Live Location Sharing", isPresented: $showLiveLocationInfo) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text("When enabled, friends who are safety contacts can see your real-time location on a map during your trip. This requires 'Always' location permission and uses battery. You can enable this globally in Settings > Friend Visibility.")
+                    }
+                    .alert("Location Permission Required", isPresented: $showLocationPermissionAlert) {
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("Live location sharing requires 'Always Allow' location permission so your friends can see your location even when the app is in the background. Please enable it in Settings.")
+                    }
                 }
 
                 // Ready to Go Section
@@ -2448,6 +2542,10 @@ struct Step4AdditionalNotes: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
+        .task {
+            // Load visibility settings to check global live location sharing status
+            _ = await session.loadFriendVisibilitySettings()
+        }
         .sheet(isPresented: $showNotesHelp) {
             HelpSheet(
                 title: "Additional Notes",

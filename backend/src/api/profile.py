@@ -327,3 +327,85 @@ def delete_account(user_id: int = Depends(auth.get_current_user_id)):
         )
 
         return {"ok": True, "message": "Account deleted successfully"}
+
+
+# ==================== Friend Visibility Settings ====================
+
+class FriendVisibilitySettings(BaseModel):
+    """Settings controlling what friends can see about user's trips."""
+    friend_share_checkin_locations: bool
+    friend_share_live_location: bool
+    friend_share_notes: bool
+    friend_allow_update_requests: bool
+
+
+@router.get("/friend-visibility", response_model=FriendVisibilitySettings)
+def get_friend_visibility(user_id: int = Depends(auth.get_current_user_id)):
+    """Get current friend visibility settings.
+
+    These settings control what information friends (app users who are safety contacts)
+    can see about the user's trips. Friends get richer info than email contacts.
+    """
+    with db.engine.begin() as connection:
+        user = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend_share_checkin_locations, friend_share_live_location,
+                       friend_share_notes, friend_allow_update_requests
+                FROM users
+                WHERE id = :user_id
+                """
+            ),
+            {"user_id": user_id}
+        ).fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Use defaults if columns don't exist yet (backwards compatibility)
+        return FriendVisibilitySettings(
+            friend_share_checkin_locations=getattr(user, 'friend_share_checkin_locations', True),
+            friend_share_live_location=getattr(user, 'friend_share_live_location', False),
+            friend_share_notes=getattr(user, 'friend_share_notes', True),
+            friend_allow_update_requests=getattr(user, 'friend_allow_update_requests', True)
+        )
+
+
+@router.put("/friend-visibility", response_model=FriendVisibilitySettings)
+def update_friend_visibility(
+    body: FriendVisibilitySettings,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Update friend visibility settings.
+
+    These settings control what information friends can see:
+    - friend_share_checkin_locations: Show check-in locations on map
+    - friend_share_live_location: Allow live location sharing (per-trip opt-in still required)
+    - friend_share_notes: Share trip notes with friends
+    - friend_allow_update_requests: Allow friends to request updates
+    """
+    with db.engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.text(
+                """
+                UPDATE users SET
+                    friend_share_checkin_locations = :share_checkins,
+                    friend_share_live_location = :share_live,
+                    friend_share_notes = :share_notes,
+                    friend_allow_update_requests = :allow_requests
+                WHERE id = :user_id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "share_checkins": body.friend_share_checkin_locations,
+                "share_live": body.friend_share_live_location,
+                "share_notes": body.friend_share_notes,
+                "allow_requests": body.friend_allow_update_requests
+            }
+        )
+
+        return body

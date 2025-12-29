@@ -3827,3 +3827,240 @@ def test_friend_contact_defaults_to_none():
     assert trip.friend_contact3 is None
 
     cleanup_test_data(user_id)
+
+
+# ==================== Live Location Tests ====================
+
+from src.api.trips import update_live_location, LiveLocationUpdate
+
+
+def test_update_live_location_success():
+    """Test successfully updating live location for a trip with sharing enabled."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Live Location Test",
+        activity="Hiking",
+        start=now - timedelta(minutes=30),  # Started 30 mins ago
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        share_live_location=True  # Enable live location
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    trip_id = trip.id
+
+    try:
+        # Update live location
+        location_update = LiveLocationUpdate(
+            latitude=37.7749,
+            longitude=-122.4194,
+            altitude=100.0,
+            horizontal_accuracy=5.0,
+            speed=2.5
+        )
+        result = update_live_location(trip_id, location_update, user_id=user_id)
+
+        assert result.ok is True
+        assert "success" in result.message.lower() or "updated" in result.message.lower()
+
+        # Verify location was stored in database
+        with db.engine.begin() as connection:
+            loc = connection.execute(
+                sqlalchemy.text(
+                    "SELECT * FROM live_locations WHERE trip_id = :trip_id ORDER BY id DESC LIMIT 1"
+                ),
+                {"trip_id": trip_id}
+            ).fetchone()
+            assert loc is not None
+            assert loc.latitude == 37.7749
+            assert loc.longitude == -122.4194
+            assert loc.altitude == 100.0
+    finally:
+        cleanup_test_data(user_id)
+
+
+def test_update_live_location_disabled():
+    """Test that updating live location fails when sharing is disabled."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="No Live Location Test",
+        activity="Hiking",
+        start=now - timedelta(minutes=30),
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        share_live_location=False  # Disabled
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    trip_id = trip.id
+
+    try:
+        location_update = LiveLocationUpdate(
+            latitude=37.7749,
+            longitude=-122.4194
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            update_live_location(trip_id, location_update, user_id=user_id)
+        assert exc_info.value.status_code == 403
+        assert "not enabled" in exc_info.value.detail.lower()
+    finally:
+        cleanup_test_data(user_id)
+
+
+def test_update_live_location_inactive_trip():
+    """Test that updating live location fails for non-active trip."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Planned Trip Live Location",
+        activity="Hiking",
+        start=now + timedelta(hours=2),  # Starts in future = planned
+        eta=now + timedelta(hours=4),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        share_live_location=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    trip_id = trip.id
+
+    try:
+        location_update = LiveLocationUpdate(
+            latitude=37.7749,
+            longitude=-122.4194
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            update_live_location(trip_id, location_update, user_id=user_id)
+        assert exc_info.value.status_code == 400
+        assert "not active" in exc_info.value.detail.lower()
+    finally:
+        cleanup_test_data(user_id)
+
+
+def test_update_live_location_wrong_user():
+    """Test that updating live location fails for wrong user."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create another user
+    with db.engine.begin() as connection:
+        other_result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age)
+                VALUES ('other@test.com', 'Other', 'User', 25)
+                RETURNING id
+                """
+            )
+        )
+        other_user_id = other_result.fetchone()[0]
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Other User Live Location",
+        activity="Hiking",
+        start=now - timedelta(minutes=30),
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        share_live_location=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    trip_id = trip.id
+
+    try:
+        location_update = LiveLocationUpdate(
+            latitude=37.7749,
+            longitude=-122.4194
+        )
+        # Other user tries to update - should fail
+        with pytest.raises(HTTPException) as exc_info:
+            update_live_location(trip_id, location_update, user_id=other_user_id)
+        assert exc_info.value.status_code == 404  # Trip not found for this user
+    finally:
+        cleanup_test_data(user_id)
+        with db.engine.begin() as connection:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": other_user_id}
+            )
+
+
+def test_update_live_location_trip_not_found():
+    """Test updating live location for non-existent trip."""
+    user_id, _ = setup_test_user_and_contact()
+
+    try:
+        location_update = LiveLocationUpdate(
+            latitude=37.7749,
+            longitude=-122.4194
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            update_live_location(999999, location_update, user_id=user_id)
+        assert exc_info.value.status_code == 404
+    finally:
+        cleanup_test_data(user_id)
+
+
+def test_share_live_location_in_trip_response():
+    """Test that share_live_location field is included in trip response."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Share Live Location Response Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        share_live_location=True
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert hasattr(trip, 'share_live_location')
+    assert trip.share_live_location is True
+
+    cleanup_test_data(user_id)
+
+
+def test_share_live_location_defaults_to_false():
+    """Test that share_live_location defaults to false."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Default Share Live Location",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id
+        # share_live_location not specified
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    assert trip.share_live_location is False
+
+    cleanup_test_data(user_id)

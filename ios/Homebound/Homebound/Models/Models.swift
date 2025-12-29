@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import SwiftUI
 
@@ -138,6 +139,41 @@ struct FriendActiveTripOwner: Codable {
     }
 }
 
+/// A check-in event with location data for friends to see on a map
+struct CheckinLocation: Codable, Identifiable {
+    let timestamp: String
+    let latitude: Double?
+    let longitude: Double?
+    let location_name: String?
+
+    var id: String { timestamp }
+
+    var timestampDate: Date? {
+        DateUtils.parseISO8601(timestamp)
+    }
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let lat = latitude, let lon = longitude else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+}
+
+/// Real-time location data for friends to track during a trip
+struct LiveLocationData: Codable {
+    let latitude: Double
+    let longitude: Double
+    let timestamp: String
+    let speed: Double?
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var timestampDate: Date? {
+        DateUtils.parseISO8601(timestamp)
+    }
+}
+
 /// A trip where the current user is a friend safety contact
 struct FriendActiveTrip: Codable, Identifiable {
     let id: Int
@@ -155,6 +191,15 @@ struct FriendActiveTrip: Codable, Identifiable {
     let notes: String?
     let timezone: String?
     let last_checkin_at: String?
+
+    // Enhanced friend visibility fields
+    let checkin_locations: [CheckinLocation]?
+    let live_location: LiveLocationData?
+    let destination_lat: Double?
+    let destination_lon: Double?
+    let start_lat: Double?
+    let start_lon: Double?
+    let has_pending_update_request: Bool?
 
     var startDate: Date? { DateUtils.parseISO8601(start) }
     var etaDate: Date? { DateUtils.parseISO8601(eta) }
@@ -176,6 +221,55 @@ struct FriendActiveTrip: Codable, Identifiable {
     /// Primary color from activity
     var primaryColor: Color {
         Color(hex: activity_colors.primary) ?? .hbBrand
+    }
+
+    /// Most recent check-in location
+    var lastCheckinLocation: CheckinLocation? {
+        checkin_locations?.first
+    }
+
+    /// Destination coordinate for map display
+    var destinationCoordinate: CLLocationCoordinate2D? {
+        guard let lat = destination_lat, let lon = destination_lon else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    /// Start location coordinate for map display
+    var startCoordinate: CLLocationCoordinate2D? {
+        guard let lat = start_lat, let lon = start_lon else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    /// True if trip has any location data to display on a map
+    var hasLocationData: Bool {
+        destinationCoordinate != nil || startCoordinate != nil ||
+        (checkin_locations?.contains { $0.coordinate != nil } ?? false) ||
+        live_location != nil
+    }
+}
+
+/// Response from requesting an update from a trip owner
+struct UpdateRequestResponse: Codable {
+    let ok: Bool
+    let message: String
+    let cooldown_remaining_seconds: Int?
+}
+
+/// Friend visibility settings (global per-user)
+struct FriendVisibilitySettings: Codable {
+    var friend_share_checkin_locations: Bool
+    var friend_share_live_location: Bool
+    var friend_share_notes: Bool
+    var friend_allow_update_requests: Bool
+
+    /// Default settings for new users
+    static var defaults: FriendVisibilitySettings {
+        FriendVisibilitySettings(
+            friend_share_checkin_locations: true,
+            friend_share_live_location: false,
+            friend_share_notes: true,
+            friend_allow_update_requests: true
+        )
     }
 }
 
@@ -250,6 +344,7 @@ struct TripCreateRequest: Codable {
     var notify_start_hour: Int?  // Hour (0-23) when notifications start (nil = no restriction)
     var notify_end_hour: Int?    // Hour (0-23) when notifications end (nil = no restriction)
     var notify_self: Bool = false  // Send copy of all emails to trip owner
+    var share_live_location: Bool = false  // Share live location with friends during trip
 }
 
 struct TripUpdateRequest: Codable {
@@ -279,6 +374,7 @@ struct TripUpdateRequest: Codable {
     var notify_start_hour: Int?
     var notify_end_hour: Int?
     var notify_self: Bool?  // Send copy of all emails to trip owner
+    var share_live_location: Bool?  // Share live location with friends during trip
 }
 
 struct Trip: Codable, Identifiable, Equatable {
@@ -316,6 +412,7 @@ struct Trip: Codable, Identifiable, Equatable {
     var start_timezone: String?     // Timezone for start time
     var eta_timezone: String?       // Timezone for return time
     var notify_self: Bool           // Send copy of all emails to trip owner
+    var share_live_location: Bool   // Share live location with friends during trip
 
     // Legacy field name for backward compatibility
     var activity_type: String { activity.name }
@@ -332,7 +429,7 @@ struct Trip: Codable, Identifiable, Equatable {
         case friend_contact1, friend_contact2, friend_contact3
         case checkin_token, checkout_token
         case checkin_interval_min, notify_start_hour, notify_end_hour
-        case timezone, start_timezone, eta_timezone, notify_self
+        case timezone, start_timezone, eta_timezone, notify_self, share_live_location
     }
 
     init(from decoder: Decoder) throws {
@@ -405,6 +502,7 @@ struct Trip: Codable, Identifiable, Equatable {
         start_timezone = try container.decodeIfPresent(String.self, forKey: .start_timezone)
         eta_timezone = try container.decodeIfPresent(String.self, forKey: .eta_timezone)
         notify_self = try container.decodeIfPresent(Bool.self, forKey: .notify_self) ?? false
+        share_live_location = try container.decodeIfPresent(Bool.self, forKey: .share_live_location) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -446,6 +544,7 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(start_timezone, forKey: .start_timezone)
         try container.encodeIfPresent(eta_timezone, forKey: .eta_timezone)
         try container.encode(notify_self, forKey: .notify_self)
+        try container.encode(share_live_location, forKey: .share_live_location)
     }
 
     /// Memberwise initializer for local storage
@@ -483,7 +582,8 @@ struct Trip: Codable, Identifiable, Equatable {
         timezone: String? = nil,
         start_timezone: String? = nil,
         eta_timezone: String? = nil,
-        notify_self: Bool = false
+        notify_self: Bool = false,
+        share_live_location: Bool = false
     ) {
         self.id = id
         self.user_id = user_id
@@ -519,6 +619,7 @@ struct Trip: Codable, Identifiable, Equatable {
         self.start_timezone = start_timezone
         self.eta_timezone = eta_timezone
         self.notify_self = notify_self
+        self.share_live_location = share_live_location
     }
 }
 

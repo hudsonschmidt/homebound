@@ -61,17 +61,17 @@ def checkin_with_token(
                 detail="Invalid or expired check-in link"
             )
 
-        # Log the check-in event
+        # Log the check-in event with location coordinates
         now = datetime.now(UTC)
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO events (user_id, trip_id, what, timestamp)
-                VALUES (:user_id, :trip_id, 'checkin', :timestamp)
+                INSERT INTO events (user_id, trip_id, what, timestamp, lat, lon)
+                VALUES (:user_id, :trip_id, 'checkin', :timestamp, :lat, :lon)
                 RETURNING id
                 """
             ),
-            {"user_id": trip.user_id, "trip_id": trip.id, "timestamp": now.isoformat()}
+            {"user_id": trip.user_id, "trip_id": trip.id, "timestamp": now.isoformat(), "lat": lat, "lon": lon}
         )
         row = result.fetchone()
         assert row is not None

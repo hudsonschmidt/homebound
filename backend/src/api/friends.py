@@ -554,6 +554,22 @@ class FriendActiveTripOwner(BaseModel):
     profile_photo_url: str | None
 
 
+class CheckinLocation(BaseModel):
+    """A check-in event with location data for friends to see on a map."""
+    timestamp: str
+    latitude: float | None
+    longitude: float | None
+    location_name: str | None
+
+
+class LiveLocationData(BaseModel):
+    """Real-time location data for friends to track during a trip."""
+    latitude: float
+    longitude: float
+    timestamp: str
+    speed: float | None
+
+
 class FriendActiveTrip(BaseModel):
     id: int
     owner: FriendActiveTripOwner
@@ -570,6 +586,14 @@ class FriendActiveTrip(BaseModel):
     notes: str | None
     timezone: str | None
     last_checkin_at: str | None
+    # Enhanced friend visibility fields
+    checkin_locations: list[CheckinLocation] | None = None
+    live_location: LiveLocationData | None = None
+    destination_lat: float | None = None
+    destination_lon: float | None = None
+    start_lat: float | None = None
+    start_lon: float | None = None
+    has_pending_update_request: bool = False
 
 
 @router.get("/active-trips", response_model=list[FriendActiveTrip])
@@ -577,33 +601,29 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
     """Get all active/planned trips where the current user is a friend safety contact.
 
     This allows friends to see the status of trips they're monitoring.
+    Friends get enhanced visibility compared to email contacts, including:
+    - Check-in locations on a map
+    - Live location (if owner has enabled it)
+    - Trip coordinates for map display
     """
     import json
     import logging
+    from src.services.geocoding import reverse_geocode_sync
     log = logging.getLogger(__name__)
     log.info(f"[Friends] get_friend_active_trips called for user_id={user_id}")
 
     with db.engine.begin() as connection:
-        # Debug: Check what's in trip_safety_contacts for this user
-        debug_contacts = connection.execute(
-            sqlalchemy.text(
-                """
-                SELECT tsc.trip_id, tsc.friend_user_id, tsc.position, t.status, t.title
-                FROM trip_safety_contacts tsc
-                LEFT JOIN trips t ON t.id = tsc.trip_id
-                WHERE tsc.friend_user_id = :current_user_id
-                """
-            ),
-            {"current_user_id": user_id}
-        ).fetchall()
-        log.info(f"[Friends] Found {len(debug_contacts)} entries in trip_safety_contacts for user {user_id}: {[(c.trip_id, c.status, c.title) for c in debug_contacts]}")
+        # Get trips with owner visibility settings and coordinates
         trips = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
                        t.location_text, t.start_location_text, t.notes, t.status, t.timezone,
+                       t.gen_lat, t.gen_lon, t.start_lat, t.start_lon, t.share_live_location,
                        a.name as activity_name, a.icon as activity_icon, a.colors as activity_colors,
                        u.first_name, u.last_name, u.profile_photo_url,
+                       u.friend_share_checkin_locations, u.friend_share_live_location,
+                       u.friend_share_notes, u.friend_allow_update_requests,
                        e.timestamp as last_checkin_at
                 FROM trips t
                 JOIN trip_safety_contacts tsc ON tsc.trip_id = t.id
@@ -636,6 +656,93 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             if last_checkin_str is not None and hasattr(last_checkin_str, 'isoformat'):
                 last_checkin_str = last_checkin_str.isoformat()
 
+            # Get owner's visibility settings (with defaults for backwards compatibility)
+            share_checkin_locations = trip.get("friend_share_checkin_locations", True)
+            share_live_location = trip.get("friend_share_live_location", False)
+            share_notes = trip.get("friend_share_notes", True)
+            allow_update_requests = trip.get("friend_allow_update_requests", True)
+
+            # Fetch check-in locations if owner allows it
+            checkin_locations = None
+            if share_checkin_locations:
+                checkin_events = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        SELECT timestamp, lat, lon
+                        FROM events
+                        WHERE trip_id = :trip_id AND what = 'checkin' AND lat IS NOT NULL
+                        ORDER BY timestamp DESC
+                        LIMIT 10
+                        """
+                    ),
+                    {"trip_id": trip["id"]}
+                ).fetchall()
+
+                if checkin_events:
+                    checkin_locations = []
+                    for event in checkin_events:
+                        ts = event.timestamp
+                        if hasattr(ts, 'isoformat'):
+                            ts = ts.isoformat()
+                        # Try to reverse geocode the location
+                        location_name = None
+                        if event.lat and event.lon:
+                            try:
+                                location_name = reverse_geocode_sync(event.lat, event.lon)
+                            except Exception:
+                                pass
+                        checkin_locations.append(CheckinLocation(
+                            timestamp=ts,
+                            latitude=event.lat,
+                            longitude=event.lon,
+                            location_name=location_name
+                        ))
+
+            # Fetch live location if owner allows it AND trip has it enabled
+            live_location = None
+            trip_has_live_location = trip.get("share_live_location", False)
+            if share_live_location and trip_has_live_location:
+                live_loc = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        SELECT latitude, longitude, speed, timestamp
+                        FROM live_locations
+                        WHERE trip_id = :trip_id
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"trip_id": trip["id"]}
+                ).fetchone()
+
+                if live_loc:
+                    ts = live_loc.timestamp
+                    if hasattr(ts, 'isoformat'):
+                        ts = ts.isoformat()
+                    live_location = LiveLocationData(
+                        latitude=live_loc.latitude,
+                        longitude=live_loc.longitude,
+                        speed=live_loc.speed,
+                        timestamp=ts
+                    )
+
+            # Check for pending update requests from this friend
+            has_pending_update = False
+            if allow_update_requests:
+                pending = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        SELECT 1 FROM update_requests
+                        WHERE trip_id = :trip_id AND requester_user_id = :user_id
+                        AND resolved_at IS NULL
+                        AND requested_at > NOW() - INTERVAL '10 minutes'
+                        LIMIT 1
+                        """
+                    ),
+                    {"trip_id": trip["id"], "user_id": user_id}
+                ).fetchone()
+                has_pending_update = pending is not None
+
             result.append(FriendActiveTrip(
                 id=trip["id"],
                 owner=FriendActiveTripOwner(
@@ -654,12 +761,157 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
                 grace_min=trip["grace_min"],
                 location_text=trip["location_text"],
                 start_location_text=trip["start_location_text"],
-                notes=trip["notes"],
+                notes=trip["notes"] if share_notes else None,
                 timezone=trip["timezone"],
-                last_checkin_at=last_checkin_str
+                last_checkin_at=last_checkin_str,
+                # Enhanced friend visibility fields
+                checkin_locations=checkin_locations,
+                live_location=live_location,
+                destination_lat=trip["gen_lat"],
+                destination_lon=trip["gen_lon"],
+                start_lat=trip.get("start_lat"),
+                start_lon=trip.get("start_lon"),
+                has_pending_update_request=has_pending_update
             ))
 
         return result
+
+
+# ==================== Update Request Endpoint ====================
+
+class UpdateRequestResponse(BaseModel):
+    ok: bool
+    message: str
+    cooldown_remaining_seconds: int | None = None
+
+
+@router.post("/trips/{trip_id}/request-update", response_model=UpdateRequestResponse)
+def request_trip_update(
+    trip_id: int,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Request an update from the trip owner.
+
+    Friends can use this to "ping" the trip owner when they're worried.
+    Rate limited to 1 request per 10 minutes per trip per user.
+    """
+    from datetime import timezone
+    from src.services.notifications import send_update_request_push
+    import asyncio
+
+    with db.engine.begin() as connection:
+        # Verify user is a friend safety contact for this trip
+        is_contact = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT 1 FROM trip_safety_contacts
+                WHERE trip_id = :trip_id AND friend_user_id = :user_id
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if not is_contact:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a safety contact for this trip"
+            )
+
+        # Get trip info and owner settings
+        trip_info = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT t.title, t.user_id as owner_id, t.status,
+                       u.first_name as owner_first_name, u.friend_allow_update_requests
+                FROM trips t
+                JOIN users u ON t.user_id = u.id
+                WHERE t.id = :trip_id
+                AND t.status IN ('active', 'overdue', 'overdue_notified', 'planned')
+                """
+            ),
+            {"trip_id": trip_id}
+        ).fetchone()
+
+        if not trip_info:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trip not found or not active"
+            )
+
+        # Check if owner allows update requests (default True for backwards compatibility)
+        allow_requests = trip_info.friend_allow_update_requests
+        if allow_requests is not None and not allow_requests:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Trip owner has disabled update requests"
+            )
+
+        # Check for recent request from this user (rate limiting)
+        now = datetime.now(timezone.utc)
+        recent = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT requested_at FROM update_requests
+                WHERE trip_id = :trip_id AND requester_user_id = :user_id
+                AND requested_at > :cutoff
+                ORDER BY requested_at DESC LIMIT 1
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id, "cutoff": (now - timedelta(minutes=10)).isoformat()}
+        ).fetchone()
+
+        if recent:
+            # Calculate remaining cooldown
+            recent_at = recent.requested_at
+            if hasattr(recent_at, 'replace'):
+                recent_at = recent_at.replace(tzinfo=timezone.utc)
+            cooldown_seconds = int(600 - (now - recent_at).total_seconds())
+            return UpdateRequestResponse(
+                ok=False,
+                message="Please wait before requesting another update",
+                cooldown_remaining_seconds=max(0, cooldown_seconds)
+            )
+
+        # Get requester's name for the notification
+        requester = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+        requester_name = f"{requester.first_name} {requester.last_name}".strip() if requester else "A friend"
+
+        # Create the update request
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO update_requests (trip_id, requester_user_id, owner_user_id, requested_at)
+                VALUES (:trip_id, :requester_id, :owner_id, :requested_at)
+                """
+            ),
+            {
+                "trip_id": trip_id,
+                "requester_id": user_id,
+                "owner_id": trip_info.owner_id,
+                "requested_at": now.isoformat()
+            }
+        )
+
+        # Send push notification to trip owner
+        def send_push_sync():
+            asyncio.run(send_update_request_push(
+                owner_user_id=trip_info.owner_id,
+                requester_name=requester_name,
+                trip_title=trip_info.title,
+                trip_id=trip_id
+            ))
+
+        background_tasks.add_task(send_push_sync)
+
+        return UpdateRequestResponse(
+            ok=True,
+            message="Update request sent",
+            cooldown_remaining_seconds=600  # 10 minute cooldown starts now
+        )
 
 
 # ==================== Individual Friend Endpoints ====================

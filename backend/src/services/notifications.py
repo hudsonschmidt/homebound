@@ -61,20 +61,42 @@ async def send_friend_overdue_push(
     friend_user_id: int,
     user_name: str,
     trip_title: str,
-    trip_id: int
+    trip_id: int,
+    last_location_name: str | None = None,
+    last_location_coords: tuple[float, float] | None = None,
+    destination_text: str | None = None,
+    time_overdue_minutes: int = 0
 ):
     """Send URGENT push notification to a friend when a trip they're monitoring is overdue.
 
     This is a high-priority notification that should always be delivered.
+    Enhanced: Now includes location information for better friend visibility.
     """
     title = f"🚨 URGENT: {user_name} is overdue!"
-    body = f"{user_name} hasn't checked in from '{trip_title}'. They may need help!"
+
+    # Build rich body with location details
+    body_parts = [f"{user_name} hasn't checked in from '{trip_title}'"]
+    if time_overdue_minutes > 0:
+        body_parts.append(f"({time_overdue_minutes} min overdue)")
+    if last_location_name:
+        body_parts.append(f"Last seen: {last_location_name}")
+    if destination_text:
+        body_parts.append(f"Destination: {destination_text}")
+    body_parts.append("They may need help!")
+
+    body = ". ".join(body_parts)
+
+    # Include coordinates in data for map deep linking
+    data: dict = {"trip_id": trip_id, "is_overdue_alert": True}
+    if last_location_coords:
+        data["last_known_lat"] = last_location_coords[0]
+        data["last_known_lon"] = last_location_coords[1]
 
     await send_push_to_user(
         friend_user_id,
         title,
         body,
-        data={"trip_id": trip_id, "is_overdue_alert": True},
+        data=data,
         notification_type="emergency"  # Emergency notifications always send
     )
     log.info(f"Sent friend OVERDUE push to user {friend_user_id} for trip {trip_id}")
@@ -119,16 +141,33 @@ async def send_friend_overdue_resolved_push(
 async def send_friend_checkin_push(
     friend_user_id: int,
     user_name: str,
-    trip_title: str
+    trip_title: str,
+    location_name: str | None = None,
+    coordinates: tuple[float, float] | None = None
 ):
-    """Send push notification to a friend when the trip owner checks in."""
+    """Send push notification to a friend when the trip owner checks in.
+
+    Enhanced: Now includes location information for better friend visibility.
+    """
     title = "Check-in Update"
-    body = f"{user_name} checked in on their trip '{trip_title}'"
+
+    # Include location in body if available
+    if location_name:
+        body = f"{user_name} checked in at {location_name} on '{trip_title}'"
+    else:
+        body = f"{user_name} checked in on their trip '{trip_title}'"
+
+    # Include coordinates in data for map deep linking
+    data: dict = {}
+    if coordinates:
+        data["checkin_lat"] = coordinates[0]
+        data["checkin_lon"] = coordinates[1]
 
     await send_push_to_user(
         friend_user_id,
         title,
         body,
+        data=data if data else None,
         notification_type="general"
     )
     log.info(f"Sent friend check-in push to user {friend_user_id}")
@@ -151,6 +190,30 @@ async def send_friend_trip_extended_push(
         notification_type="general"
     )
     log.info(f"Sent friend trip extended push to user {friend_user_id}")
+
+
+async def send_update_request_push(
+    owner_user_id: int,
+    requester_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification to trip owner when a friend requests an update.
+
+    This is sent when a friend who is monitoring the trip wants to know if the owner is okay.
+    """
+    title = "Check-in Requested"
+    body = f"{requester_name} is checking on you for '{trip_title}'. Tap to check in."
+
+    await send_push_to_user(
+        owner_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id, "action": "checkin_requested"},
+        notification_type="checkin",
+        category="CHECKIN_REMINDER"  # Actionable notification
+    )
+    log.info(f"Sent update request push to user {owner_user_id} from friend for trip {trip_id}")
 
 
 async def send_friend_request_accepted_push(
