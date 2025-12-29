@@ -261,6 +261,7 @@ struct FriendVisibilitySettings: Codable {
     var friend_share_live_location: Bool
     var friend_share_notes: Bool
     var friend_allow_update_requests: Bool
+    var friend_share_achievements: Bool
 
     /// Default settings for new users
     static var defaults: FriendVisibilitySettings {
@@ -268,9 +269,58 @@ struct FriendVisibilitySettings: Codable {
             friend_share_checkin_locations: true,
             friend_share_live_location: false,
             friend_share_notes: true,
-            friend_allow_update_requests: true
+            friend_allow_update_requests: true,
+            friend_share_achievements: true
         )
     }
+}
+
+/// A single achievement from a friend's profile
+struct FriendAchievement: Codable, Identifiable {
+    let id: String
+    let title: String
+    let description: String
+    let category: String
+    let sf_symbol: String
+    let threshold: Int
+    let unit: String
+    let is_earned: Bool
+    let earned_date: String?
+    let current_value: Int
+
+    /// Parse earned_date string to Date
+    var earnedDateValue: Date? {
+        guard let dateStr = earned_date else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: dateStr) {
+            return date
+        }
+        // Try without fractional seconds
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: dateStr)
+    }
+
+    /// Map category string to AchievementCategory enum
+    var categoryEnum: AchievementCategory? {
+        switch category {
+        case "totalTrips": return .totalTrips
+        case "adventureTime": return .adventureTime
+        case "activitiesTried": return .activitiesTried
+        case "locations": return .locations
+        case "timeBased": return .timeBased
+        default: return nil
+        }
+    }
+}
+
+/// Full achievements response for a friend
+struct FriendAchievementsResponse: Codable {
+    let user_id: Int
+    let friend_name: String
+    let achievements: [FriendAchievement]
+    let earned_count: Int
+    let total_count: Int
 }
 
 /// Unified safety contact - can be either an email contact or a friend

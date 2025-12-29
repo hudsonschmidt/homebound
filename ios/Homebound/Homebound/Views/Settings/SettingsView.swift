@@ -1770,6 +1770,11 @@ struct FriendVisibilitySettingsView: View {
                     Label("Allow update requests", systemImage: "bell.badge.fill")
                 }
                 .onChange(of: settings.friend_allow_update_requests) { _, _ in saveSettings() }
+
+                Toggle(isOn: $settings.friend_share_achievements) {
+                    Label("Share achievements", systemImage: "trophy.fill")
+                }
+                .onChange(of: settings.friend_share_achievements) { _, _ in saveSettings() }
             } header: {
                 Text("What friends can see")
             } footer: {
@@ -1790,6 +1795,7 @@ struct FriendVisibilitySettingsView: View {
                         BulletPoint("Real-time location (if enabled)")
                         BulletPoint("Rich overdue alerts with last known location")
                         BulletPoint("Ability to request updates")
+                        BulletPoint("Achievement progress and details")
                     }
 
                     Text("Email contacts only receive basic notifications.")

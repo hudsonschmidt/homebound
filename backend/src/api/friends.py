@@ -989,3 +989,317 @@ def remove_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_u
         )
 
         return {"ok": True, "message": "Friend removed"}
+
+
+# ==================== Friend Achievements Endpoint ====================
+
+class FriendAchievementResponse(BaseModel):
+    """A single achievement with earned status and date."""
+    id: str
+    title: str
+    description: str
+    category: str
+    sf_symbol: str
+    threshold: int
+    unit: str
+    is_earned: bool
+    earned_date: str | None = None
+    current_value: int
+
+
+class FriendAchievementsResponse(BaseModel):
+    """Full achievement details for a friend."""
+    user_id: int
+    friend_name: str
+    achievements: list[FriendAchievementResponse]
+    earned_count: int
+    total_count: int
+
+
+# Achievement definitions (mirrors iOS TripStats.swift - 40 total)
+ACHIEVEMENTS = [
+    # Total Trips (11 achievements)
+    {"id": "first_trip", "sf_symbol": "flag.fill", "title": "First Steps", "description": "Complete 1 trip", "category": "totalTrips", "threshold": 1, "unit": "trips"},
+    {"id": "getting_started", "sf_symbol": "figure.walk", "title": "Getting Started", "description": "Complete 5 trips", "category": "totalTrips", "threshold": 5, "unit": "trips"},
+    {"id": "explorer", "sf_symbol": "binoculars.fill", "title": "Explorer", "description": "Complete 10 trips", "category": "totalTrips", "threshold": 10, "unit": "trips"},
+    {"id": "pathfinder", "sf_symbol": "point.bottomleft.forward.to.point.topright.scurvepath.fill", "title": "Pathfinder", "description": "Complete 25 trips", "category": "totalTrips", "threshold": 25, "unit": "trips"},
+    {"id": "adventurer", "sf_symbol": "mountain.2.fill", "title": "Adventurer", "description": "Complete 50 trips", "category": "totalTrips", "threshold": 50, "unit": "trips"},
+    {"id": "century", "sf_symbol": "trophy.fill", "title": "Century", "description": "Complete 100 trips", "category": "totalTrips", "threshold": 100, "unit": "trips"},
+    {"id": "dedicated", "sf_symbol": "medal.fill", "title": "Dedicated", "description": "Complete 150 trips", "category": "totalTrips", "threshold": 150, "unit": "trips"},
+    {"id": "committed", "sf_symbol": "star.circle.fill", "title": "Committed", "description": "Complete 200 trips", "category": "totalTrips", "threshold": 200, "unit": "trips"},
+    {"id": "elite", "sf_symbol": "rosette", "title": "Elite", "description": "Complete 250 trips", "category": "totalTrips", "threshold": 250, "unit": "trips"},
+    {"id": "master", "sf_symbol": "crown.fill", "title": "Master", "description": "Complete 500 trips", "category": "totalTrips", "threshold": 500, "unit": "trips"},
+    {"id": "legendary", "sf_symbol": "sparkle.magnifyingglass", "title": "Legendary", "description": "Complete 1000 trips", "category": "totalTrips", "threshold": 1000, "unit": "trips"},
+
+    # Adventure Time (8 achievements)
+    {"id": "first_hour", "sf_symbol": "clock", "title": "First Hour", "description": "1 hour", "category": "adventureTime", "threshold": 1, "unit": "hours"},
+    {"id": "getting_outdoors", "sf_symbol": "clock.fill", "title": "Getting Out", "description": "10 hours", "category": "adventureTime", "threshold": 10, "unit": "hours"},
+    {"id": "timekeeper", "sf_symbol": "timer", "title": "Time Keeper", "description": "50 hours", "category": "adventureTime", "threshold": 50, "unit": "hours"},
+    {"id": "timemaster", "sf_symbol": "hourglass", "title": "Time Master", "description": "100 hours", "category": "adventureTime", "threshold": 100, "unit": "hours"},
+    {"id": "time_devotee", "sf_symbol": "hourglass.circle.fill", "title": "Devotee", "description": "250 hours", "category": "adventureTime", "threshold": 250, "unit": "hours"},
+    {"id": "time_legend", "sf_symbol": "hourglass.badge.plus", "title": "Time Legend", "description": "500 hours", "category": "adventureTime", "threshold": 500, "unit": "hours"},
+    {"id": "time_titan", "sf_symbol": "star.fill", "title": "Time Titan", "description": "1000 hours", "category": "adventureTime", "threshold": 1000, "unit": "hours"},
+    {"id": "eternal", "sf_symbol": "infinity", "title": "Eternal", "description": "2500 hours", "category": "adventureTime", "threshold": 2500, "unit": "hours"},
+
+    # Activities (6 achievements)
+    {"id": "first_activity", "sf_symbol": "leaf", "title": "Starter", "description": "Try 1 activity type", "category": "activitiesTried", "threshold": 1, "unit": "activities"},
+    {"id": "curious", "sf_symbol": "sparkle", "title": "Curious", "description": "Try 3 activity types", "category": "activitiesTried", "threshold": 3, "unit": "activities"},
+    {"id": "diverse", "sf_symbol": "star.fill", "title": "Diverse", "description": "Try 5 activity types", "category": "activitiesTried", "threshold": 5, "unit": "activities"},
+    {"id": "variety", "sf_symbol": "sparkles", "title": "Variety", "description": "Try 10 activity types", "category": "activitiesTried", "threshold": 10, "unit": "activities"},
+    {"id": "well_rounded", "sf_symbol": "circle.hexagongrid.fill", "title": "Well Rounded", "description": "Try 15 activity types", "category": "activitiesTried", "threshold": 15, "unit": "activities"},
+    {"id": "jack_of_all", "sf_symbol": "seal.fill", "title": "Jack of All", "description": "Try 20 activity types", "category": "activitiesTried", "threshold": 20, "unit": "activities"},
+
+    # Locations (7 achievements)
+    {"id": "first_place", "sf_symbol": "mappin", "title": "First Place", "description": "Visit 1 location", "category": "locations", "threshold": 1, "unit": "locations"},
+    {"id": "local", "sf_symbol": "mappin.circle.fill", "title": "Local", "description": "Visit 5 locations", "category": "locations", "threshold": 5, "unit": "locations"},
+    {"id": "explorer_loc", "sf_symbol": "map", "title": "Explorer", "description": "Visit 10 locations", "category": "locations", "threshold": 10, "unit": "locations"},
+    {"id": "wanderer", "sf_symbol": "map.fill", "title": "Wanderer", "description": "Visit 25 locations", "category": "locations", "threshold": 25, "unit": "locations"},
+    {"id": "traveler", "sf_symbol": "airplane", "title": "Traveler", "description": "Visit 50 locations", "category": "locations", "threshold": 50, "unit": "locations"},
+    {"id": "globetrotter", "sf_symbol": "globe.americas.fill", "title": "Globetrotter", "description": "Visit 100 locations", "category": "locations", "threshold": 100, "unit": "locations"},
+    {"id": "world_explorer", "sf_symbol": "globe", "title": "World Explorer", "description": "Visit 250 locations", "category": "locations", "threshold": 250, "unit": "locations"},
+
+    # Time-Based (8 achievements)
+    {"id": "earlybird", "sf_symbol": "sunrise.fill", "title": "Early Bird", "description": "5 trips before 8 AM", "category": "timeBased", "threshold": 5, "unit": "trips"},
+    {"id": "earlybird_pro", "sf_symbol": "sunrise.circle.fill", "title": "Dawn Patrol", "description": "25 trips before 8 AM", "category": "timeBased", "threshold": 25, "unit": "trips"},
+    {"id": "nightowl", "sf_symbol": "moon.stars.fill", "title": "Night Owl", "description": "5 trips after 8 PM", "category": "timeBased", "threshold": 5, "unit": "trips"},
+    {"id": "nightowl_pro", "sf_symbol": "moon.circle.fill", "title": "Nocturnal", "description": "25 trips after 8 PM", "category": "timeBased", "threshold": 25, "unit": "trips"},
+    {"id": "weekendwarrior", "sf_symbol": "sun.max.fill", "title": "Weekender", "description": "10 weekend trips", "category": "timeBased", "threshold": 10, "unit": "trips"},
+    {"id": "weekendwarrior_pro", "sf_symbol": "sun.max.circle.fill", "title": "Weekend Pro", "description": "50 weekend trips", "category": "timeBased", "threshold": 50, "unit": "trips"},
+    {"id": "consistent", "sf_symbol": "calendar", "title": "Consistent", "description": "Trips in 5 months", "category": "timeBased", "threshold": 5, "unit": "months"},
+    {"id": "year_round", "sf_symbol": "calendar.badge.checkmark", "title": "Year Round", "description": "Trips in 12 months", "category": "timeBased", "threshold": 12, "unit": "months"},
+]
+
+
+def _compute_achievement_details(connection, user_id: int) -> dict:
+    """Compute detailed achievement info for a user."""
+    # Get base stats
+    trips_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(*) as count
+            FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    total_trips = trips_result.count if trips_result else 0
+
+    hours_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COALESCE(
+                SUM(EXTRACT(EPOCH FROM (completed_at - start)) / 3600),
+                0
+            ) as total_hours
+            FROM trips
+            WHERE user_id = :user_id AND status = 'completed' AND completed_at IS NOT NULL
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    total_hours = int(hours_result.total_hours) if hours_result else 0
+
+    activities_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(DISTINCT activity) as count
+            FROM trips WHERE user_id = :user_id AND status = 'completed'
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    unique_activities = activities_result.count if activities_result else 0
+
+    locations_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(DISTINCT location_text) as count
+            FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            AND location_text IS NOT NULL AND location_text != ''
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    unique_locations = locations_result.count if locations_result else 0
+
+    # Time-based stats
+    early_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(*) as count FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            AND EXTRACT(HOUR FROM start) < 8
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    early_trips = early_result.count if early_result else 0
+
+    night_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(*) as count FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            AND EXTRACT(HOUR FROM start) >= 20
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    night_trips = night_result.count if night_result else 0
+
+    weekend_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(*) as count FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            AND EXTRACT(DOW FROM start) IN (0, 6)
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    weekend_trips = weekend_result.count if weekend_result else 0
+
+    months_result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT COUNT(DISTINCT TO_CHAR(start, 'YYYY-MM')) as count
+            FROM trips
+            WHERE user_id = :user_id AND status = 'completed'
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchone()
+    unique_months = months_result.count if months_result else 0
+
+    # Get completed_at dates for earned date calculation
+    completed_dates = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT completed_at FROM trips
+            WHERE user_id = :user_id AND status = 'completed' AND completed_at IS NOT NULL
+            ORDER BY completed_at ASC
+            """
+        ),
+        {"user_id": user_id}
+    ).fetchall()
+    sorted_dates = [d.completed_at for d in completed_dates]
+
+    achievements = []
+    earned_count = 0
+
+    for ach in ACHIEVEMENTS:
+        # Get current value based on category
+        if ach["category"] == "totalTrips":
+            current_value = total_trips
+        elif ach["category"] == "adventureTime":
+            current_value = total_hours
+        elif ach["category"] == "activitiesTried":
+            current_value = unique_activities
+        elif ach["category"] == "locations":
+            current_value = unique_locations
+        elif ach["category"] == "timeBased":
+            # Determine which time-based metric
+            if "before 8 AM" in ach["description"]:
+                current_value = early_trips
+            elif "after 8 PM" in ach["description"]:
+                current_value = night_trips
+            elif "weekend" in ach["description"]:
+                current_value = weekend_trips
+            elif "months" in ach["unit"]:
+                current_value = unique_months
+            else:
+                current_value = 0
+        else:
+            current_value = 0
+
+        is_earned = current_value >= ach["threshold"]
+        earned_date = None
+
+        if is_earned:
+            earned_count += 1
+            # Calculate earned date (when threshold was met)
+            if ach["category"] == "totalTrips" and sorted_dates:
+                index = min(ach["threshold"] - 1, len(sorted_dates) - 1)
+                if index >= 0:
+                    earned_date = sorted_dates[index].isoformat()
+
+        achievements.append(FriendAchievementResponse(
+            id=ach["id"],
+            title=ach["title"],
+            description=ach["description"],
+            category=ach["category"],
+            sf_symbol=ach["sf_symbol"],
+            threshold=ach["threshold"],
+            unit=ach["unit"],
+            is_earned=is_earned,
+            earned_date=earned_date,
+            current_value=min(current_value, ach["threshold"])
+        ))
+
+    return {
+        "achievements": achievements,
+        "earned_count": earned_count,
+        "total_count": len(ACHIEVEMENTS)
+    }
+
+
+@router.get("/{friend_user_id}/achievements", response_model=FriendAchievementsResponse)
+def get_friend_achievements(
+    friend_user_id: int,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Get detailed achievements for a friend.
+
+    Only returns achievements if:
+    1. The users are friends
+    2. The friend has enabled friend_share_achievements
+    """
+    with db.engine.begin() as connection:
+        # Verify friendship exists
+        friendship = _get_friendship(connection, user_id, friend_user_id)
+        if not friendship:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Friend not found"
+            )
+
+        # Check if friend allows sharing achievements
+        friend_settings = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT first_name, last_name, friend_share_achievements
+                FROM users
+                WHERE id = :friend_id
+                """
+            ),
+            {"friend_id": friend_user_id}
+        ).fetchone()
+
+        if not friend_settings:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Check privacy setting (default True for backwards compatibility)
+        share_achievements = getattr(friend_settings, 'friend_share_achievements', True)
+        if share_achievements is not None and not share_achievements:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This user has disabled achievement sharing"
+            )
+
+        # Get achievement details
+        stats = _compute_achievement_details(connection, friend_user_id)
+
+        friend_name = f"{friend_settings.first_name or ''} {friend_settings.last_name or ''}".strip() or "Friend"
+
+        return FriendAchievementsResponse(
+            user_id=friend_user_id,
+            friend_name=friend_name,
+            achievements=stats["achievements"],
+            earned_count=stats["earned_count"],
+            total_count=stats["total_count"]
+        )

@@ -10,6 +10,7 @@ struct FriendProfileView: View {
     @State private var showingRemoveConfirmation = false
     @State private var isRemoving = false
     @State private var showingRemoveError = false
+    @State private var showingAchievements = false
 
     var body: some View {
         NavigationStack {
@@ -57,6 +58,9 @@ struct FriendProfileView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("Something went wrong. Please check your connection and try again.")
+            }
+            .sheet(isPresented: $showingAchievements) {
+                FriendAchievementsView(friend: friend)
             }
         }
     }
@@ -169,12 +173,15 @@ struct FriendProfileView: View {
 
         case .achievements:
             if preferences.showFriendAchievements, let count = friend.achievements_count, count > 0 {
-                statCard(
-                    icon: statType.icon,
-                    iconColor: statType.iconColor,
-                    title: statType.displayName,
-                    value: "\(count) unlocked"
-                )
+                Button(action: { showingAchievements = true }) {
+                    statCardWithChevron(
+                        icon: statType.icon,
+                        iconColor: statType.iconColor,
+                        title: statType.displayName,
+                        value: "\(count)/40"
+                    )
+                }
+                .buttonStyle(.plain)
             }
 
         case .totalTrips:
@@ -227,6 +234,33 @@ struct FriendProfileView: View {
             }
 
             Spacer()
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
+    }
+
+    func statCardWithChevron(icon: String, iconColor: Color, title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(iconColor)
+                .frame(width: 32)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .padding()
         .background(Color(.secondarySystemBackground))

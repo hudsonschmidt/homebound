@@ -2634,6 +2634,28 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Load detailed achievements for a friend
+    /// Returns nil if friend has disabled achievement sharing or on error
+    func loadFriendAchievements(friendUserId: Int) async -> FriendAchievementsResponse? {
+        do {
+            let response: FriendAchievementsResponse = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/friends/\(friendUserId)/achievements"),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Loaded \(response.earned_count) achievements for friend \(friendUserId)")
+            return response
+        } catch API.APIError.httpError(let statusCode, _) where statusCode == 403 {
+            // Friend has disabled achievement sharing
+            debugLog("[Session] 🔒 Friend \(friendUserId) has disabled achievement sharing")
+            return nil
+        } catch {
+            debugLog("[Session] ❌ Failed to load friend achievements: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Request an update from a trip owner (friend ping feature)
     /// Returns the response with cooldown info if rate limited
     func requestTripUpdate(tripId: Int) async -> UpdateRequestResponse {
