@@ -453,6 +453,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                     completionHandler(.newData)
                 }
 
+            case "friend_trip_update":
+                debugLog("[AppDelegate] 🔄 Silent push: friend trip update")
+                Task {
+                    _ = await Session.shared.loadFriendActiveTrips()
+                    debugLog("[AppDelegate] ✅ Friend active trips refreshed via push")
+                    completionHandler(.newData)
+                }
+
             default:
                 debugLog("[AppDelegate] ⚠️ Unknown sync type: \(sync)")
                 completionHandler(.noData)

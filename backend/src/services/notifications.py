@@ -233,6 +233,23 @@ async def send_friend_request_accepted_push(
     log.info(f"Sent friend request accepted push to user {inviter_user_id}")
 
 
+async def send_friend_trip_update_silent_push(
+    friend_user_id: int,
+    trip_id: int
+):
+    """Send silent push to trigger friend data refresh.
+
+    Used when live location updates or minor trip changes occur
+    that don't warrant a visible notification. The app will wake
+    in the background and refresh friend trip data.
+    """
+    await send_background_push_to_user(
+        friend_user_id,
+        data={"sync": "friend_trip_update", "trip_id": str(trip_id)}
+    )
+    log.info(f"Sent friend trip update silent push to user {friend_user_id} for trip {trip_id}")
+
+
 def log_notification(
     user_id: int,
     notification_type: str,

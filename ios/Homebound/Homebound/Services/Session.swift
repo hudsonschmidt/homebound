@@ -238,6 +238,9 @@ final class Session: ObservableObject {
     @Published var friendActiveTrips: [FriendActiveTrip] = []
     @Published var friendVisibilitySettings: FriendVisibilitySettings = .defaults
 
+    // Update request cooldowns (trip_id -> cooldown_end_time)
+    var updateRequestCooldowns: [Int: Date] = [:]
+
     // Saved trip templates (local-only)
     @Published var savedTemplates: [SavedTripTemplate] = []
 
@@ -2652,6 +2655,22 @@ final class Session: ObservableObject {
             debugLog("[Session] ❌ Failed to send update request: \(error.localizedDescription)")
             return UpdateRequestResponse(ok: false, message: "Failed to send request", cooldown_remaining_seconds: nil)
         }
+    }
+
+    /// Get remaining cooldown seconds for a trip's update request
+    func getCooldownRemaining(for tripId: Int) -> Int? {
+        guard let endTime = updateRequestCooldowns[tripId] else { return nil }
+        let remaining = Int(endTime.timeIntervalSinceNow)
+        if remaining <= 0 {
+            updateRequestCooldowns.removeValue(forKey: tripId)
+            return nil
+        }
+        return remaining
+    }
+
+    /// Set cooldown for a trip's update request
+    func setCooldown(for tripId: Int, seconds: Int) {
+        updateRequestCooldowns[tripId] = Date().addingTimeInterval(Double(seconds))
     }
 
     /// Update live location for a trip

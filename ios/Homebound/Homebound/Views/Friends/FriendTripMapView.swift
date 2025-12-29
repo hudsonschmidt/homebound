@@ -5,28 +5,36 @@ import CoreLocation
 /// Map view showing a friend's trip with destination, start location, check-in markers, and live location
 struct FriendTripMapView: View {
     let trip: FriendActiveTrip
+    @EnvironmentObject var session: Session
+    @State private var currentTrip: FriendActiveTrip
     @State private var mapPosition: MapCameraPosition = .automatic
     @Environment(\.dismiss) private var dismiss
+    private let pollingInterval: TimeInterval = 10
+
+    init(trip: FriendActiveTrip) {
+        self.trip = trip
+        _currentTrip = State(initialValue: trip)
+    }
 
     // MARK: - Map Content
     @MapContentBuilder
     private var mapContent: some MapContent {
         // Destination pin
-        if let coord = trip.destinationCoordinate {
-            Annotation(trip.location_text ?? "Destination", coordinate: coord) {
-                DestinationPin(activityIcon: trip.activity_icon, primaryColor: trip.primaryColor)
+        if let coord = currentTrip.destinationCoordinate {
+            Annotation(currentTrip.location_text ?? "Destination", coordinate: coord) {
+                DestinationPin(activityIcon: currentTrip.activity_icon, primaryColor: currentTrip.primaryColor)
             }
         }
 
         // Start location pin
-        if let coord = trip.startCoordinate {
-            Annotation(trip.start_location_text ?? "Start", coordinate: coord) {
+        if let coord = currentTrip.startCoordinate {
+            Annotation(currentTrip.start_location_text ?? "Start", coordinate: coord) {
                 StartPin()
             }
         }
 
         // Check-in location markers (numbered, most recent first)
-        if let checkins = trip.checkin_locations {
+        if let checkins = currentTrip.checkin_locations {
             ForEach(Array(checkins.enumerated()), id: \.element.id) { index, checkin in
                 if let coord = checkin.coordinate {
                     Annotation(checkin.location_name ?? "Check-in \(index + 1)", coordinate: coord) {
@@ -37,14 +45,14 @@ struct FriendTripMapView: View {
         }
 
         // Live location pin
-        if let liveLocation = trip.live_location {
-            Annotation("\(trip.owner.first_name) (Live)", coordinate: liveLocation.coordinate) {
-                LiveLocationPin(ownerName: trip.owner.first_name)
+        if let liveLocation = currentTrip.live_location {
+            Annotation("\(currentTrip.owner.first_name) (Live)", coordinate: liveLocation.coordinate) {
+                LiveLocationPin(ownerName: currentTrip.owner.first_name)
             }
         }
 
         // Draw polyline connecting check-ins if there are multiple
-        if let checkins = trip.checkin_locations,
+        if let checkins = currentTrip.checkin_locations,
            checkins.count > 1 {
             let coordinates = checkins.compactMap { $0.coordinate }
             if coordinates.count > 1 {
@@ -60,7 +68,7 @@ struct FriendTripMapView: View {
                 mapContent
             }
             .mapStyle(.standard)
-            .navigationTitle("\(trip.owner.first_name)'s Trip")
+            .navigationTitle("\(currentTrip.owner.first_name)'s Trip")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -71,8 +79,26 @@ struct FriendTripMapView: View {
             }
             .overlay(alignment: .bottom) {
                 // Trip info card at bottom
-                TripInfoCard(trip: trip)
+                TripInfoCard(trip: currentTrip)
                     .padding()
+            }
+            .task {
+                // Poll for live location updates while map is open
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: UInt64(pollingInterval * 1_000_000_000))
+                    guard !Task.isCancelled else { break }
+                    await refreshTripData()
+                }
+            }
+        }
+    }
+
+    private func refreshTripData() async {
+        // Reload active trips and find this one
+        _ = await session.loadFriendActiveTrips()
+        if let updated = session.friendActiveTrips.first(where: { $0.id == trip.id }) {
+            await MainActor.run {
+                currentTrip = updated
             }
         }
     }

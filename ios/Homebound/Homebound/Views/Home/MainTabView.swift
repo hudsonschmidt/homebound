@@ -37,6 +37,11 @@ struct MainTabView: View {
                 .tag(3)
         }
         .accentColor(Color.hbBrand)
+        .onChange(of: selectedTab) { oldValue, newValue in
+            if newValue == 2 { // Friends tab
+                NotificationCenter.default.post(name: .friendsTabSelected, object: nil)
+            }
+        }
     }
 }
 

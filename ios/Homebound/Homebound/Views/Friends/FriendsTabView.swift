@@ -1,6 +1,11 @@
 import SwiftUI
 import Combine
 
+// Notification for tab switch refresh
+extension Notification.Name {
+    static let friendsTabSelected = Notification.Name("friendsTabSelected")
+}
+
 /// Main Friends tab view showing friends list and invite options
 struct FriendsTabView: View {
     @EnvironmentObject var session: Session
@@ -8,6 +13,12 @@ struct FriendsTabView: View {
     @State private var showingQRScanner = false
     @State private var selectedFriend: Friend? = nil
     @State private var isLoading = false
+
+    // Auto-refresh polling
+    @State private var pollingTask: Task<Void, Never>? = nil
+    @State private var lastTabRefresh: Date? = nil
+    private let pollingInterval: TimeInterval = 30
+    private let tabSwitchDebounce: TimeInterval = 5
 
     var body: some View {
         NavigationStack {
@@ -30,6 +41,9 @@ struct FriendsTabView: View {
                     .padding(.bottom, 100)
                 }
                 .scrollIndicators(.hidden)
+                .refreshable {
+                    await loadData()
+                }
             }
             .navigationBarHidden(true)
             .sheet(isPresented: $showingInviteSheet) {
@@ -52,10 +66,39 @@ struct FriendsTabView: View {
             .task {
                 await loadData()
             }
-            .refreshable {
-                await loadData()
+            .onAppear {
+                startPolling()
+            }
+            .onDisappear {
+                stopPolling()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .friendsTabSelected)) { _ in
+                let now = Date()
+                if let last = lastTabRefresh, now.timeIntervalSince(last) < tabSwitchDebounce {
+                    return // Skip if recently refreshed
+                }
+                lastTabRefresh = now
+                Task { await loadData() }
             }
         }
+    }
+
+    // MARK: - Polling
+
+    private func startPolling() {
+        guard pollingTask == nil else { return }
+        pollingTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(pollingInterval * 1_000_000_000))
+                guard !Task.isCancelled else { break }
+                _ = await session.loadFriendActiveTrips()
+            }
+        }
+    }
+
+    private func stopPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
     }
 
     // MARK: - Header
@@ -502,8 +545,11 @@ struct FriendActiveTripCardExpanded: View {
     // Map and request update state
     @State private var showingMap = false
     @State private var isRequestingUpdate = false
-    @State private var updateRequestCooldown: Int? = nil
-    @State private var cooldownTimer: Timer? = nil
+
+    // Computed from Session to survive view recreation
+    private var cooldownRemaining: Int? {
+        session.getCooldownRemaining(for: trip.id)
+    }
 
     private var statusColor: Color {
         switch timeState {
@@ -686,7 +732,7 @@ struct FriendActiveTripCardExpanded: View {
                         } else {
                             Image(systemName: "bell.badge")
                         }
-                        if let cooldown = updateRequestCooldown, cooldown > 0 {
+                        if let cooldown = cooldownRemaining, cooldown > 0 {
                             Text("Wait \(cooldown)s")
                         } else {
                             Text("Request Update")
@@ -697,10 +743,10 @@ struct FriendActiveTripCardExpanded: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(updateRequestCooldown != nil ? Color.gray : Color.orange)
+                    .background(cooldownRemaining != nil ? Color.gray : Color.orange)
                     .clipShape(Capsule())
                 }
-                .disabled(isRequestingUpdate || (updateRequestCooldown ?? 0) > 0)
+                .disabled(isRequestingUpdate || (cooldownRemaining ?? 0) > 0)
             }
         }
         .padding()
@@ -714,18 +760,16 @@ struct FriendActiveTripCardExpanded: View {
         )
         .sheet(isPresented: $showingMap) {
             FriendTripMapView(trip: trip)
+                .environmentObject(session)
         }
         .onAppear {
             // Calculate time state immediately so button visibility is correct
             updateTimeRemaining()
             // Check if there's already a pending request (from has_pending_update_request)
-            if trip.has_pending_update_request == true {
-                updateRequestCooldown = 600 // Assume full cooldown if pending
-                startCooldownTimer()
+            // Only set if we don't already have a cooldown tracked
+            if trip.has_pending_update_request == true && session.getCooldownRemaining(for: trip.id) == nil {
+                session.setCooldown(for: trip.id, seconds: 600)
             }
-        }
-        .onDisappear {
-            cooldownTimer?.invalidate()
         }
         .task {
             // Initial update
@@ -745,21 +789,8 @@ struct FriendActiveTripCardExpanded: View {
             await MainActor.run {
                 isRequestingUpdate = false
                 if let cooldown = result.cooldown_remaining_seconds {
-                    updateRequestCooldown = cooldown
-                    startCooldownTimer()
+                    session.setCooldown(for: trip.id, seconds: cooldown)
                 }
-            }
-        }
-    }
-
-    private func startCooldownTimer() {
-        cooldownTimer?.invalidate()
-        cooldownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            if let current = updateRequestCooldown, current > 0 {
-                updateRequestCooldown = current - 1
-            } else {
-                updateRequestCooldown = nil
-                cooldownTimer?.invalidate()
             }
         }
     }
