@@ -9,6 +9,8 @@ struct FriendInviteView: View {
     @State private var invite: FriendInvite? = nil
     @State private var isLoading = true
     @State private var showingShareSheet = false
+    @State private var showingRegenerateConfirmation = false
+    @State private var isRegenerating = false
 
     var body: some View {
         NavigationStack {
@@ -42,6 +44,20 @@ struct FriendInviteView: View {
                     ShareSheet(activityItems: ["Be my friend on Homebound! \(invite.invite_url)"])
                 }
             }
+            .confirmationDialog(
+                "Regenerate Invite Link?",
+                isPresented: $showingRegenerateConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Regenerate", role: .destructive) {
+                    Task {
+                        await regenerateInvite()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will invalidate your current invite link. Anyone with the old link or QR code will no longer be able to add you as a friend.")
+            }
         }
     }
 
@@ -51,7 +67,7 @@ struct FriendInviteView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.5)
-            Text("Creating invite link...")
+            Text(isRegenerating ? "Regenerating link..." : "Loading your invite link...")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -68,11 +84,11 @@ struct FriendInviteView: View {
 
             // Instructions
             VStack(spacing: 8) {
-                Text("Scan to Add Friend")
+                Text("Your Invite Link")
                     .font(.title3)
                     .fontWeight(.bold)
 
-                Text("Have your friend scan this QR code with their Homebound app, or share the link below.")
+                Text("Share this QR code or link with friends. They can use it anytime to add you on Homebound.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -92,15 +108,11 @@ struct FriendInviteView: View {
                     .cornerRadius(12)
             }
 
-            // Expiration info
-            if let expiresAt = invite.expiresAtDate {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                        .font(.caption)
-                    Text("Expires \(expiresAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption)
-                }
-                .foregroundStyle(.secondary)
+            // Regenerate link button
+            Button(action: { showingRegenerateConfirmation = true }) {
+                Label("Regenerate Link", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
 
             // Benefits section
@@ -255,6 +267,17 @@ struct FriendInviteView: View {
         isLoading = true
         invite = await session.createFriendInvite()
         isLoading = false
+    }
+
+    func regenerateInvite() async {
+        isLoading = true
+        isRegenerating = true
+        invite = await session.createFriendInvite(regenerate: true)
+        isRegenerating = false
+        isLoading = false
+        if invite != nil {
+            session.notice = "Link regenerated"
+        }
     }
 
     // MARK: - QR Code Generator

@@ -7,6 +7,10 @@ struct PendingInvitesView: View {
 
     @State private var isLoading = false
 
+    var activeInvites: [PendingInvite] {
+        session.pendingInvites.filter { $0.isActive }
+    }
+
     var pendingInvites: [PendingInvite] {
         session.pendingInvites.filter { $0.isPending }
     }
@@ -22,7 +26,20 @@ struct PendingInvitesView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Pending section
+                // Active (reusable) section
+                if !activeInvites.isEmpty {
+                    Section {
+                        ForEach(activeInvites) { invite in
+                            InviteRowView(invite: invite)
+                        }
+                    } header: {
+                        Text("Your Invite Link")
+                    } footer: {
+                        Text("This is your permanent invite link. Friends can use it anytime to add you.")
+                    }
+                }
+
+                // Pending section (legacy one-time invites)
                 if !pendingInvites.isEmpty {
                     Section {
                         ForEach(pendingInvites) { invite in
@@ -112,7 +129,9 @@ struct InviteRowView: View {
     let invite: PendingInvite
 
     var statusColor: Color {
-        if invite.isAccepted {
+        if invite.isActive {
+            return .hbBrand
+        } else if invite.isAccepted {
             return .green
         } else if invite.isExpired {
             return .secondary
@@ -122,7 +141,9 @@ struct InviteRowView: View {
     }
 
     var statusIcon: String {
-        if invite.isAccepted {
+        if invite.isActive {
+            return "link.circle.fill"
+        } else if invite.isAccepted {
             return "checkmark.circle.fill"
         } else if invite.isExpired {
             return "clock.badge.xmark"
@@ -140,7 +161,12 @@ struct InviteRowView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 // Status or accepted by name
-                if invite.isAccepted, let name = invite.accepted_by_name {
+                if invite.isActive {
+                    Text("Active - Reusable")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color.hbBrand)
+                } else if invite.isAccepted, let name = invite.accepted_by_name {
                     Text("Accepted by \(name)")
                         .font(.subheadline)
                         .fontWeight(.medium)
@@ -157,12 +183,12 @@ struct InviteRowView: View {
 
                 // Created date
                 if let createdAt = invite.createdAtDate {
-                    Text("Sent \(createdAt.formatted(date: .abbreviated, time: .shortened))")
+                    Text("Created \(createdAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                // Expiration info for pending invites
+                // Expiration info for pending invites (not for active/permanent)
                 if invite.isPending, let expiresAt = invite.expiresAtDate {
                     let isExpiringSoon = expiresAt.timeIntervalSinceNow < Constants.Time.oneDay
 
@@ -178,8 +204,8 @@ struct InviteRowView: View {
 
             Spacer()
 
-            // Share button for pending invites
-            if invite.isPending, let shareURL = URL(string: "\(session.baseURL)/f/\(invite.token)") {
+            // Share button for active or pending invites
+            if (invite.isActive || invite.isPending), let shareURL = URL(string: "https://api.homeboundapp.com/f/\(invite.token)") {
                 ShareLink(
                     item: shareURL,
                     message: Text("Be my friend on Homebound!")

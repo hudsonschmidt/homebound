@@ -71,10 +71,15 @@ struct Friend: Codable, Identifiable, Hashable {
 struct FriendInvite: Codable {
     let token: String
     let invite_url: String
-    let expires_at: String
+    let expires_at: String?  // nil for permanent invites
 
     var expiresAtDate: Date? {
-        DateUtils.parseISO8601(expires_at)
+        guard let expires_at else { return nil }
+        return DateUtils.parseISO8601(expires_at)
+    }
+
+    var isPermanent: Bool {
+        expires_at == nil
     }
 }
 
@@ -83,7 +88,7 @@ struct FriendInvitePreview: Codable {
     let inviter_first_name: String
     let inviter_profile_photo_url: String?
     let inviter_member_since: String
-    let expires_at: String
+    let expires_at: String?  // nil for permanent invites
     let is_valid: Bool
 
     var inviterMemberSinceDate: Date? {
@@ -91,7 +96,8 @@ struct FriendInvitePreview: Codable {
     }
 
     var expiresAtDate: Date? {
-        DateUtils.parseISO8601(expires_at)
+        guard let expires_at else { return nil }
+        return DateUtils.parseISO8601(expires_at)
     }
 }
 
@@ -100,8 +106,8 @@ struct PendingInvite: Codable, Identifiable {
     let id: Int
     let token: String
     let created_at: String
-    let expires_at: String
-    let status: String  // "pending", "accepted", "expired"
+    let expires_at: String?  // nil for permanent invites
+    let status: String  // "pending", "accepted", "expired", "active" (permanent)
     let accepted_by_name: String?
 
     var createdAtDate: Date? {
@@ -109,12 +115,14 @@ struct PendingInvite: Codable, Identifiable {
     }
 
     var expiresAtDate: Date? {
-        DateUtils.parseISO8601(expires_at)
+        guard let expires_at else { return nil }
+        return DateUtils.parseISO8601(expires_at)
     }
 
     var isPending: Bool { status == "pending" }
     var isAccepted: Bool { status == "accepted" }
     var isExpired: Bool { status == "expired" }
+    var isActive: Bool { status == "active" }  // Permanent invite
 }
 
 // MARK: - Friend Active Trips

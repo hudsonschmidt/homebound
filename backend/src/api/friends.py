@@ -17,8 +17,8 @@ router = APIRouter(
     tags=["friends"],
 )
 
-# How long invite tokens are valid (7 days)
-INVITE_EXPIRY_DAYS = 7
+# Reusable invites are permanent (no expiry)
+# Legacy one-time invites still respect their expiry
 
 
 # Response models
@@ -41,14 +41,14 @@ class FriendResponse(BaseModel):
 class FriendInviteResponse(BaseModel):
     token: str
     invite_url: str
-    expires_at: str
+    expires_at: str | None = None  # None for permanent invites
 
 
 class FriendInvitePreview(BaseModel):
     inviter_first_name: str
     inviter_profile_photo_url: str | None
     inviter_member_since: str
-    expires_at: str
+    expires_at: str | None = None  # None for permanent invites
     is_valid: bool
 
 
@@ -56,8 +56,8 @@ class PendingInviteResponse(BaseModel):
     id: int
     token: str
     created_at: str
-    expires_at: str
-    status: str  # "pending", "accepted", "expired"
+    expires_at: str | None = None  # None for permanent invites
+    status: str  # "pending", "accepted", "expired" (permanent invites are always "pending")
     accepted_by_name: str | None
 
 
@@ -231,33 +231,67 @@ def _calculate_achievements_count(
 # ==================== Invite Endpoints ====================
 
 @router.post("/invite", response_model=FriendInviteResponse)
-def create_invite(user_id: int = Depends(auth.get_current_user_id)):
-    """Generate a shareable friend invite link."""
-    token = _generate_invite_token()
-    expires_at = datetime.utcnow() + timedelta(days=INVITE_EXPIRY_DAYS)
+def create_invite(
+    regenerate: bool = False,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Get or create a reusable friend invite link.
 
+    Each user has one permanent invite link that can be used unlimited times.
+    Pass regenerate=true to invalidate the old link and create a new one.
+    """
     with db.engine.begin() as connection:
+        # Check for existing reusable invite (max_uses IS NULL = permanent)
+        if not regenerate:
+            existing = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT token FROM friend_invites
+                    WHERE inviter_id = :user_id AND max_uses IS NULL
+                    LIMIT 1
+                    """
+                ),
+                {"user_id": user_id}
+            ).fetchone()
+
+            if existing:
+                invite_url = f"https://api.homeboundapp.com/f/{existing.token}"
+                return FriendInviteResponse(
+                    token=existing.token,
+                    invite_url=invite_url,
+                    expires_at=None  # Permanent
+                )
+
+        # Regenerate: invalidate old permanent invite by deleting it
+        if regenerate:
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    DELETE FROM friend_invites
+                    WHERE inviter_id = :user_id AND max_uses IS NULL
+                    """
+                ),
+                {"user_id": user_id}
+            )
+
+        # Create new permanent invite (max_uses=NULL, expires_at=NULL)
+        token = _generate_invite_token()
         connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO friend_invites (inviter_id, token, expires_at)
-                VALUES (:inviter_id, :token, :expires_at)
+                INSERT INTO friend_invites (inviter_id, token, expires_at, max_uses)
+                VALUES (:inviter_id, :token, NULL, NULL)
                 """
             ),
-            {
-                "inviter_id": user_id,
-                "token": token,
-                "expires_at": expires_at
-            }
+            {"inviter_id": user_id, "token": token}
         )
 
-    # Build the invite URL (will be used with universal links)
     invite_url = f"https://api.homeboundapp.com/f/{token}"
 
     return FriendInviteResponse(
         token=token,
         invite_url=invite_url,
-        expires_at=expires_at.isoformat()
+        expires_at=None  # Permanent
     )
 
 
@@ -285,15 +319,17 @@ def get_invite_preview(token: str):
             )
 
         now = datetime.utcnow()
-        is_expired = invite.expires_at < now
-        is_used_up = invite.use_count >= invite.max_uses
+        # Permanent invites (max_uses IS NULL) never expire and have unlimited uses
+        is_permanent = invite.max_uses is None
+        is_expired = False if is_permanent else (invite.expires_at and invite.expires_at < now)
+        is_used_up = False if is_permanent else (invite.use_count >= invite.max_uses)
         is_valid = not is_expired and not is_used_up
 
         return FriendInvitePreview(
             inviter_first_name=invite.first_name or "A user",
             inviter_profile_photo_url=invite.profile_photo_url,
             inviter_member_since=invite.member_since.isoformat() if invite.member_since else "",
-            expires_at=invite.expires_at.isoformat(),
+            expires_at=invite.expires_at.isoformat() if invite.expires_at else None,
             is_valid=is_valid
         )
 
@@ -325,18 +361,23 @@ def accept_invite(
             )
 
         # Check if invite is still valid
+        # Permanent invites (max_uses IS NULL) never expire and have unlimited uses
+        is_permanent = invite.max_uses is None
         now = datetime.utcnow()
-        if invite.expires_at < now:
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Invite has expired"
-            )
 
-        if invite.use_count >= invite.max_uses:
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Invite has already been used"
-            )
+        if not is_permanent:
+            # Legacy one-time invites have expiry and use limits
+            if invite.expires_at and invite.expires_at < now:
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Invite has expired"
+                )
+
+            if invite.use_count >= invite.max_uses:
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Invite has already been used"
+                )
 
         inviter_id = invite.inviter_id
 
@@ -472,9 +513,13 @@ def get_pending_invites(user_id: int = Depends(auth.get_current_user_id)):
         result = []
         for inv in invites:
             # Determine status
-            if inv.use_count >= inv.max_uses:
+            # Permanent invites (max_uses IS NULL) are always "active" (reusable)
+            is_permanent = inv.max_uses is None
+            if is_permanent:
+                invite_status = "active"  # Permanent, reusable invite
+            elif inv.use_count >= inv.max_uses:
                 invite_status = "accepted"
-            elif inv.expires_at < now:
+            elif inv.expires_at and inv.expires_at < now:
                 invite_status = "expired"
             else:
                 invite_status = "pending"
@@ -488,7 +533,7 @@ def get_pending_invites(user_id: int = Depends(auth.get_current_user_id)):
                 id=inv.id,
                 token=inv.token,
                 created_at=inv.created_at.isoformat(),
-                expires_at=inv.expires_at.isoformat(),
+                expires_at=inv.expires_at.isoformat() if inv.expires_at else None,
                 status=invite_status,
                 accepted_by_name=accepted_by_name
             ))

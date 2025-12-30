@@ -27,7 +27,7 @@ def serve_invite_page(token: str):
             sqlalchemy.text(
                 """
                 SELECT fi.id, fi.expires_at,
-                       (fi.expires_at > CURRENT_TIMESTAMP AND
+                       ((fi.expires_at IS NULL OR fi.expires_at > CURRENT_TIMESTAMP) AND
                         (fi.max_uses IS NULL OR fi.use_count < fi.max_uses)) as is_valid
                 FROM friend_invites fi
                 WHERE fi.token = :token

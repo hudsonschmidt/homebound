@@ -2781,21 +2781,25 @@ final class Session: ObservableObject {
         }
     }
 
-    /// Create a new friend invite link
-    func createFriendInvite() async -> FriendInvite? {
+    /// Get or create the user's reusable friend invite link
+    /// - Parameter regenerate: If true, invalidates the old link and creates a new one
+    func createFriendInvite(regenerate: Bool = false) async -> FriendInvite? {
         do {
+            let urlString = regenerate
+                ? "/api/v1/friends/invite?regenerate=true"
+                : "/api/v1/friends/invite"
             let invite: FriendInvite = try await withAuth { bearer in
                 try await self.api.post(
-                    self.url("/api/v1/friends/invite"),
+                    self.url(urlString),
                     body: API.Empty(),
                     bearer: bearer
                 )
             }
-            debugLog("[Session] ✅ Created friend invite: \(invite.invite_url)")
+            debugLog("[Session] ✅ Got friend invite: \(invite.invite_url)")
             return invite
         } catch {
             await MainActor.run {
-                self.lastError = "Failed to create invite: \(error.localizedDescription)"
+                self.lastError = "Failed to get invite: \(error.localizedDescription)"
             }
             return nil
         }

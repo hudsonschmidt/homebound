@@ -76,7 +76,7 @@ def _cleanup_user(connection, user_id: int):
 # ==================== Invite Tests ====================
 
 def test_create_invite():
-    """Test creating a friend invite."""
+    """Test creating a friend invite (permanent, reusable)."""
     with db.engine.begin() as connection:
         user_id = _create_test_user(connection, "inviter@test.com", "Alice", "Inviter")
 
@@ -87,7 +87,8 @@ def test_create_invite():
         assert invite.token is not None
         assert len(invite.token) > 20  # URL-safe tokens are reasonably long
         assert "api.homeboundapp.com/f/" in invite.invite_url
-        assert invite.expires_at is not None
+        # Permanent invites have no expiry
+        assert invite.expires_at is None
 
         # Verify invite was stored in database
         with db.engine.begin() as connection:
@@ -98,6 +99,60 @@ def test_create_invite():
             assert stored is not None
             assert stored.inviter_id == user_id
             assert stored.use_count == 0
+            # Permanent invites have NULL max_uses and expires_at
+            assert stored.max_uses is None
+            assert stored.expires_at is None
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_create_invite_returns_existing():
+    """Test that calling create_invite returns existing permanent invite."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "reuse@test.com", "Reuse", "Test")
+
+    try:
+        # Create first invite
+        invite1 = create_invite(user_id=user_id)
+        token1 = invite1.token
+
+        # Calling again should return the same invite
+        invite2 = create_invite(user_id=user_id)
+        assert invite2.token == token1  # Same token returned
+    finally:
+        with db.engine.begin() as connection:
+            _cleanup_user(connection, user_id)
+
+
+def test_create_invite_regenerate():
+    """Test that regenerate=True creates a new invite and invalidates the old one."""
+    with db.engine.begin() as connection:
+        user_id = _create_test_user(connection, "regen@test.com", "Regen", "Test")
+
+    try:
+        # Create first invite
+        invite1 = create_invite(user_id=user_id)
+        token1 = invite1.token
+
+        # Regenerate should create a new invite with different token
+        invite2 = create_invite(regenerate=True, user_id=user_id)
+        assert invite2.token != token1  # Different token
+
+        # Old token should no longer exist
+        with db.engine.begin() as connection:
+            old_invite = connection.execute(
+                sqlalchemy.text("SELECT * FROM friend_invites WHERE token = :token"),
+                {"token": token1}
+            ).fetchone()
+            assert old_invite is None  # Old invite was deleted
+
+            # New invite exists
+            new_invite = connection.execute(
+                sqlalchemy.text("SELECT * FROM friend_invites WHERE token = :token"),
+                {"token": invite2.token}
+            ).fetchone()
+            assert new_invite is not None
     finally:
         with db.engine.begin() as connection:
             _cleanup_user(connection, user_id)
@@ -274,28 +329,30 @@ def test_accept_already_friends_fails():
 # ==================== Pending Invites Tests ====================
 
 def test_get_pending_invites():
-    """Test getting list of pending invites."""
+    """Test getting list of invites (now returns permanent invite)."""
     with db.engine.begin() as connection:
         user_id = _create_test_user(connection, "pending@test.com", "Kate", "Pending")
 
     try:
-        # Create multiple invites
+        # Create invite (calling twice returns the same permanent invite)
         create_invite(user_id=user_id)
         create_invite(user_id=user_id)
 
         pending = get_pending_invites(user_id=user_id)
 
         assert isinstance(pending, list)
-        assert len(pending) == 2
-        assert all(isinstance(p, PendingInviteResponse) for p in pending)
-        assert all(p.status == "pending" for p in pending)
+        # Only 1 permanent invite (reused)
+        assert len(pending) == 1
+        assert isinstance(pending[0], PendingInviteResponse)
+        # Permanent invites have status "active"
+        assert pending[0].status == "active"
     finally:
         with db.engine.begin() as connection:
             _cleanup_user(connection, user_id)
 
 
 def test_pending_invites_shows_accepted():
-    """Test that accepted invites show correct status."""
+    """Test that permanent invite remains active after acceptance."""
     with db.engine.begin() as connection:
         inviter_id = _create_test_user(connection, "pendinginviter@test.com", "Leo", "Inviter")
         accepter_id = _create_test_user(connection, "pendingaccepter@test.com", "Mia", "Accepter")
@@ -307,8 +364,8 @@ def test_pending_invites_shows_accepted():
         pending = get_pending_invites(user_id=inviter_id)
 
         assert len(pending) == 1
-        assert pending[0].status == "accepted"
-        assert pending[0].accepted_by_name == "Mia Accepter"
+        # Permanent invites stay "active" even after being used
+        assert pending[0].status == "active"
     finally:
         with db.engine.begin() as connection:
             _cleanup_user(connection, inviter_id)
@@ -495,25 +552,23 @@ def test_multiple_friendships():
             _cleanup_user(connection, friend3_id)
 
 
-def test_invite_max_uses_exceeded():
-    """Test that invite cannot be used more than max_uses times."""
+def test_permanent_invite_allows_multiple_accepts():
+    """Test that permanent invites allow multiple different users to accept."""
     with db.engine.begin() as connection:
         inviter_id = _create_test_user(connection, "maxuses@test.com", "Max", "Uses")
         accepter1_id = _create_test_user(connection, "accepter1@test.com", "First", "Accepter")
         accepter2_id = _create_test_user(connection, "accepter2@test.com", "Second", "Accepter")
 
     try:
-        # Create invite with default max_uses=1
+        # Create permanent invite (max_uses=NULL = unlimited)
         invite = create_invite(user_id=inviter_id)
 
         # First user accepts successfully
         accept_invite(invite.token, BackgroundTasks(), user_id=accepter1_id)
 
-        # Second user should fail (max uses exceeded)
-        with pytest.raises(HTTPException) as exc_info:
-            accept_invite(invite.token, BackgroundTasks(), user_id=accepter2_id)
-        assert exc_info.value.status_code == 410
-        assert "already been used" in exc_info.value.detail.lower()
+        # Second user should also succeed (permanent invites have unlimited uses)
+        friend = accept_invite(invite.token, BackgroundTasks(), user_id=accepter2_id)
+        assert friend.user_id == inviter_id
     finally:
         with db.engine.begin() as connection:
             _cleanup_user(connection, inviter_id)
@@ -521,8 +576,8 @@ def test_invite_max_uses_exceeded():
             _cleanup_user(connection, accepter2_id)
 
 
-def test_invite_preview_used_up_shows_invalid():
-    """Test that used up invite preview shows is_valid=False."""
+def test_permanent_invite_preview_stays_valid_after_use():
+    """Test that permanent invite preview stays valid after acceptance."""
     with db.engine.begin() as connection:
         inviter_id = _create_test_user(connection, "usedupinviter@test.com", "Used", "Inviter")
         accepter_id = _create_test_user(connection, "usedupaccepter@test.com", "Up", "Accepter")
@@ -537,9 +592,9 @@ def test_invite_preview_used_up_shows_invalid():
         # Accept the invite
         accept_invite(invite.token, BackgroundTasks(), user_id=accepter_id)
 
-        # Preview after acceptance should be invalid
+        # Preview after acceptance should STILL be valid (permanent invites)
         preview_after = get_invite_preview(invite.token)
-        assert preview_after.is_valid is False
+        assert preview_after.is_valid is True
     finally:
         with db.engine.begin() as connection:
             _cleanup_user(connection, inviter_id)
@@ -622,8 +677,8 @@ def test_friend_profile_includes_all_fields():
             _cleanup_user(connection, user2_id)
 
 
-def test_create_multiple_invites():
-    """Test that a user can create multiple invites."""
+def test_create_invite_returns_same_permanent_invite():
+    """Test that calling create_invite returns the same permanent invite."""
     with db.engine.begin() as connection:
         user_id = _create_test_user(connection, "multiinvite@test.com", "Multi", "Invite")
 
@@ -632,13 +687,13 @@ def test_create_multiple_invites():
         invite2 = create_invite(user_id=user_id)
         invite3 = create_invite(user_id=user_id)
 
-        # Each invite should have a unique token
-        assert invite1.token != invite2.token
-        assert invite2.token != invite3.token
-        assert invite1.token != invite3.token
+        # All invites should have the same token (permanent, reused)
+        assert invite1.token == invite2.token
+        assert invite2.token == invite3.token
 
         pending = get_pending_invites(user_id=user_id)
-        assert len(pending) == 3
+        # Only 1 permanent invite exists
+        assert len(pending) == 1
     finally:
         with db.engine.begin() as connection:
             _cleanup_user(connection, user_id)
