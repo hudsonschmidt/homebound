@@ -31,7 +31,7 @@ def get_global_stats():
                 """
                 SELECT COUNT(*) as count
                 FROM users
-                WHERE is_active = true
+                WHERE id NOT IN (1,5)
                 """
             )
         ).fetchone()
