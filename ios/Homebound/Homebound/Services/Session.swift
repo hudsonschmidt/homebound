@@ -1468,7 +1468,14 @@ final class Session: ObservableObject {
                             debugLog("[Session] ⚠️ extend action has invalid URL - skipping")
                             continue
                         }
-                        urlComponents.queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+                        var queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+                        // Include coordinates if they were captured when queued
+                        if let lat = action.payload["lat"] as? Double,
+                           let lon = action.payload["lon"] as? Double {
+                            queryItems.append(URLQueryItem(name: "lat", value: String(lat)))
+                            queryItems.append(URLQueryItem(name: "lon", value: String(lon)))
+                        }
+                        urlComponents.queryItems = queryItems
 
                         guard let requestURL = urlComponents.url else {
                             debugLog("[Session] ⚠️ extend action URL construction failed - skipping")
@@ -1941,6 +1948,9 @@ final class Session: ObservableObject {
             return false
         }
 
+        // Get current location for extend event (non-blocking, 5s timeout)
+        let location = await LocationManager.shared.getCurrentLocation()
+
         // Calculate new ETA locally for offline update
         // If currently past ETA (overdue), extend from now instead of original ETA
         let now = Date()
@@ -1950,7 +1960,7 @@ final class Session: ObservableObject {
 
         // Check if offline FIRST - queue immediately without waiting for network timeout
         if !NetworkMonitor.shared.isConnected {
-            return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString)
+            return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
         }
 
         do {
@@ -1965,7 +1975,12 @@ final class Session: ObservableObject {
                 debugLog("[Session] ❌ Failed to construct extend URL")
                 return false
             }
-            urlComponents.queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+            var queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
+            if let loc = location {
+                queryItems.append(URLQueryItem(name: "lat", value: String(loc.latitude)))
+                queryItems.append(URLQueryItem(name: "lon", value: String(loc.longitude)))
+            }
+            urlComponents.queryItems = queryItems
 
             guard let requestURL = urlComponents.url else {
                 debugLog("[Session] ❌ Failed to build extend request URL")
@@ -1995,15 +2010,20 @@ final class Session: ObservableObject {
             return true
         } catch {
             // Network failed - queue for later sync
-            return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString)
+            return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
         }
     }
 
-    private func queueOfflineExtendPlan(plan: Trip, minutes: Int, newETA: Date, newETAString: String) async -> Bool {
+    private func queueOfflineExtendPlan(plan: Trip, minutes: Int, newETA: Date, newETAString: String, location: CLLocationCoordinate2D?) async -> Bool {
+        var payload: [String: Any] = ["minutes": minutes, "new_eta": newETAString]
+        if let loc = location {
+            payload["lat"] = loc.latitude
+            payload["lon"] = loc.longitude
+        }
         LocalStorage.shared.queuePendingAction(
             type: "extend",
             tripId: plan.id,
-            payload: ["minutes": minutes, "new_eta": newETAString]
+            payload: payload
         )
 
         // Update local cache with new ETA

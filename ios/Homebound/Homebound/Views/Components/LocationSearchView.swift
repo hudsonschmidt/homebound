@@ -374,10 +374,8 @@ struct LocationSearchView: View {
             }
         } catch {
             debugLog("Error converting search result: \(error)")
-            await MainActor.run {
-                selectedLocation = result.title
-                isPresented = false
-            }
+            // Don't dismiss - coordinates couldn't be obtained
+            // User can try selecting again or choose a different location
         }
     }
 

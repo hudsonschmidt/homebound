@@ -385,6 +385,22 @@ def create_trip(
                     )
                 log.info(f"[Trips] Friend {friend_id} verified")
 
+        # Validate that coordinates are provided (iOS should always send these)
+        if body.gen_lat is None or body.gen_lon is None:
+            log.warning(f"[Trips] Missing destination coordinates: lat={body.gen_lat}, lon={body.gen_lon}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Location coordinates are required"
+            )
+
+        # Validate start location coordinates if separate locations enabled
+        if body.has_separate_locations and (body.start_lat is None or body.start_lon is None):
+            log.warning(f"[Trips] Missing start coordinates: lat={body.start_lat}, lon={body.start_lon}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Start location coordinates are required when using separate locations"
+            )
+
         # Generate unique tokens for checkin/checkout
         checkin_token = secrets.token_urlsafe(32)
         checkout_token = secrets.token_urlsafe(32)
@@ -471,8 +487,8 @@ def create_trip(
                 "eta": body.eta.isoformat(),
                 "grace_min": body.grace_min,
                 "location_text": location_text or "Unknown Location",  # Default if not provided
-                "gen_lat": body.gen_lat if body.gen_lat is not None else 0.0,  # Default to 0.0
-                "gen_lon": body.gen_lon if body.gen_lon is not None else 0.0,  # Default to 0.0
+                "gen_lat": body.gen_lat,  # Already validated as not None
+                "gen_lon": body.gen_lon,  # Already validated as not None
                 "start_location_text": start_location_text if body.has_separate_locations else None,
                 "start_lat": body.start_lat if body.has_separate_locations else None,
                 "start_lon": body.start_lon if body.has_separate_locations else None,
@@ -1447,7 +1463,9 @@ def extend_trip(
     trip_id: int,
     minutes: int,
     background_tasks: BackgroundTasks,
-    user_id: int = Depends(auth.get_current_user_id)
+    user_id: int = Depends(auth.get_current_user_id),
+    lat: float | None = None,
+    lon: float | None = None
 ):
     """Extend the ETA of an active or overdue trip by the specified number of minutes.
 
@@ -1499,15 +1517,17 @@ def extend_trip(
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO events (user_id, trip_id, what, timestamp)
-                VALUES (:user_id, :trip_id, 'checkin', :timestamp)
+                INSERT INTO events (user_id, trip_id, what, timestamp, lat, lon)
+                VALUES (:user_id, :trip_id, 'checkin', :timestamp, :lat, :lon)
                 RETURNING id
                 """
             ),
             {
                 "user_id": user_id,
                 "trip_id": trip_id,
-                "timestamp": now.isoformat()
+                "timestamp": now.isoformat(),
+                "lat": lat,
+                "lon": lon
             }
         )
         row = result.fetchone()

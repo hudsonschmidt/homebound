@@ -138,7 +138,17 @@ struct HistoryView: View {
                         // Trip List
                         Section {
                             ForEach(filteredPlans) { plan in
-                                TripHistoryCard(plan: plan)
+                                // Only non-planned trips are tappable
+                                if plan.status != "planned" {
+                                    ZStack {
+                                        // Hidden NavigationLink (no chevron)
+                                        NavigationLink(destination: TripDetailView(trip: plan)) {
+                                            EmptyView()
+                                        }
+                                        .opacity(0)
+
+                                        TripHistoryCard(plan: plan)
+                                    }
                                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                     .listRowBackground(Color.clear)
                                     .listRowSeparator(.hidden)
@@ -150,8 +160,22 @@ struct HistoryView: View {
                                         } label: {
                                             Label("Delete", systemImage: "trash")
                                         }
+                                    }
+                                } else {
+                                    // Planned trips are not tappable
+                                    TripHistoryCard(plan: plan)
+                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                        .listRowBackground(Color.clear)
+                                        .listRowSeparator(.hidden)
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                            Button(role: .destructive) {
+                                                Task {
+                                                    await deletePlan(plan)
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
 
-                                        if plan.status == "planned" {
                                             Button {
                                                 tripToEdit = plan
                                             } label: {
@@ -159,7 +183,7 @@ struct HistoryView: View {
                                             }
                                             .tint(.blue)
                                         }
-                                    }
+                                }
                             }
                         }
                     }

@@ -711,7 +711,7 @@ struct TimelineResponse: Codable {
     var events: [TimelineEvent]
 }
 
-struct TimelineEvent: Codable, Identifiable {
+struct TimelineEvent: Codable, Identifiable, Equatable {
     // Use the full ISO8601 string for better uniqueness (includes fractional seconds)
     var id: String { "\(kind)-\(at)" }
     var kind: String

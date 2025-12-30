@@ -431,11 +431,13 @@ struct CreatePlanView: View {
         case 1:
             let hasTitle = !planTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let hasDestination = !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let hasDestinationCoords = locationCoordinates != nil
             if useSeparateLocations {
                 let hasStart = !startLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                return hasTitle && hasDestination && hasStart
+                let hasStartCoords = startLocationCoordinates != nil
+                return hasTitle && hasDestination && hasDestinationCoords && hasStart && hasStartCoords
             }
-            return hasTitle && hasDestination
+            return hasTitle && hasDestination && hasDestinationCoords
         case 2:
             // Return time must be after start time AND in the future
             let now = Date()
