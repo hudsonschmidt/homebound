@@ -405,6 +405,8 @@ def test_create_trip_with_other_users_contact_fails():
         grace_min=30,
         location_text="Mountain",
         contact1=contact_a_id,  # User A's contact!
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
     )
 
     background_tasks = BackgroundTasks()
@@ -441,6 +443,8 @@ def test_create_trip_requires_own_contact():
         grace_min=30,
         location_text="My Mountain",
         contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194,
     )
 
     background_tasks = BackgroundTasks()

@@ -109,7 +109,9 @@ def test_e2e_complete_user_journey():
         grace_min=30,
         location_text="Mountain Trail",
         notes="End-to-end test trip",
-        contact1=contact1.id
+        contact1=contact1.id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
     background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(trip_data, background_tasks, user_id=user_id)
@@ -354,7 +356,9 @@ def test_e2e_contact_management_workflow():
             start=now,
             eta=now + timedelta(hours=2),
             grace_min=30,
-            contact1=contact1.id
+            contact1=contact1.id,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id
@@ -450,7 +454,9 @@ def test_e2e_trip_lifecycle():
             grace_min=45,
             location_text="Test Mountain",
             notes="Testing trip lifecycle",
-            contact1=contact.id
+            contact1=contact.id,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id

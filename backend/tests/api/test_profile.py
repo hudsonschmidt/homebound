@@ -1738,7 +1738,8 @@ def test_update_friend_visibility():
             friend_share_checkin_locations=False,
             friend_share_live_location=True,
             friend_share_notes=False,
-            friend_allow_update_requests=False
+            friend_allow_update_requests=False,
+            friend_share_achievements=True
         )
         result = update_friend_visibility(new_settings, user_id=user_id)
 
@@ -1795,7 +1796,8 @@ def test_update_friend_visibility_partial():
             friend_share_checkin_locations=False,
             friend_share_live_location=False,
             friend_share_notes=True,
-            friend_allow_update_requests=True
+            friend_allow_update_requests=True,
+            friend_share_achievements=True
         )
         update_friend_visibility(settings1, user_id=user_id)
 
@@ -1811,7 +1813,8 @@ def test_update_friend_visibility_partial():
             friend_share_checkin_locations=False,
             friend_share_live_location=True,
             friend_share_notes=False,
-            friend_allow_update_requests=True
+            friend_allow_update_requests=True,
+            friend_share_achievements=True
         )
         update_friend_visibility(settings2, user_id=user_id)
 

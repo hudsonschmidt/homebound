@@ -21,25 +21,43 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 0.5.0",
+        title: "Update 0.5.1",
         features: [
             WhatsNewFeature(
                 icon: "person.2",
                 iconColor: .white,
-                title: "Friends",
-                description: "Add friends to share your adventures and achievements with them."
+                title: "More info on Friends",
+                description: "See more details about your friends, including their adventure stats and achievements."
             ),
             WhatsNewFeature(
-                icon: "trophy",
+                icon: "person.crop.circle.badge.checkmark",
                 iconColor: .white,
-                title: "Achievements",
-                description: "Earn achievements based on your adventure stats and show them off to your friends."
+                title: "Request Check in",
+                description: "Send a notification to your friends to check in on their adventures."
+            ),
+            WhatsNewFeature(
+                icon: "location",
+                iconColor: .white,
+                title: "Live Location",
+                description: "See your friend's live location during an adventure for added safety. (Opt-in only)"
+            ),
+            WhatsNewFeature(
+                icon: "qrcode",
+                iconColor: .white,
+                title: "QR Code and Invite Link lasts forever",
+                description: "Invite links and QR codes are no longer single use no longer expire."
+            ),
+            WhatsNewFeature(
+                icon: "text.page",
+                iconColor: .white,
+                title: "See more details in Trip History",
+                description: "Click past trips to see more detailed stats and maps of your adventures."
             ),
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .white,
                 title: "Bug Fixes",
-                description: "Lots of performance improvements and bug fixes to make experience smoother. Time zone handling has been fixed."
+                description: "Light mode bug. Friends page updates more. UI switching improvements. Coordinate logging bug."
             )
         ]
     )

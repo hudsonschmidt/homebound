@@ -164,7 +164,9 @@ def test_create_trip_invalid_activity():
         start=now,
         eta=now + timedelta(hours=2),
         grace_min=30,
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -188,7 +190,9 @@ def test_create_trip_invalid_contact():
         start=now,
         eta=now + timedelta(hours=2),
         grace_min=30,
-        contact1=999999  # Non-existent contact
+        contact1=999999,  # Non-existent contact
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -652,7 +656,9 @@ def test_update_active_trip_fails():
         start=now,  # Starts now, so status will be 'active'
         eta=now + timedelta(hours=2),
         grace_min=30,
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -683,7 +689,9 @@ def test_update_completed_trip_fails():
         start=now,
         eta=now + timedelta(hours=2),
         grace_min=30,
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -860,8 +868,10 @@ def test_create_trip_default_notification_settings():
         start=now,
         eta=now + timedelta(hours=2),
         grace_min=30,
-        contact1=contact_id
+        contact1=contact_id,
         # No notification settings specified
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -887,7 +897,9 @@ def test_create_trip_custom_checkin_interval():
         eta=now + timedelta(hours=3),
         grace_min=15,
         contact1=contact_id,
-        checkin_interval_min=15  # Check in every 15 minutes
+        checkin_interval_min=15,  # Check in every 15 minutes
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -913,7 +925,9 @@ def test_create_trip_quiet_hours_only():
         grace_min=60,
         contact1=contact_id,
         notify_start_hour=7,   # 7 AM
-        notify_end_hour=21     # 9 PM
+        notify_end_hour=21,  # 9 PM
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -987,7 +1001,9 @@ def test_get_trip_includes_notification_settings():
         contact1=contact_id,
         checkin_interval_min=90,
         notify_start_hour=9,
-        notify_end_hour=20
+        notify_end_hour=20,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -1021,7 +1037,9 @@ def test_get_trips_includes_notification_settings():
             contact1=contact_id,
             checkin_interval_min=45,
             notify_start_hour=8,
-            notify_end_hour=22
+            notify_end_hour=22,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id
@@ -1035,7 +1053,9 @@ def test_get_trips_includes_notification_settings():
             start=now,
             eta=now + timedelta(hours=1),
             grace_min=20,
-            contact1=contact_id
+            contact1=contact_id,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id
@@ -1071,7 +1091,9 @@ def test_get_active_trip_includes_notification_settings():
         contact1=contact_id,
         checkin_interval_min=15,
         notify_start_hour=6,
-        notify_end_hour=23
+        notify_end_hour=23,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -1101,7 +1123,9 @@ def test_create_trip_with_overnight_notification_hours():
         contact1=contact_id,
         checkin_interval_min=60,
         notify_start_hour=22,  # 10 PM
-        notify_end_hour=8      # 8 AM (overnight wrap)
+        notify_end_hour=8,  # 8 AM (overnight wrap)
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -1126,7 +1150,9 @@ def test_create_trip_with_short_interval():
         eta=now + timedelta(hours=1),
         grace_min=15,
         contact1=contact_id,
-        checkin_interval_min=15
+        checkin_interval_min=15,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -1149,7 +1175,9 @@ def test_create_trip_with_long_interval():
         eta=now + timedelta(hours=8),
         grace_min=60,
         contact1=contact_id,
-        checkin_interval_min=120  # 2 hours
+        checkin_interval_min=120,  # 2 hours
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -1174,7 +1202,9 @@ def test_update_trip_clear_notification_hours():
         grace_min=30,
         contact1=contact_id,
         notify_start_hour=8,
-        notify_end_hour=20
+        notify_end_hour=20,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -1213,7 +1243,9 @@ def test_update_trip_notification_hours_to_overnight():
         grace_min=60,
         contact1=contact_id,
         notify_start_hour=8,
-        notify_end_hour=20
+        notify_end_hour=20,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2274,7 +2306,9 @@ def test_get_trip_includes_notify_self():
         eta=now + timedelta(hours=26),
         grace_min=30,
         contact1=contact_id,
-        notify_self=True
+        notify_self=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2304,7 +2338,9 @@ def test_get_trips_includes_notify_self():
             eta=now + timedelta(hours=2),
             grace_min=30,
             contact1=contact_id,
-            notify_self=True
+            notify_self=True,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id
@@ -2319,7 +2355,9 @@ def test_get_trips_includes_notify_self():
             eta=now + timedelta(hours=1),
             grace_min=20,
             contact1=contact_id,
-            notify_self=False
+            notify_self=False,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id
@@ -2348,7 +2386,9 @@ def test_get_active_trip_includes_notify_self():
         eta=now + timedelta(hours=1),
         grace_min=15,
         contact1=contact_id,
-        notify_self=True
+        notify_self=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2392,7 +2432,9 @@ def test_update_trip_disable_notify_self():
         eta=now + timedelta(hours=26),
         grace_min=30,
         contact1=contact_id,
-        notify_self=True
+        notify_self=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2422,7 +2464,9 @@ def test_update_trip_notify_self_unchanged():
         eta=now + timedelta(hours=26),
         grace_min=30,
         contact1=contact_id,
-        notify_self=True
+        notify_self=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2502,7 +2546,9 @@ def test_start_trip_early_updates_start_time():
         eta=future_start + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2549,7 +2595,9 @@ def test_trip_duration_non_negative_after_early_start():
         eta=future_start + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2594,7 +2642,9 @@ def test_start_trip_already_active_fails():
         eta=now + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2624,7 +2674,9 @@ def test_start_trip_completed_fails():
         eta=now + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2677,7 +2729,9 @@ def test_start_trip_other_users_trip_fails():
         eta=future_start + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2732,7 +2786,9 @@ def test_extend_trip_basic():
         eta=original_eta,
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2781,7 +2837,9 @@ def test_extend_trip_updates_overdue_to_active():
         eta=past_eta,
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2843,7 +2901,9 @@ def test_extend_trip_planned_fails():
         eta=future_start + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2872,7 +2932,9 @@ def test_extend_trip_completed_fails():
         eta=now + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2920,7 +2982,9 @@ def test_extend_trip_other_users_trip_fails():
         eta=now + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -2968,7 +3032,9 @@ def test_extend_trip_multiple_times():
         eta=original_eta,
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3019,7 +3085,9 @@ def test_complete_trip_planned_fails():
         eta=future_start + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3048,7 +3116,9 @@ def test_complete_trip_already_completed_fails():
         eta=now + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3081,7 +3151,9 @@ def test_create_trip_start_after_eta():
         eta=now + timedelta(hours=1),  # ETA before start!
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3364,7 +3436,9 @@ def test_create_trip_with_invalid_friend_contact():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        friend_contact1=non_friend_id  # Not actually a friend!
+        friend_contact1=non_friend_id,  # Not actually a friend!
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3461,7 +3535,9 @@ def test_create_trip_with_multiple_friend_contacts():
         contact1=contact_id,  # Required by NOT NULL constraint
         friend_contact1=friend_ids[0],
         friend_contact2=friend_ids[1],
-        friend_contact3=friend_ids[2]
+        friend_contact3=friend_ids[2],
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3498,7 +3574,9 @@ def test_create_trip_with_both_email_and_friend_contacts():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,      # Email contact
-        friend_contact1=friend_id  # Friend contact
+        friend_contact1=friend_id,  # Friend contact
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3523,7 +3601,9 @@ def test_get_trip_includes_friend_contacts():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        friend_contact1=friend_id
+        friend_contact1=friend_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3557,7 +3637,9 @@ def test_get_trips_includes_friend_contacts():
             grace_min=30,
             location_text="Trail A",
             contact1=contact_id,
-            friend_contact1=friend_id
+            friend_contact1=friend_id,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id
@@ -3572,7 +3654,9 @@ def test_get_trips_includes_friend_contacts():
             eta=now + timedelta(hours=1),
             grace_min=20,
             location_text="Trail B",
-            contact1=contact_id
+            contact1=contact_id,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
         ),
         background_tasks,
         user_id=user_id
@@ -3601,7 +3685,9 @@ def test_get_active_trip_includes_friend_contacts():
         eta=now + timedelta(hours=1),
         grace_min=15,
         contact1=contact_id,
-        friend_contact1=friend_id
+        friend_contact1=friend_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3628,7 +3714,9 @@ def test_update_trip_add_friend_contact():
         eta=now + timedelta(hours=26),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3665,7 +3753,9 @@ def test_update_trip_invalid_friend_contact():
         eta=now + timedelta(hours=26),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3697,8 +3787,10 @@ def test_create_trip_no_contacts_fails():
         start=now,
         eta=now + timedelta(hours=2),
         grace_min=30,
-        location_text="Mountain Trail"
+        location_text="Mountain Trail",
         # No contact1, no friend_contact1
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3725,7 +3817,9 @@ def test_trip_safety_contacts_junction_table():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        friend_contact1=friend_id
+        friend_contact1=friend_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3774,7 +3868,9 @@ def test_trip_delete_cascades_to_safety_contacts():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        friend_contact1=friend_id
+        friend_contact1=friend_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3815,8 +3911,10 @@ def test_friend_contact_defaults_to_none():
         eta=now + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
         # No friend_contact fields specified
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3847,7 +3945,9 @@ def test_update_live_location_success():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        share_live_location=True  # Enable live location
+        share_live_location=True,  # Enable live location
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3897,7 +3997,9 @@ def test_update_live_location_disabled():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        share_live_location=False  # Disabled
+        share_live_location=False,  # Disabled
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3930,7 +4032,9 @@ def test_update_live_location_inactive_trip():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        share_live_location=True
+        share_live_location=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -3976,7 +4080,9 @@ def test_update_live_location_wrong_user():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        share_live_location=True
+        share_live_location=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -4030,7 +4136,9 @@ def test_share_live_location_in_trip_response():
         grace_min=30,
         location_text="Mountain Trail",
         contact1=contact_id,
-        share_live_location=True
+        share_live_location=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -4054,8 +4162,10 @@ def test_share_live_location_defaults_to_false():
         eta=now + timedelta(hours=2),
         grace_min=30,
         location_text="Mountain Trail",
-        contact1=contact_id
+        contact1=contact_id,
         # share_live_location not specified
+        gen_lat=37.7749,
+        gen_lon=-122.4194
     )
 
     background_tasks = MagicMock(spec=BackgroundTasks)
