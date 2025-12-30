@@ -1616,18 +1616,101 @@ struct ShareSheet: UIViewControllerRepresentable {
 }
 
 struct AboutView: View {
+    @EnvironmentObject var session: Session
+    @State private var stats: GlobalStats?
+    @State private var isLoadingStats = true
+
+    // MARK: - Mission Text (Edit these strings to update content)
+    private let missionTitle = "Our Mission"
+    private let missionParagraph1 = "Homebound was built with a simple belief: every adventure should end with you making it home safely."
+    private let missionParagraph2 = "Whether you're hiking a remote trail, driving cross-country, or exploring somewhere new—we're here to make sure someone always knows your plan and can help if something goes wrong."
+
     var body: some View {
         List {
+            // Mission Section
             Section {
-                HStack {
-                    Text("Made with ❤️ in California")
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(missionParagraph1)
+                        .font(.body)
+
+                    Text(missionParagraph2)
+                        .font(.body)
+                }
+                .padding(.vertical, 8)
+            } header: {
+                Text(missionTitle)
+            }
+
+            // Community Stats Section
+            if let stats = stats {
+                Section {
+                    HStack(spacing: 16) {
+                        StatCard(
+                            value: formatNumber(stats.total_users),
+                            label: "adventurers"
+                        )
+
+                        StatCard(
+                            value: formatNumber(stats.total_completed_trips),
+                            label: "trips completed safely"
+                        )
+                    }
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                    .listRowBackground(Color.clear)
+                } header: {
+                    Text("Community")
+                }
+            } else if isLoadingStats {
+                Section {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                } header: {
+                    Text("Community")
                 }
             }
         }
         .scrollIndicators(.hidden)
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            stats = await session.fetchGlobalStats()
+            isLoadingStats = false
+        }
+    }
+
+    private func formatNumber(_ number: Int) -> String {
+        if number >= 1000 {
+            let thousands = Double(number) / 1000.0
+            return String(format: "%.1fK", thousands)
+        }
+        return "\(number)"
+    }
+}
+
+private struct StatCard: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundStyle(Color.hbBrand)
+
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

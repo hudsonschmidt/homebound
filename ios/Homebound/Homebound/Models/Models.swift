@@ -897,3 +897,11 @@ extension Array where Element == Activity {
         map { ActivityTypeAdapter(activity: $0) }
     }
 }
+
+// MARK: - Global Stats
+
+/// Platform-wide statistics (public endpoint)
+struct GlobalStats: Codable {
+    let total_users: Int
+    let total_completed_trips: Int
+}

@@ -2989,6 +2989,23 @@ final class Session: ObservableObject {
         isLoadingActivities = false
     }
 
+    // MARK: - Global Stats
+
+    /// Fetch global platform statistics (public endpoint, no auth required)
+    func fetchGlobalStats() async -> GlobalStats? {
+        do {
+            let stats: GlobalStats = try await api.get(
+                url("/api/v1/stats/global"),
+                bearer: nil
+            )
+            debugLog("[Session] ✅ Loaded global stats: \(stats.total_users) users, \(stats.total_completed_trips) trips")
+            return stats
+        } catch {
+            debugLog("[Session] ❌ Failed to load global stats: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Trip Templates
 
     /// Load templates from local storage
