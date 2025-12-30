@@ -582,6 +582,9 @@ struct ActivePlanCardCompact: View {
         } message: {
             Text(errorMessage)
         }
+        .onChange(of: plan.eta_at) { _, _ in
+            updateTimeRemaining()
+        }
     }
 
     var glowColor: Color {

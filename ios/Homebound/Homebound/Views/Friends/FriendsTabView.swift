@@ -780,6 +780,9 @@ struct FriendActiveTripCardExpanded: View {
                 updateTimeRemaining()
             }
         }
+        .onChange(of: trip.etaDate) { _, _ in
+            updateTimeRemaining()
+        }
     }
 
     private func requestUpdate() {
