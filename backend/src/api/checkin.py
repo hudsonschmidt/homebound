@@ -63,6 +63,7 @@ def checkin_with_token(
 
         # Log the check-in event with location coordinates
         now = datetime.now(UTC)
+        log.info(f"[Checkin] About to INSERT event with lat={lat}, lon={lon}, types: lat={type(lat)}, lon={type(lon)}")
         result = connection.execute(
             sqlalchemy.text(
                 """
@@ -76,6 +77,7 @@ def checkin_with_token(
         row = result.fetchone()
         assert row is not None
         event_id = row[0]
+        log.info(f"[Checkin] Created event id={event_id} with lat={lat}, lon={lon}")
 
         # Update last check-in event reference, reset status to active, and clear warning timestamps
         # Also reset transition flags so Live Activity updates work if trip extends past new ETA
