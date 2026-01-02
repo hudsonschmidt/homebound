@@ -8,6 +8,9 @@ struct TripDetailView: View {
     @State private var timelineEvents: [TimelineEvent] = []
     @State private var isLoadingTimeline = false
     @State private var isLoadingContacts = false
+    @State private var isLoadingFriends = false
+    @State private var contactsLoaded = false
+    @State private var friendsLoaded = false
 
     // Computed property to always get fresh trip from session
     private var trip: Trip? {
@@ -29,7 +32,7 @@ struct TripDetailView: View {
                         TripDetailTimelineSection(events: timelineEvents, isLoading: isLoadingTimeline)
 
                         // Safety Contacts Section
-                        TripDetailContactsSection(trip: trip, isLoadingContacts: isLoadingContacts)
+                        TripDetailContactsSection(trip: trip, contactsReady: contactsLoaded && friendsLoaded)
 
                         // Statistics Section
                         TripDetailStatsSection(trip: trip, events: timelineEvents)
@@ -80,18 +83,20 @@ struct TripDetailView: View {
     }
 
     private func ensureContactsLoaded() async {
-        // Only load if contacts are empty (not loaded yet)
-        if session.contacts.isEmpty {
-            await MainActor.run { isLoadingContacts = true }
-            _ = await session.loadContacts()
-            await MainActor.run { isLoadingContacts = false }
+        await MainActor.run { isLoadingContacts = true }
+        _ = await session.loadContacts()
+        await MainActor.run {
+            isLoadingContacts = false
+            contactsLoaded = true
         }
     }
 
     private func ensureFriendsLoaded() async {
-        // Only load if friends are empty (not loaded yet)
-        if session.friends.isEmpty {
-            _ = await session.loadFriends()
+        await MainActor.run { isLoadingFriends = true }
+        _ = await session.loadFriends()
+        await MainActor.run {
+            isLoadingFriends = false
+            friendsLoaded = true
         }
     }
 
@@ -504,7 +509,7 @@ private struct TimelineEventRow: View {
 
 private struct TripDetailContactsSection: View {
     let trip: Trip
-    let isLoadingContacts: Bool
+    let contactsReady: Bool
     @EnvironmentObject var session: Session
 
     private var friendContactIds: [Int] {
@@ -524,7 +529,7 @@ private struct TripDetailContactsSection: View {
             Text("Safety Contacts")
                 .font(.headline)
 
-            if isLoadingContacts && session.contacts.isEmpty && session.friends.isEmpty {
+            if !contactsReady {
                 HStack {
                     Spacer()
                     ProgressView()
@@ -673,27 +678,42 @@ private struct TripDetailStatsSection: View {
         }
     }
 
+    private var hasAnyStats: Bool {
+        durationString != nil || distanceTraveled != nil || checkinCount > 0 || averageCheckinInterval != nil || trip.grace_minutes > 0
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Statistics")
-                .font(.headline)
+        if hasAnyStats {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Statistics")
+                    .font(.headline)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                StatBox(icon: "timer", label: "Duration", value: durationString ?? "--")
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    if let duration = durationString {
+                        StatBox(icon: "timer", label: "Duration", value: duration)
+                    }
 
-                StatBox(icon: "arrow.left.and.right", label: "Distance", value: distanceTraveled ?? "--")
+                    if let distance = distanceTraveled {
+                        StatBox(icon: "arrow.left.and.right", label: "Distance", value: distance)
+                    }
 
-                StatBox(icon: "checkmark.circle.fill", label: "Check-ins", value: "\(checkinCount)")
+                    if checkinCount > 0 {
+                        StatBox(icon: "checkmark.circle.fill", label: "Check-ins", value: "\(checkinCount)")
+                    }
 
-                StatBox(icon: "clock.arrow.circlepath", label: "Avg Interval", value: averageCheckinInterval ?? "--")
+                    if let avgInterval = averageCheckinInterval {
+                        StatBox(icon: "clock.arrow.circlepath", label: "Avg Interval", value: avgInterval)
+                    }
 
-                StatBox(icon: "clock.badge.checkmark", label: "Grace Period",
-                        value: trip.grace_minutes > 0 ? "\(trip.grace_minutes) min" : "--")
+                    if trip.grace_minutes > 0 {
+                        StatBox(icon: "clock.badge.checkmark", label: "Grace Period", value: "\(trip.grace_minutes) min")
+                    }
+                }
             }
+            .padding(16)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(16)
         }
-        .padding(16)
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(16)
     }
 }
 
