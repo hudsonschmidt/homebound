@@ -142,7 +142,7 @@ struct HistoryView: View {
                                 if plan.status != "planned" {
                                     ZStack {
                                         // Hidden NavigationLink (no chevron)
-                                        NavigationLink(destination: TripDetailView(trip: plan)) {
+                                        NavigationLink(destination: TripDetailView(tripId: plan.id)) {
                                             EmptyView()
                                         }
                                         .opacity(0)

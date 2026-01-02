@@ -3,54 +3,105 @@ import MapKit
 
 /// Full-screen detail view for past trips
 struct TripDetailView: View {
-    let trip: Trip
+    let tripId: Int
     @EnvironmentObject var session: Session
     @State private var timelineEvents: [TimelineEvent] = []
     @State private var isLoadingTimeline = false
+    @State private var isLoadingContacts = false
+
+    // Computed property to always get fresh trip from session
+    private var trip: Trip? {
+        session.allTrips.first(where: { $0.id == tripId })
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // Map Section
-                TripDetailMapSection(trip: trip, events: timelineEvents)
+        Group {
+            if let trip = trip {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        // Map Section
+                        TripDetailMapSection(trip: trip, events: timelineEvents)
 
-                // Summary Card
-                TripDetailSummaryCard(trip: trip)
+                        // Summary Card
+                        TripDetailSummaryCard(trip: trip)
 
-                // Timeline Section
-                TripDetailTimelineSection(events: timelineEvents, isLoading: isLoadingTimeline)
+                        // Timeline Section
+                        TripDetailTimelineSection(events: timelineEvents, isLoading: isLoadingTimeline)
 
-                // Safety Contacts Section
-                TripDetailContactsSection(trip: trip)
+                        // Safety Contacts Section
+                        TripDetailContactsSection(trip: trip, isLoadingContacts: isLoadingContacts)
 
-                // Statistics Section
-                TripDetailStatsSection(trip: trip, events: timelineEvents)
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 24)
-        }
-        .background(Color(.systemBackground))
-        .navigationTitle("Trip Details")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                ShareLink(item: generateShareSummary()) {
-                    Image(systemName: "square.and.arrow.up")
+                        // Statistics Section
+                        TripDetailStatsSection(trip: trip, events: timelineEvents)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 24)
                 }
+                .background(Color(.systemBackground))
+                .navigationTitle("Trip Details")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        ShareLink(item: generateShareSummary(for: trip)) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "Trip Not Found",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("This trip may have been deleted.")
+                )
             }
         }
         .task {
-            await loadTimelineEvents()
+            await loadAllData()
+        }
+        .refreshable {
+            await refreshAllData()
+        }
+    }
+
+    private func loadAllData() async {
+        // Load timeline, contacts, and friends in parallel
+        async let timelineTask: Void = loadTimelineEvents()
+        async let contactsTask: Void = ensureContactsLoaded()
+        async let friendsTask: Void = ensureFriendsLoaded()
+        _ = await (timelineTask, contactsTask, friendsTask)
+    }
+
+    private func refreshAllData() async {
+        // Force refresh all data from network
+        async let timelineTask: Void = loadTimelineEvents()
+        async let contactsTask: [Contact] = session.loadContacts()
+        async let friendsTask: [Friend] = session.loadFriends()
+        _ = await (timelineTask, contactsTask, friendsTask)
+    }
+
+    private func ensureContactsLoaded() async {
+        // Only load if contacts are empty (not loaded yet)
+        if session.contacts.isEmpty {
+            await MainActor.run { isLoadingContacts = true }
+            _ = await session.loadContacts()
+            await MainActor.run { isLoadingContacts = false }
+        }
+    }
+
+    private func ensureFriendsLoaded() async {
+        // Only load if friends are empty (not loaded yet)
+        if session.friends.isEmpty {
+            _ = await session.loadFriends()
         }
     }
 
     private func loadTimelineEvents() async {
         isLoadingTimeline = true
-        timelineEvents = await session.loadTimeline(planId: trip.id)
+        timelineEvents = await session.loadTimeline(planId: tripId)
         isLoadingTimeline = false
 
         // Debug: Log timeline events
-        debugLog("[TripDetailView] Loaded \(timelineEvents.count) timeline events for trip \(trip.id)")
+        debugLog("[TripDetailView] Loaded \(timelineEvents.count) timeline events for trip \(tripId)")
         for event in timelineEvents {
             debugLog("[TripDetailView] Event: kind=\(event.kind), lat=\(String(describing: event.lat)), lon=\(String(describing: event.lon))")
         }
@@ -58,7 +109,7 @@ struct TripDetailView: View {
         debugLog("[TripDetailView] Check-ins with coordinates: \(checkins.count)")
     }
 
-    private func generateShareSummary() -> String {
+    private func generateShareSummary(for trip: Trip) -> String {
         var summary = "\(trip.activity.icon) \(trip.title)\n\n"
         summary += "Status: \(trip.status.capitalized)\n"
 
@@ -453,6 +504,7 @@ private struct TimelineEventRow: View {
 
 private struct TripDetailContactsSection: View {
     let trip: Trip
+    let isLoadingContacts: Bool
     @EnvironmentObject var session: Session
 
     private var friendContactIds: [Int] {
@@ -472,7 +524,14 @@ private struct TripDetailContactsSection: View {
             Text("Safety Contacts")
                 .font(.headline)
 
-            if !hasContacts {
+            if isLoadingContacts && session.contacts.isEmpty && session.friends.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.vertical, 8)
+            } else if !hasContacts {
                 Text("No contacts assigned")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
