@@ -429,9 +429,9 @@ struct FriendPlannedTripCompact: View {
                     .foregroundStyle(.secondary)
             }
 
-            // ETA (displayed in the trip's original timezone)
+            // ETA (displayed in the trip's original timezone, with date if not today)
             if let etaDate = trip.etaDate {
-                Text(DateUtils.formatTime(etaDate, inTimezone: trip.timezone))
+                Text(formattedETA(etaDate))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -440,6 +440,30 @@ struct FriendPlannedTripCompact: View {
         .padding(.horizontal, 8)
         .background(trip.primaryColor.opacity(0.05))
         .cornerRadius(6)
+    }
+
+    /// Format ETA with date if not today (in the trip's timezone)
+    private func formattedETA(_ date: Date) -> String {
+        // Use trip's timezone for determining "today" and formatting
+        var calendar = Calendar.current
+        if let tzId = trip.timezone, let tz = TimeZone(identifier: tzId) {
+            calendar.timeZone = tz
+        }
+
+        let time = DateUtils.formatTime(date, inTimezone: trip.timezone)
+
+        if calendar.isDateInToday(date) {
+            return time
+        } else {
+            // Format date in trip's timezone
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "MMM d"
+            if let tzId = trip.timezone, let tz = TimeZone(identifier: tzId) {
+                dateFormatter.timeZone = tz
+            }
+            let dateStr = dateFormatter.string(from: date)
+            return "\(dateStr) • \(time)"
+        }
     }
 }
 

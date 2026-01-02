@@ -16,6 +16,11 @@ struct LocationSearchView: View {
     @State private var isGettingCurrentLocation = false
     @State private var showLocationDeniedAlert = false
 
+    // Selection state
+    @State private var isSelectingResult = false
+    @State private var showSelectionError = false
+    @State private var selectionErrorMessage = ""
+
     // Map picker state
     @State private var showingMapPicker = false
     @State private var mapPinCoordinate: CLLocationCoordinate2D?
@@ -221,7 +226,24 @@ struct LocationSearchView: View {
 
                     } else {
                         // Search Results
-                        if searchCompleter.searchResults.isEmpty && !searchText.isEmpty {
+                        if searchCompleter.isSearching {
+                            // Show loading indicator while search is in progress
+                            HStack {
+                                Spacer()
+                                VStack(spacing: 12) {
+                                    ProgressView()
+                                        .scaleEffect(1.2)
+
+                                    Text("Searching...")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 40)
+                                Spacer()
+                            }
+                            .listRowBackground(Color.clear)
+                        } else if searchCompleter.searchResults.isEmpty && !searchText.isEmpty {
+                            // No results found (only show when search is complete)
                             HStack {
                                 Spacer()
                                 VStack(spacing: 12) {
@@ -245,8 +267,8 @@ struct LocationSearchView: View {
                             ForEach(searchCompleter.searchResults, id: \.self) { result in
                                 SearchResultRow(
                                     result: result,
-                                    distance: searchCompleter.distances[searchCompleter.resultKey(result)],
-                                    locationEnabled: locationManager.isAuthorized,
+                                    distance: searchCompleter.distances[searchCompleter.cacheKey(for: result)],
+                                    isSelecting: isSelectingResult,
                                     onSelect: {
                                         Task {
                                             await selectSearchResult(result)
@@ -259,6 +281,7 @@ struct LocationSearchView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollIndicators(.hidden)
+                .disabled(isSelectingResult)
             }
             .navigationTitle("Select Location")
             .navigationBarTitleDisplayMode(.inline)
@@ -277,16 +300,27 @@ struct LocationSearchView: View {
             } message: {
                 Text("Please enable location access in Settings to use your current location.")
             }
+            .alert("Location Selection Failed", isPresented: $showSelectionError) {
+                Button("OK") {}
+            } message: {
+                Text(selectionErrorMessage)
+            }
         }
         .task {
             // Start location services when view appears
             locationManager.startUpdatingLocation()
-            // Set initial user location for distance calculations
-            searchCompleter.userLocation = locationManager.currentLocation
+            // Set region bias and user location when available
+            if let location = locationManager.currentLocation {
+                searchCompleter.updateRegion(center: location)
+                searchCompleter.userLocation = location
+            }
         }
         .onChange(of: locationManager.currentLocation?.latitude) { _, _ in
-            // Update search completer with user location for distance calculations
-            searchCompleter.userLocation = locationManager.currentLocation
+            // Update region bias and user location when location changes
+            if let location = locationManager.currentLocation {
+                searchCompleter.updateRegion(center: location)
+                searchCompleter.userLocation = location
+            }
         }
     }
 
@@ -359,23 +393,38 @@ struct LocationSearchView: View {
     }
 
     private func selectSearchResult(_ result: MKLocalSearchCompletion) async {
-        // Convert search completion to map item
-        let searchRequest = MKLocalSearch.Request(completion: result)
-        let search = MKLocalSearch(request: searchRequest)
+        // Prevent double-taps
+        guard !isSelectingResult else { return }
 
-        do {
-            let response = try await search.start()
-            if let mapItem = response.mapItems.first {
-                await MainActor.run {
-                    selectedLocation = result.title + (result.subtitle.isEmpty ? "" : ", \(result.subtitle)")
-                    selectedCoordinates = mapItem.placemark.coordinate
-                    isPresented = false
-                }
+        await MainActor.run {
+            isSelectingResult = true
+        }
+
+        // First, check if we have cached coordinates (from prefetch)
+        if let cachedCoordinate = searchCompleter.getCachedCoordinates(for: result) {
+            await MainActor.run {
+                selectedLocation = result.title + (result.subtitle.isEmpty ? "" : ", \(result.subtitle)")
+                selectedCoordinates = cachedCoordinate
+                isSelectingResult = false
+                isPresented = false
             }
-        } catch {
-            debugLog("Error converting search result: \(error)")
-            // Don't dismiss - coordinates couldn't be obtained
-            // User can try selecting again or choose a different location
+            return
+        }
+
+        // If not cached, fetch with retry logic
+        if let coordinate = await searchCompleter.fetchCoordinateWithRetry(for: result, maxRetries: 3) {
+            await MainActor.run {
+                selectedLocation = result.title + (result.subtitle.isEmpty ? "" : ", \(result.subtitle)")
+                selectedCoordinates = coordinate
+                isSelectingResult = false
+                isPresented = false
+            }
+        } else {
+            await MainActor.run {
+                isSelectingResult = false
+                selectionErrorMessage = "Could not get location details. Please check your connection and try again."
+                showSelectionError = true
+            }
         }
     }
 
@@ -477,7 +526,7 @@ struct LocationSearchView: View {
 struct SearchResultRow: View {
     let result: MKLocalSearchCompletion
     let distance: String?
-    let locationEnabled: Bool
+    let isSelecting: Bool
     let onSelect: () -> Void
 
     var body: some View {
@@ -488,9 +537,15 @@ struct SearchResultRow: View {
                         .fill(Color.hbBrand.opacity(0.2))
                         .frame(width: 40, height: 40)
 
-                    Image(systemName: "mappin.circle.fill")
-                        .foregroundStyle(Color.hbBrand)
-                        .font(.system(size: 18))
+                    if isSelecting {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color.hbBrand))
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "mappin.circle.fill")
+                            .foregroundStyle(Color.hbBrand)
+                            .font(.system(size: 18))
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -509,25 +564,26 @@ struct SearchResultRow: View {
 
                 Spacer()
 
-                // Distance or location prompt
                 if let distance = distance {
                     Text(distance)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else if !locationEnabled {
-                    Image(systemName: "location.slash")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
                 }
             }
         }
+        .disabled(isSelecting)
     }
 }
 
 // MARK: - Location Search Completer
 class LocationSearchCompleter: NSObject, ObservableObject {
     @Published var searchResults: [MKLocalSearchCompletion] = []
-    @Published var distances: [String: String] = [:] // Key: result title+subtitle, Value: formatted distance
+    @Published var isSearching = false
+    @Published var distances: [String: String] = [:] // Formatted distances from cached coordinates
+
+    /// Cache of pre-fetched coordinates for search results (keyed by title|subtitle)
+    private var coordinateCache: [String: CLLocationCoordinate2D] = [:]
+    private var prefetchTasks: [String: Task<Void, Never>] = [:]
 
     var userLocation: CLLocationCoordinate2D?
 
@@ -535,8 +591,13 @@ class LocationSearchCompleter: NSObject, ObservableObject {
         didSet {
             if searchQuery.isEmpty {
                 searchResults = []
+                isSearching = false
                 distances = [:]
+                // Cancel any pending prefetch tasks
+                prefetchTasks.values.forEach { $0.cancel() }
+                prefetchTasks.removeAll()
             } else {
+                isSearching = true
                 searchCompleter.queryFragment = searchQuery
             }
         }
@@ -550,50 +611,108 @@ class LocationSearchCompleter: NSObject, ObservableObject {
         searchCompleter.resultTypes = [.address, .pointOfInterest]
     }
 
-    /// Get a unique key for a search result
-    func resultKey(_ result: MKLocalSearchCompletion) -> String {
+    /// Update the search region to bias results toward the user's location
+    func updateRegion(center: CLLocationCoordinate2D) {
+        let region = MKCoordinateRegion(
+            center: center,
+            latitudinalMeters: 50_000,
+            longitudinalMeters: 50_000
+        )
+        searchCompleter.region = region
+    }
+
+    /// Get cache key for a search result
+    func cacheKey(for result: MKLocalSearchCompletion) -> String {
         return "\(result.title)|\(result.subtitle)"
     }
 
-    /// Fetch distances for all current results
-    func fetchDistances() {
-        guard let userLocation = userLocation else { return }
-
-        for result in searchResults {
-            let key = resultKey(result)
-            // Skip if we already have this distance
-            if distances[key] != nil { continue }
-
-            Task {
-                await fetchDistance(for: result, from: userLocation)
-            }
-        }
+    /// Get cached coordinates for a result, if available
+    func getCachedCoordinates(for result: MKLocalSearchCompletion) -> CLLocationCoordinate2D? {
+        return coordinateCache[cacheKey(for: result)]
     }
 
-    /// Fetch distance for a single result
-    private func fetchDistance(for result: MKLocalSearchCompletion, from userLocation: CLLocationCoordinate2D) async {
-        let request = MKLocalSearch.Request(completion: result)
-        let search = MKLocalSearch(request: request)
+    /// Pre-fetch coordinates for the first N results to reduce latency when user taps
+    func prefetchCoordinates(for results: [MKLocalSearchCompletion], limit: Int = 5) {
+        // Cancel previous prefetch tasks
+        prefetchTasks.values.forEach { $0.cancel() }
+        prefetchTasks.removeAll()
 
-        do {
-            let response = try await search.start()
-            if let resultCoord = response.mapItems.first?.placemark.coordinate {
-                let userCL = CLLocation(latitude: userLocation.latitude, longitude: userLocation.longitude)
-                let resultCL = CLLocation(latitude: resultCoord.latitude, longitude: resultCoord.longitude)
-                let meters = userCL.distance(from: resultCL)
-                let formatted = formatDistance(meters)
+        for result in results.prefix(limit) {
+            let key = cacheKey(for: result)
 
-                await MainActor.run {
-                    self.distances[self.resultKey(result)] = formatted
+            // Skip if already cached
+            if coordinateCache[key] != nil { continue }
+
+            let task = Task {
+                if let coordinate = await fetchCoordinateWithRetry(for: result, maxRetries: 2) {
+                    await MainActor.run {
+                        self.coordinateCache[key] = coordinate
+                        // Calculate distance if we have user location
+                        if let userLoc = self.userLocation {
+                            self.distances[key] = self.formatDistance(from: userLoc, to: coordinate)
+                        }
+                    }
                 }
             }
-        } catch {
-            // Silently ignore distance fetch failures
+            prefetchTasks[key] = task
         }
     }
 
-    /// Format distance in miles/feet
-    private func formatDistance(_ meters: CLLocationDistance) -> String {
+    /// Fetch coordinates for a result with retry logic
+    func fetchCoordinateWithRetry(for result: MKLocalSearchCompletion, maxRetries: Int = 3) async -> CLLocationCoordinate2D? {
+        // Check cache first
+        let key = cacheKey(for: result)
+        if let cached = coordinateCache[key] {
+            return cached
+        }
+
+        var lastError: Error?
+
+        for attempt in 0..<maxRetries {
+            // Exponential backoff: 0ms, 500ms, 1500ms
+            if attempt > 0 {
+                let delay = UInt64(500_000_000 * attempt) // 500ms * attempt
+                try? await Task.sleep(nanoseconds: delay)
+            }
+
+            // Check for cancellation
+            if Task.isCancelled { return nil }
+
+            let searchRequest = MKLocalSearch.Request(completion: result)
+            let search = MKLocalSearch(request: searchRequest)
+
+            do {
+                let response = try await search.start()
+                if let mapItem = response.mapItems.first {
+                    let coordinate = mapItem.placemark.coordinate
+                    // Cache the result
+                    await MainActor.run {
+                        self.coordinateCache[key] = coordinate
+                        // Calculate distance if we have user location
+                        if let userLoc = self.userLocation {
+                            self.distances[key] = self.formatDistance(from: userLoc, to: coordinate)
+                        }
+                    }
+                    return coordinate
+                }
+            } catch {
+                lastError = error
+                debugLog("[LocationSearch] Attempt \(attempt + 1)/\(maxRetries) failed: \(error.localizedDescription)")
+            }
+        }
+
+        if let error = lastError {
+            debugLog("[LocationSearch] All \(maxRetries) attempts failed for '\(result.title)': \(error.localizedDescription)")
+        }
+        return nil
+    }
+
+    /// Format distance between two coordinates
+    private func formatDistance(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> String {
+        let fromLocation = CLLocation(latitude: from.latitude, longitude: from.longitude)
+        let toLocation = CLLocation(latitude: to.latitude, longitude: to.longitude)
+        let meters = fromLocation.distance(from: toLocation)
+
         if meters < 1609.34 {  // Less than 1 mile
             let feet = meters * 3.28084
             return "\(Int(feet)) ft"
@@ -608,13 +727,18 @@ class LocationSearchCompleter: NSObject, ObservableObject {
 extension LocationSearchCompleter: MKLocalSearchCompleterDelegate {
     func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
         DispatchQueue.main.async {
+            self.isSearching = false
             self.searchResults = completer.results
-            self.fetchDistances()
+            // Pre-fetch coordinates for top results (reduces failure rate when user taps)
+            self.prefetchCoordinates(for: completer.results, limit: 5)
         }
     }
 
     func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
         debugLog("Search completer error: \(error)")
+        DispatchQueue.main.async {
+            self.isSearching = false
+        }
     }
 }
 
