@@ -308,7 +308,7 @@ struct FriendRowView: View {
             )
             .frame(width: 50, height: 50)
             .overlay(
-                Text(friend.first_name.prefix(1).uppercased())
+                Text(friend.initial)
                     .font(.title2)
                     .fontWeight(.semibold)
                     .foregroundStyle(.white)
@@ -365,95 +365,6 @@ struct FriendRowWithTripsView: View {
         }
         .background(Color(.secondarySystemBackground))
         .cornerRadius(12)
-    }
-}
-
-// MARK: - Friend Trip Card View
-
-struct FriendTripCardView: View {
-    let trip: FriendActiveTrip
-
-    private var statusColor: Color {
-        if trip.contactsNotified { return .red }
-        if trip.isOverdue { return .orange }
-        return .green
-    }
-
-    private var statusText: String {
-        if trip.contactsNotified { return "OVERDUE" }
-        if trip.isOverdue { return "CHECK IN" }
-        if trip.isPlanned { return "PLANNED" }
-        return "ACTIVE"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Header: Icon + Title + Status
-            HStack {
-                Text(trip.activity_icon)
-                    .font(.title3)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(trip.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-
-                    Text(trip.activity_name)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                // Status badge
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 6, height: 6)
-                        .accessibilityHidden(true)
-                    Text(statusText)
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(statusColor)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Friend's trip status: \(statusText)")
-            }
-
-            // Location
-            if let location = trip.location_text, !location.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "location.fill")
-                        .font(.caption2)
-                    Text(location)
-                        .font(.caption)
-                        .lineLimit(1)
-                }
-                .foregroundStyle(.secondary)
-            }
-
-            // ETA (displayed in the trip's original timezone)
-            if let etaDate = trip.etaDate {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                        .font(.caption2)
-                    Text("Expected by \(DateUtils.formatTime(etaDate, inTimezone: trip.timezone))")
-                        .font(.caption)
-                }
-                .foregroundStyle(.secondary)
-            }
-
-            // Notes (if any)
-            if let notes = trip.notes, !notes.isEmpty {
-                Text(notes)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .padding()
-        .background(trip.primaryColor.opacity(0.1))
-        .cornerRadius(8)
     }
 }
 
@@ -545,6 +456,9 @@ struct FriendActiveTripCardExpanded: View {
     // Map and request update state
     @State private var showingMap = false
     @State private var isRequestingUpdate = false
+
+    // Constants
+    private let defaultCooldownSeconds = 600  // 10 minutes between update requests
 
     // Computed from Session to survive view recreation
     private var cooldownRemaining: Int? {
@@ -768,7 +682,7 @@ struct FriendActiveTripCardExpanded: View {
             // Check if there's already a pending request (from has_pending_update_request)
             // Only set if we don't already have a cooldown tracked
             if trip.has_pending_update_request == true && session.getCooldownRemaining(for: trip.id) == nil {
-                session.setCooldown(for: trip.id, seconds: 600)
+                session.setCooldown(for: trip.id, seconds: defaultCooldownSeconds)
             }
         }
         .task {

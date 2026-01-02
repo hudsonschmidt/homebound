@@ -131,7 +131,7 @@ struct FriendProfileView: View {
             )
             .frame(width: 100, height: 100)
             .overlay(
-                Text(friend.first_name.prefix(1).uppercased())
+                Text(friend.initial)
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .foregroundStyle(.white)
@@ -172,13 +172,13 @@ struct FriendProfileView: View {
             }
 
         case .achievements:
-            if preferences.showFriendAchievements, let count = friend.achievements_count, count > 0 {
+            if preferences.showFriendAchievements, let formattedCount = friend.formattedAchievementsCount {
                 Button(action: { showingAchievements = true }) {
                     statCardWithChevron(
                         icon: statType.icon,
                         iconColor: statType.iconColor,
                         title: statType.displayName,
-                        value: "\(count)/40"
+                        value: formattedCount
                     )
                 }
                 .buttonStyle(.plain)
@@ -341,6 +341,7 @@ struct FriendProfileView: View {
         friendship_since: "2024-06-01T00:00:00",
         age: 28,
         achievements_count: 12,
+        total_achievements: 40,
         total_trips: 45,
         total_adventure_hours: 120,
         favorite_activity_name: "Hiking",

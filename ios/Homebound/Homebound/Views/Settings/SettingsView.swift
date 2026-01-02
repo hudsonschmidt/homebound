@@ -1859,9 +1859,35 @@ struct FriendVisibilitySettingsView: View {
                 }
                 .onChange(of: settings.friend_share_achievements) { _, _ in saveSettings() }
             } header: {
-                Text("What friends can see")
+                Text("Trip visibility")
             } footer: {
-                Text("These settings apply when friends are your safety contacts. Friends get richer information than email contacts to help monitor your safety.")
+                Text("These settings apply when friends are your safety contacts during trips.")
+            }
+
+            Section {
+                Toggle(isOn: $settings.friend_share_age) {
+                    Label("Share your age", systemImage: "number.circle.fill")
+                }
+                .onChange(of: settings.friend_share_age) { _, _ in saveSettings() }
+
+                Toggle(isOn: $settings.friend_share_total_trips) {
+                    Label("Share total trips", systemImage: "figure.hiking")
+                }
+                .onChange(of: settings.friend_share_total_trips) { _, _ in saveSettings() }
+
+                Toggle(isOn: $settings.friend_share_adventure_time) {
+                    Label("Share adventure time", systemImage: "clock.fill")
+                }
+                .onChange(of: settings.friend_share_adventure_time) { _, _ in saveSettings() }
+
+                Toggle(isOn: $settings.friend_share_favorite_activity) {
+                    Label("Share favorite activity", systemImage: "star.fill")
+                }
+                .onChange(of: settings.friend_share_favorite_activity) { _, _ in saveSettings() }
+            } header: {
+                Text("Profile stats")
+            } footer: {
+                Text("Control what stats friends see on your mini profile.")
             }
 
             Section {

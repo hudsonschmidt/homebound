@@ -132,9 +132,7 @@ struct FriendAchievementTileView: View {
 
     private var progressText: String {
         if achievement.is_earned, let date = achievement.earnedDateValue {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .short
-            return formatter.string(from: date)
+            return date.formatted(date: .abbreviated, time: .omitted)
         } else {
             return "\(achievement.current_value)/\(achievement.threshold)"
         }
@@ -236,10 +234,11 @@ struct FriendAchievementBadgeView: View {
         friendship_since: "2024-06-01T00:00:00",
         age: 28,
         achievements_count: 12,
+        total_achievements: 40,
         total_trips: 45,
         total_adventure_hours: 120,
         favorite_activity_name: "Hiking",
-        favorite_activity_icon: "hiking"
+        favorite_activity_icon: "🥾"
     ))
     .environmentObject(Session())
 }

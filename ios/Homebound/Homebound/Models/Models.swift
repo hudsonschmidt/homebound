@@ -29,6 +29,7 @@ struct Friend: Codable, Identifiable, Hashable {
     // Mini profile stats
     let age: Int?
     let achievements_count: Int?
+    let total_achievements: Int?  // Total available achievements (for display as "earned/total")
     let total_trips: Int?
     let total_adventure_hours: Int?
     let favorite_activity_name: String?
@@ -41,6 +42,20 @@ struct Friend: Codable, Identifiable, Hashable {
             return first_name
         }
         return "\(first_name) \(last_name)"
+    }
+
+    /// Safe initial for display (handles empty first_name)
+    var initial: String {
+        first_name.first.map { String($0).uppercased() } ?? "?"
+    }
+
+    /// Formatted achievements count (e.g., "12/40" or just "12" if total unknown)
+    var formattedAchievementsCount: String? {
+        guard let earned = achievements_count, earned > 0 else { return nil }
+        if let total = total_achievements {
+            return "\(earned)/\(total)"
+        }
+        return "\(earned)"
     }
 
     var memberSinceDate: Date? {
@@ -265,11 +280,17 @@ struct UpdateRequestResponse: Codable {
 
 /// Friend visibility settings (global per-user)
 struct FriendVisibilitySettings: Codable {
+    // Trip visibility settings
     var friend_share_checkin_locations: Bool
     var friend_share_live_location: Bool
     var friend_share_notes: Bool
     var friend_allow_update_requests: Bool
     var friend_share_achievements: Bool
+    // Mini profile stats visibility settings
+    var friend_share_age: Bool
+    var friend_share_total_trips: Bool
+    var friend_share_adventure_time: Bool
+    var friend_share_favorite_activity: Bool
 
     /// Default settings for new users
     static var defaults: FriendVisibilitySettings {
@@ -278,7 +299,11 @@ struct FriendVisibilitySettings: Codable {
             friend_share_live_location: false,
             friend_share_notes: true,
             friend_allow_update_requests: true,
-            friend_share_achievements: true
+            friend_share_achievements: true,
+            friend_share_age: true,
+            friend_share_total_trips: true,
+            friend_share_adventure_time: true,
+            friend_share_favorite_activity: true
         )
     }
 }

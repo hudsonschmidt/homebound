@@ -32,6 +32,7 @@ class FriendResponse(BaseModel):
     # Mini profile stats
     age: int | None = None
     achievements_count: int | None = None
+    total_achievements: int | None = None  # Total available achievements for display
     total_trips: int | None = None
     total_adventure_hours: int | None = None
     favorite_activity_name: str | None = None
@@ -97,20 +98,61 @@ def _create_friendship(connection, user_id: int, other_user_id: int) -> None:
     )
 
 
+def _get_friend_privacy_settings(connection, friend_user_id: int) -> dict:
+    """Get a friend's mini profile privacy settings."""
+    result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT friend_share_age, friend_share_total_trips,
+                   friend_share_adventure_time, friend_share_favorite_activity,
+                   friend_share_achievements
+            FROM users WHERE id = :user_id
+            """
+        ),
+        {"user_id": friend_user_id}
+    ).fetchone()
+
+    if not result:
+        # Default to all visible if user not found
+        return {
+            "share_age": True,
+            "share_total_trips": True,
+            "share_adventure_time": True,
+            "share_favorite_activity": True,
+            "share_achievements": True,
+        }
+
+    return {
+        "share_age": getattr(result, 'friend_share_age', True) if result else True,
+        "share_total_trips": getattr(result, 'friend_share_total_trips', True) if result else True,
+        "share_adventure_time": getattr(result, 'friend_share_adventure_time', True) if result else True,
+        "share_favorite_activity": getattr(result, 'friend_share_favorite_activity', True) if result else True,
+        "share_achievements": getattr(result, 'friend_share_achievements', True) if result else True,
+    }
+
+
 def _compute_friend_stats(connection, friend_user_id: int) -> dict:
     """Compute stats for a friend's mini profile.
 
     Returns dict with: age, achievements_count, total_trips,
     total_adventure_hours, favorite_activity_name, favorite_activity_icon
-    """
-    # Get user age
-    user = connection.execute(
-        sqlalchemy.text("SELECT age FROM users WHERE id = :user_id"),
-        {"user_id": friend_user_id}
-    ).fetchone()
-    age = user.age if user and user.age and user.age > 0 else None
 
-    # Get total completed trips count
+    Respects the friend's privacy settings - if a stat is hidden,
+    it will be returned as None.
+    """
+    # Get privacy settings for this friend
+    privacy = _get_friend_privacy_settings(connection, friend_user_id)
+
+    # Get user age (only if allowed)
+    age = None
+    if privacy["share_age"]:
+        user = connection.execute(
+            sqlalchemy.text("SELECT age FROM users WHERE id = :user_id"),
+            {"user_id": friend_user_id}
+        ).fetchone()
+        age = user.age if user and user.age and user.age > 0 else None
+
+    # Get total completed trips count (needed for achievements calc even if hidden)
     trips_result = connection.execute(
         sqlalchemy.text(
             """
@@ -121,9 +163,9 @@ def _compute_friend_stats(connection, friend_user_id: int) -> dict:
         ),
         {"user_id": friend_user_id}
     ).fetchone()
-    total_trips = trips_result.count if trips_result else 0
+    total_trips_raw = trips_result.count if trips_result else 0
 
-    # Get total adventure hours (sum of trip durations for completed trips)
+    # Get total adventure hours (needed for achievements calc even if hidden)
     hours_result = connection.execute(
         sqlalchemy.text(
             """
@@ -139,34 +181,47 @@ def _compute_friend_stats(connection, friend_user_id: int) -> dict:
         ),
         {"user_id": friend_user_id}
     ).fetchone()
-    total_adventure_hours = int(hours_result.total_hours) if hours_result else 0
+    total_adventure_hours_raw = int(hours_result.total_hours) if hours_result else 0
 
-    # Calculate achievements count based on trip thresholds
-    achievements_count = _calculate_achievements_count(
-        total_trips, total_adventure_hours, connection, friend_user_id
-    )
+    # Calculate achievements count (only if allowed)
+    achievements_count = None
+    if privacy["share_achievements"]:
+        achievements_count = _calculate_achievements_count(
+            total_trips_raw, total_adventure_hours_raw, connection, friend_user_id
+        )
 
-    # Get favorite activity (most common for completed trips)
-    favorite_result = connection.execute(
-        sqlalchemy.text(
-            """
-            SELECT a.name, a.icon, COUNT(*) as trip_count
-            FROM trips t
-            JOIN activities a ON t.activity = a.id
-            WHERE t.user_id = :user_id AND t.status = 'completed'
-            GROUP BY a.id, a.name, a.icon
-            ORDER BY trip_count DESC
-            LIMIT 1
-            """
-        ),
-        {"user_id": friend_user_id}
-    ).fetchone()
-    favorite_activity_name = favorite_result.name if favorite_result else None
-    favorite_activity_icon = favorite_result.icon if favorite_result else None
+    # Only expose stats if privacy settings allow
+    total_trips = total_trips_raw if privacy["share_total_trips"] else None
+    total_adventure_hours = total_adventure_hours_raw if privacy["share_adventure_time"] else None
+
+    # Get favorite activity (only if allowed)
+    favorite_activity_name = None
+    favorite_activity_icon = None
+    if privacy["share_favorite_activity"]:
+        favorite_result = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT a.name, a.icon, COUNT(*) as trip_count
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.user_id = :user_id AND t.status = 'completed'
+                GROUP BY a.id, a.name, a.icon
+                ORDER BY trip_count DESC
+                LIMIT 1
+                """
+            ),
+            {"user_id": friend_user_id}
+        ).fetchone()
+        favorite_activity_name = favorite_result.name if favorite_result else None
+        favorite_activity_icon = favorite_result.icon if favorite_result else None
+
+    # Total achievements is always 40 (or len(ACHIEVEMENTS) if defined)
+    total_achievements = 40 if privacy["share_achievements"] else None
 
     return {
         "age": age,
         "achievements_count": achievements_count,
+        "total_achievements": total_achievements,
         "total_trips": total_trips,
         "total_adventure_hours": total_adventure_hours,
         "favorite_activity_name": favorite_activity_name,
@@ -482,6 +537,7 @@ def accept_invite(
             friendship_since=friendship.created_at.isoformat() if friendship else "",
             age=stats["age"],
             achievements_count=stats["achievements_count"],
+            total_achievements=stats["total_achievements"],
             total_trips=stats["total_trips"],
             total_adventure_hours=stats["total_adventure_hours"],
             favorite_activity_name=stats["favorite_activity_name"],
@@ -581,6 +637,7 @@ def get_friends(user_id: int = Depends(auth.get_current_user_id)):
                 friendship_since=f.friendship_since.isoformat() if f.friendship_since else "",
                 age=stats["age"],
                 achievements_count=stats["achievements_count"],
+                total_achievements=stats["total_achievements"],
                 total_trips=stats["total_trips"],
                 total_adventure_hours=stats["total_adventure_hours"],
                 favorite_activity_name=stats["favorite_activity_name"],
@@ -1002,6 +1059,7 @@ def get_friend(friend_user_id: int, user_id: int = Depends(auth.get_current_user
             friendship_since=friendship.created_at.isoformat() if friendship.created_at else "",
             age=stats["age"],
             achievements_count=stats["achievements_count"],
+            total_achievements=stats["total_achievements"],
             total_trips=stats["total_trips"],
             total_adventure_hours=stats["total_adventure_hours"],
             favorite_activity_name=stats["favorite_activity_name"],

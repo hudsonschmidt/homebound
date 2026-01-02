@@ -630,7 +630,7 @@ struct ActivePlanCardCompact: View {
                         .stroke(statusColor, lineWidth: 2)
                         .scaleEffect(pulseAnimation ? 2.0 : 1.0)
                         .opacity(pulseAnimation ? 0.0 : 1.0)
-                        .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: pulseAnimation)
+                        // .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: pulseAnimation)
                 )
                 .accessibilityHidden(true) // Status is conveyed by text, hide decorative dot
 

@@ -332,12 +332,18 @@ def delete_account(user_id: int = Depends(auth.get_current_user_id)):
 # ==================== Friend Visibility Settings ====================
 
 class FriendVisibilitySettings(BaseModel):
-    """Settings controlling what friends can see about user's trips."""
+    """Settings controlling what friends can see about user's trips and profile."""
+    # Trip visibility settings
     friend_share_checkin_locations: bool
     friend_share_live_location: bool
     friend_share_notes: bool
     friend_allow_update_requests: bool
     friend_share_achievements: bool
+    # Mini profile stats visibility settings
+    friend_share_age: bool = True
+    friend_share_total_trips: bool = True
+    friend_share_adventure_time: bool = True
+    friend_share_favorite_activity: bool = True
 
 
 @router.get("/friend-visibility", response_model=FriendVisibilitySettings)
@@ -345,7 +351,7 @@ def get_friend_visibility(user_id: int = Depends(auth.get_current_user_id)):
     """Get current friend visibility settings.
 
     These settings control what information friends (app users who are safety contacts)
-    can see about the user's trips. Friends get richer info than email contacts.
+    can see about the user's trips and profile. Friends get richer info than email contacts.
     """
     with db.engine.begin() as connection:
         user = connection.execute(
@@ -353,7 +359,9 @@ def get_friend_visibility(user_id: int = Depends(auth.get_current_user_id)):
                 """
                 SELECT friend_share_checkin_locations, friend_share_live_location,
                        friend_share_notes, friend_allow_update_requests,
-                       friend_share_achievements
+                       friend_share_achievements,
+                       friend_share_age, friend_share_total_trips,
+                       friend_share_adventure_time, friend_share_favorite_activity
                 FROM users
                 WHERE id = :user_id
                 """
@@ -373,7 +381,11 @@ def get_friend_visibility(user_id: int = Depends(auth.get_current_user_id)):
             friend_share_live_location=getattr(user, 'friend_share_live_location', False),
             friend_share_notes=getattr(user, 'friend_share_notes', True),
             friend_allow_update_requests=getattr(user, 'friend_allow_update_requests', True),
-            friend_share_achievements=getattr(user, 'friend_share_achievements', True)
+            friend_share_achievements=getattr(user, 'friend_share_achievements', True),
+            friend_share_age=getattr(user, 'friend_share_age', True),
+            friend_share_total_trips=getattr(user, 'friend_share_total_trips', True),
+            friend_share_adventure_time=getattr(user, 'friend_share_adventure_time', True),
+            friend_share_favorite_activity=getattr(user, 'friend_share_favorite_activity', True)
         )
 
 
@@ -385,11 +397,19 @@ def update_friend_visibility(
     """Update friend visibility settings.
 
     These settings control what information friends can see:
+
+    Trip visibility:
     - friend_share_checkin_locations: Show check-in locations on map
     - friend_share_live_location: Allow live location sharing (per-trip opt-in still required)
     - friend_share_notes: Share trip notes with friends
     - friend_allow_update_requests: Allow friends to request updates
     - friend_share_achievements: Allow friends to view achievement details
+
+    Mini profile stats:
+    - friend_share_age: Show your age on your profile
+    - friend_share_total_trips: Show your total completed trips count
+    - friend_share_adventure_time: Show your total adventure hours
+    - friend_share_favorite_activity: Show your favorite activity
     """
     with db.engine.begin() as connection:
         connection.execute(
@@ -400,7 +420,11 @@ def update_friend_visibility(
                     friend_share_live_location = :share_live,
                     friend_share_notes = :share_notes,
                     friend_allow_update_requests = :allow_requests,
-                    friend_share_achievements = :share_achievements
+                    friend_share_achievements = :share_achievements,
+                    friend_share_age = :share_age,
+                    friend_share_total_trips = :share_total_trips,
+                    friend_share_adventure_time = :share_adventure_time,
+                    friend_share_favorite_activity = :share_favorite_activity
                 WHERE id = :user_id
                 """
             ),
@@ -410,7 +434,11 @@ def update_friend_visibility(
                 "share_live": body.friend_share_live_location,
                 "share_notes": body.friend_share_notes,
                 "allow_requests": body.friend_allow_update_requests,
-                "share_achievements": body.friend_share_achievements
+                "share_achievements": body.friend_share_achievements,
+                "share_age": body.friend_share_age,
+                "share_total_trips": body.friend_share_total_trips,
+                "share_adventure_time": body.friend_share_adventure_time,
+                "share_favorite_activity": body.friend_share_favorite_activity
             }
         )
 
