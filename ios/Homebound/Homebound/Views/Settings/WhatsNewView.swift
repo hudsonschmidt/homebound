@@ -122,32 +122,37 @@ struct WhatsNewView: View {
             VStack {
                 Spacer()
 
-                Button(action: {
-                    if !isFromSettings {
-                        AppPreferences.shared.markWhatsNewAsSeen()
-                    }
-                    dismiss()
-                }) {
-                    Text(isFromSettings ? "Done" : "Continue")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(Color.hbBrand)
-                        .cornerRadius(16)
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 34)
-                .background(
+                VStack(spacing: 0) {
                     LinearGradient(
                         colors: [.clear, Color(.systemBackground)],
                         startPoint: .top,
-                        endPoint: .center
+                        endPoint: .bottom
                     )
-                    .frame(height: 100)
-                    .allowsHitTesting(false)
-                )
+                    .frame(height: 40)
+
+                    Color(.systemBackground)
+                        .frame(height: 90)
+                        .overlay(
+                            Button(action: {
+                                if !isFromSettings {
+                                    AppPreferences.shared.markWhatsNewAsSeen()
+                                }
+                                dismiss()
+                            }) {
+                                Text(isFromSettings ? "Done" : "Continue")
+                                    .font(.headline)
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 56)
+                                    .background(Color.hbBrand)
+                                    .cornerRadius(16)
+                            }
+                            .padding(.horizontal, 24),
+                            alignment: .top
+                        )
+                }
             }
+            .allowsHitTesting(true)
         }
     }
 }
