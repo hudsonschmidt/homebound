@@ -384,6 +384,7 @@ final class LocalStorage {
                     cached_at TEXT NOT NULL,
                     age INTEGER,
                     achievements_count INTEGER,
+                    total_achievements INTEGER,
                     total_trips INTEGER,
                     total_adventure_hours INTEGER,
                     favorite_activity_name TEXT,
@@ -400,6 +401,9 @@ final class LocalStorage {
                 try db.execute(sql: "ALTER TABLE cached_friends ADD COLUMN total_adventure_hours INTEGER")
                 try db.execute(sql: "ALTER TABLE cached_friends ADD COLUMN favorite_activity_name TEXT")
                 try db.execute(sql: "ALTER TABLE cached_friends ADD COLUMN favorite_activity_icon TEXT")
+            }
+            if !friendColumns.contains("total_achievements") {
+                try db.execute(sql: "ALTER TABLE cached_friends ADD COLUMN total_achievements INTEGER")
             }
 
             // Create cached_timeline table for offline check-in display
@@ -1440,8 +1444,8 @@ final class LocalStorage {
                 try db.execute(sql: """
                     INSERT OR REPLACE INTO cached_friends
                     (user_id, first_name, last_name, profile_photo_url, member_since, friendship_since, cached_at,
-                     age, achievements_count, total_trips, total_adventure_hours, favorite_activity_name, favorite_activity_icon)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     age, achievements_count, total_achievements, total_trips, total_adventure_hours, favorite_activity_name, favorite_activity_icon)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [
                     friend.user_id,
                     friend.first_name,
@@ -1452,6 +1456,7 @@ final class LocalStorage {
                     ISO8601DateFormatter().string(from: Date()),
                     friend.age,
                     friend.achievements_count,
+                    friend.total_achievements,
                     friend.total_trips,
                     friend.total_adventure_hours,
                     friend.favorite_activity_name,
@@ -1481,8 +1486,8 @@ final class LocalStorage {
                         try db.execute(sql: """
                             INSERT INTO cached_friends
                             (user_id, first_name, last_name, profile_photo_url, member_since, friendship_since, cached_at,
-                             age, achievements_count, total_trips, total_adventure_hours, favorite_activity_name, favorite_activity_icon)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             age, achievements_count, total_achievements, total_trips, total_adventure_hours, favorite_activity_name, favorite_activity_icon)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, arguments: [
                             friend.user_id,
                             friend.first_name,
@@ -1493,6 +1498,7 @@ final class LocalStorage {
                             ISO8601DateFormatter().string(from: Date()),
                             friend.age,
                             friend.achievements_count,
+                            friend.total_achievements,
                             friend.total_trips,
                             friend.total_adventure_hours,
                             friend.favorite_activity_name,
@@ -1539,6 +1545,7 @@ final class LocalStorage {
                         friendship_since: friendshipSince,
                         age: row["age"] as? Int,
                         achievements_count: row["achievements_count"] as? Int,
+                        total_achievements: row["total_achievements"] as? Int,
                         total_trips: row["total_trips"] as? Int,
                         total_adventure_hours: row["total_adventure_hours"] as? Int,
                         favorite_activity_name: row["favorite_activity_name"] as? String,

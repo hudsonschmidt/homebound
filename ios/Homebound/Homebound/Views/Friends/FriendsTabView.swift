@@ -60,6 +60,7 @@ struct FriendsTabView: View {
             }
             .sheet(item: $selectedFriend) { friend in
                 FriendProfileView(friend: friend)
+                    .id(friend.user_id)  // Force view recreation when friend changes
                     .environmentObject(session)
                     .environmentObject(AppPreferences.shared)
             }
