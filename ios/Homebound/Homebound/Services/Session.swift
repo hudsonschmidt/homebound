@@ -1057,11 +1057,15 @@ final class Session: ObservableObject {
 
             // For checkin, include current location coordinates
             if action == "checkin" {
+                debugLog("[Session] Getting location for check-in...")
                 if let location = await LocationManager.shared.getCurrentLocation() {
+                    debugLog("[Session] ✅ Got location: \(location.latitude), \(location.longitude)")
                     urlComponents.queryItems = [
                         URLQueryItem(name: "lat", value: String(location.latitude)),
                         URLQueryItem(name: "lon", value: String(location.longitude))
                     ]
+                } else {
+                    debugLog("[Session] ❌ No location available for check-in")
                 }
             }
 
@@ -1736,8 +1740,16 @@ final class Session: ObservableObject {
         guard let plan = activeTrip,
               let token = plan.checkin_token else { return false }
 
+        debugLog("[Session] 📍 Check-in started, fetching location...")
+
         // Get current location for check-in email (non-blocking, 5s timeout)
         let location = await LocationManager.shared.getCurrentLocation()
+
+        if let loc = location {
+            debugLog("[Session] 📍 Got location for check-in: \(loc.latitude), \(loc.longitude)")
+        } else {
+            debugLog("[Session] ⚠️ No location available for check-in")
+        }
 
         // Check if offline FIRST - queue immediately without waiting for network timeout
         if !NetworkMonitor.shared.isConnected {
@@ -1755,6 +1767,9 @@ final class Session: ObservableObject {
                     URLQueryItem(name: "lat", value: String(loc.latitude)),
                     URLQueryItem(name: "lon", value: String(loc.longitude))
                 ]
+                debugLog("[Session] 📍 Check-in URL with coords: \(urlComponents.url?.absoluteString ?? "nil")")
+            } else {
+                debugLog("[Session] ⚠️ Check-in URL without coords: \(urlComponents.url?.absoluteString ?? "nil")")
             }
 
             guard let requestURL = urlComponents.url else {
@@ -1770,6 +1785,7 @@ final class Session: ObservableObject {
 
             // Update local activeTrip with new last_checkin timestamp immediately
             let checkinTimestamp = ISO8601DateFormatter().string(from: Date())
+            let hasLocation = location != nil
 
             await MainActor.run {
                 // Update local activeTrip state so UI reflects the check-in
@@ -1779,7 +1795,8 @@ final class Session: ObservableObject {
                     // Sync to allTrips as well
                     self.syncTripInAllTrips(updatedTrip)
                 }
-                self.notice = "Checked in successfully!"
+                // Show appropriate notice based on location availability
+                self.notice = hasLocation ? "Checked in successfully!" : "Checked in (location unavailable)"
                 // Update widget data with new check-in
                 self.updateWidgetData()
             }

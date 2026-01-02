@@ -20,7 +20,7 @@ final class LiveLocationManager: NSObject, ObservableObject {
 
     private let locationManager = CLLocationManager()
     private var updateTimer: Timer?
-    private var lastLocation: CLLocation?
+    private(set) var lastLocation: CLLocation?
     private var lastSentLocation: CLLocation?  // Track last sent location for deduplication
     private let updateInterval: TimeInterval = 30  // seconds between updates
     private let minimumDistanceForUpdate: CLLocationDistance = 10  // meters
