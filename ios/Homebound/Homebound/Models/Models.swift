@@ -1114,3 +1114,8 @@ struct TripInvitation: Codable, Identifiable {
 struct ParticipantInviteRequest: Codable {
     let friend_user_ids: [Int]
 }
+
+/// Request body for accepting a trip invitation with safety contacts
+struct AcceptInvitationRequest: Codable {
+    let safety_contact_ids: [Int]
+}

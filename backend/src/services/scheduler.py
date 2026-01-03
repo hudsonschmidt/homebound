@@ -244,18 +244,17 @@ async def _process_overdue_trip(trip, now: datetime):
                 participant_user_ids = [p.user_id for p in participants]
                 log.info(f"[Scheduler] Trip {trip_id}: Group trip with {len(participant_user_ids)} participants")
 
-                # Get each participant's contacts
+                # Get each participant's safety contacts for THIS trip
+                # These are the contacts they selected when joining (stored in participant_trip_contacts)
                 if participant_user_ids:
-                    # Build dynamic IN clause for cross-database compatibility
-                    placeholders = ", ".join([f":uid{i}" for i in range(len(participant_user_ids))])
-                    params = {f"uid{i}": uid for i, uid in enumerate(participant_user_ids)}
                     participant_contacts = conn.execute(
-                        sqlalchemy.text(f"""
+                        sqlalchemy.text("""
                             SELECT DISTINCT c.name, c.email
-                            FROM contacts c
-                            WHERE c.owner_id IN ({placeholders}) AND c.email IS NOT NULL
+                            FROM participant_trip_contacts ptc
+                            JOIN contacts c ON ptc.contact_id = c.id
+                            WHERE ptc.trip_id = :trip_id AND c.email IS NOT NULL
                         """),
-                        params
+                        {"trip_id": trip_id}
                     ).fetchall()
 
                     # Deduplicate by email (keep unique emails)

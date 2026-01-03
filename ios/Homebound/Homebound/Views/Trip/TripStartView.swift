@@ -2,20 +2,29 @@ import SwiftUI
 
 /// Wrapper to handle both new trip and template-based trip creation
 enum CreateTripMode: Identifiable {
-    case newTrip
+    case solo
+    case group
     case fromTemplate(SavedTripTemplate)
 
     var id: String {
         switch self {
-        case .newTrip: return "new"
+        case .solo: return "solo"
+        case .group: return "group"
         case .fromTemplate(let template): return "template-\(template.id)"
         }
     }
 
     var template: SavedTripTemplate? {
         switch self {
-        case .newTrip: return nil
+        case .solo, .group: return nil
         case .fromTemplate(let template): return template
+        }
+    }
+
+    var isGroupTrip: Bool {
+        switch self {
+        case .group: return true
+        case .solo, .fromTemplate: return false
         }
     }
 }
@@ -39,27 +48,58 @@ struct TripStartView: View {
                         Text("Start a Trip")
                             .font(.largeTitle)
                             .fontWeight(.bold)
-                        Text("Create a new trip or use a saved template")
+                        Text("Choose the type of trip you're planning")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 20)
 
-                    // New Trip Button
-                    Button(action: {
-                        createTripMode = .newTrip
-                    }) {
-                        NewTripOptionCard()
+                    // Trip Type Selection
+                    HStack(spacing: 12) {
+                        // Solo Trip Button
+                        Button(action: {
+                            createTripMode = .solo
+                        }) {
+                            TripTypeCard(
+                                icon: "figure.walk",
+                                title: "Solo Trip",
+                                subtitle: "Just me",
+                                gradient: [Color.hbBrand, Color.hbTeal]
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        // Group Trip Button
+                        Button(action: {
+                            createTripMode = .group
+                        }) {
+                            TripTypeCard(
+                                icon: "person.3.fill",
+                                title: "Group Trip",
+                                subtitle: "With friends",
+                                gradient: [Color.hbAccent, Color.orange]
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    .buttonStyle(PlainButtonStyle())
 
                     // Saved Templates Section
                     if !session.savedTemplates.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Saved Templates")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                            // Divider with text
+                            HStack {
+                                Rectangle()
+                                    .fill(Color(.separator))
+                                    .frame(height: 1)
+                                Text("or start from")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Rectangle()
+                                    .fill(Color(.separator))
+                                    .frame(height: 1)
+                            }
+                            .padding(.top, 8)
 
                             ForEach(session.savedTemplates) { template in
                                 Button(action: {
@@ -87,7 +127,7 @@ struct TripStartView: View {
                 }
             }
             .sheet(item: $createTripMode) { mode in
-                CreatePlanView(prefillTemplate: mode.template)
+                CreatePlanView(prefillTemplate: mode.template, isGroupTrip: mode.isGroupTrip)
                     .environmentObject(session)
             }
             .alert("Delete Template?", isPresented: $showDeleteConfirmation) {
@@ -116,39 +156,40 @@ struct TripStartView: View {
     }
 }
 
-// MARK: - New Trip Option Card
-struct NewTripOptionCard: View {
+// MARK: - Trip Type Card
+struct TripTypeCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let gradient: [Color]
+
     var body: some View {
-        HStack(spacing: 16) {
+        VStack(spacing: 12) {
             ZStack {
                 Circle()
                     .fill(LinearGradient(
-                        colors: [Color.hbBrand, Color.hbTeal],
+                        colors: gradient,
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
-                    .frame(width: 50, height: 50)
+                    .frame(width: 60, height: 60)
 
-                Image(systemName: "plus")
+                Image(systemName: icon)
                     .font(.title2)
                     .foregroundStyle(.white)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("New Trip")
+            VStack(spacing: 4) {
+                Text(title)
                     .font(.headline)
                     .foregroundStyle(.primary)
-                Text("Start from scratch")
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .foregroundStyle(.secondary)
         }
-        .padding()
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
     }

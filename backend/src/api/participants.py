@@ -40,6 +40,11 @@ class ParticipantInviteRequest(BaseModel):
     friend_user_ids: list[int]  # List of friend user IDs to invite
 
 
+class AcceptInvitationRequest(BaseModel):
+    """Request to accept a group trip invitation with safety contacts."""
+    safety_contact_ids: list[int]  # Contact IDs (1-3) to be notified if participant doesn't check in
+
+
 class ParticipantResponse(BaseModel):
     """Response model for a trip participant."""
     id: int
@@ -478,11 +483,47 @@ def get_participants(
 @router.post("/{trip_id}/participants/accept")
 def accept_invitation(
     trip_id: int,
+    request: AcceptInvitationRequest,
     background_tasks: BackgroundTasks,
     user_id: int = Depends(auth.get_current_user_id)
 ):
-    """Accept an invitation to join a group trip."""
+    """Accept an invitation to join a group trip with safety contacts."""
+    # Validate safety contacts
+    if not request.safety_contact_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one safety contact is required to join a group trip"
+        )
+    if len(request.safety_contact_ids) > 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum of 3 safety contacts allowed"
+        )
+
     with db.engine.begin() as connection:
+        # Verify all contacts belong to this user
+        # Use IN clause with dynamic placeholders for SQLite compatibility
+        placeholders = ", ".join([f":contact_id_{i}" for i in range(len(request.safety_contact_ids))])
+        params = {"user_id": user_id}
+        for i, cid in enumerate(request.safety_contact_ids):
+            params[f"contact_id_{i}"] = cid
+
+        contact_count = connection.execute(
+            sqlalchemy.text(
+                f"""
+                SELECT COUNT(*) FROM contacts
+                WHERE id IN ({placeholders}) AND owner_id = :user_id
+                """
+            ),
+            params
+        ).scalar()
+
+        if contact_count != len(request.safety_contact_ids):
+            raise HTTPException(
+                status_code=400,
+                detail="One or more contacts do not belong to you"
+            )
+
         # Check if user has a pending invitation
         participant = connection.execute(
             sqlalchemy.text(
@@ -518,6 +559,23 @@ def accept_invitation(
             ),
             {"trip_id": trip_id, "user_id": user_id, "now": now}
         )
+
+        # Store participant's safety contacts
+        for position, contact_id in enumerate(request.safety_contact_ids, start=1):
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO participant_trip_contacts (trip_id, participant_user_id, contact_id, position)
+                    VALUES (:trip_id, :user_id, :contact_id, :position)
+                    """
+                ),
+                {
+                    "trip_id": trip_id,
+                    "user_id": user_id,
+                    "contact_id": contact_id,
+                    "position": position
+                }
+            )
 
         # Get trip owner and trip title for notification
         trip = connection.execute(

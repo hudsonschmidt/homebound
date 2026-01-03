@@ -12,9 +12,12 @@ struct CreatePlanView: View {
     // Template prefill support
     var prefillTemplate: SavedTripTemplate? = nil
 
+    // Group trip mode (passed from TripStartView)
+    var isGroupTrip: Bool = false
+
     // Current step tracking
     @State private var currentStep = 1
-    let totalSteps = 4
+    var totalSteps: Int { isGroupTrip ? 5 : 4 }
 
     // Form fields
     @State private var planTitle = ""
@@ -57,8 +60,7 @@ struct CreatePlanView: View {
     @State private var selectedFriends: [Friend] = []  // Friends as safety contacts (push notifications)
     @State private var shareLiveLocation = false  // Share live location with friends
 
-    // Group trip settings
-    @State private var isGroupTrip = false  // Is this a group trip?
+    // Group trip settings (isGroupTrip is passed as a parameter from TripStartView)
     @State private var groupParticipants: [Friend] = []  // Friends to invite as participants
     @State private var checkoutMode = "anyone"  // "anyone" | "vote" | "owner_only"
     @State private var voteThreshold: Double = 0.5  // For vote mode
@@ -135,18 +137,37 @@ struct CreatePlanView: View {
                                 newContactName: $newContactName,
                                 newContactEmail: $newContactEmail,
                                 notifySelf: $notifySelf,
-                                savedContacts: $savedContacts
+                                savedContacts: $savedContacts,
+                                isGroupTrip: isGroupTrip
                             )
                             .environmentObject(session)
                         case 4:
-                            Step4AdditionalNotes(
+                            if isGroupTrip {
+                                Step4GroupSettings(
+                                    groupParticipants: $groupParticipants,
+                                    checkoutMode: $checkoutMode,
+                                    voteThreshold: $voteThreshold,
+                                    shareLocationsBetweenParticipants: $shareLocationsBetweenParticipants
+                                )
+                                .environmentObject(session)
+                            } else {
+                                Step4AdditionalNotes(
+                                    notes: $notes,
+                                    shareLiveLocation: $shareLiveLocation,
+                                    isCreating: $isCreating,
+                                    isEditMode: isEditMode,
+                                    isGroupTrip: isGroupTrip,
+                                    hasFriendContacts: !selectedFriends.isEmpty,
+                                    onSubmit: createPlan,
+                                    onSaveAsTemplate: { showSaveTemplateSheet = true }
+                                )
+                                .environmentObject(session)
+                            }
+                        case 5:
+                            // Only for group trips - final step
+                            Step5FinalNotes(
                                 notes: $notes,
                                 shareLiveLocation: $shareLiveLocation,
-                                isGroupTrip: $isGroupTrip,
-                                groupParticipants: $groupParticipants,
-                                checkoutMode: $checkoutMode,
-                                voteThreshold: $voteThreshold,
-                                shareLocationsBetweenParticipants: $shareLocationsBetweenParticipants,
                                 isCreating: $isCreating,
                                 isEditMode: isEditMode,
                                 hasFriendContacts: !selectedFriends.isEmpty,
@@ -458,6 +479,14 @@ struct CreatePlanView: View {
             // At least one safety contact required (email contact OR friend)
             return !contacts.isEmpty || !selectedFriends.isEmpty
         case 4:
+            if isGroupTrip {
+                // For group trips, step 4 is group settings - require at least one participant
+                return !groupParticipants.isEmpty
+            }
+            // For solo trips, step 4 is final notes - always valid
+            return true
+        case 5:
+            // Step 5 is only for group trips (final notes) - always valid
             return true
         default:
             return false
@@ -2082,6 +2111,9 @@ struct Step3EmergencyContacts: View {
     @Binding var savedContacts: [Contact]
     @State private var isLoadingSaved = false
 
+    // Group trip mode - shows disclaimer when true
+    var isGroupTrip: Bool = false
+
     // Total selected count (contacts + friends, max 3)
     var totalSelectedCount: Int {
         contacts.count + selectedFriends.count
@@ -2096,7 +2128,7 @@ struct Step3EmergencyContacts: View {
             VStack(alignment: .leading, spacing: 24) {
                 // Header
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Emergency Contacts")
+                    Text(isGroupTrip ? "Your Safety Contacts" : "Emergency Contacts")
                         .font(.largeTitle)
                         .fontWeight(.bold)
                     Text("Who should we notify if needed?")
@@ -2104,6 +2136,27 @@ struct Step3EmergencyContacts: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.top, 20)
+
+                // Group trip disclaimer
+                if isGroupTrip {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.3.fill")
+                            .font(.title3)
+                            .foregroundStyle(Color.hbBrand)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Group Trip")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text("These contacts will be notified if YOU don't check in. Each participant will select their own contacts when they join.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding()
+                    .background(Color.hbBrand.opacity(0.1))
+                    .cornerRadius(12)
+                }
 
                 // Send me a copy toggle
                 VStack(alignment: .leading, spacing: 8) {
@@ -2381,22 +2434,15 @@ struct Step4AdditionalNotes: View {
     @EnvironmentObject var session: Session
     @Binding var notes: String
     @Binding var shareLiveLocation: Bool
-    // Group trip settings
-    @Binding var isGroupTrip: Bool
-    @Binding var groupParticipants: [Friend]
-    @Binding var checkoutMode: String
-    @Binding var voteThreshold: Double
-    @Binding var shareLocationsBetweenParticipants: Bool
     @Binding var isCreating: Bool
     var isEditMode: Bool = false
+    var isGroupTrip: Bool = false  // Used to hide live location for group trips (handled differently)
     var hasFriendContacts: Bool = false  // Show live location only if friends are selected
     let onSubmit: () -> Void
     var onSaveAsTemplate: (() -> Void)? = nil
     @State private var showNotesHelp = false
     @State private var showLiveLocationInfo = false
     @State private var showLocationPermissionAlert = false
-    @State private var showGroupTripInfo = false
-    @State private var showParticipantPicker = false
 
     var body: some View {
         ScrollView {
@@ -2518,157 +2564,6 @@ struct Step4AdditionalNotes: View {
                     }
                 }
 
-                // Group Trip Section (only show if user has friends)
-                if !session.friends.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Text("Group Trip")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
-
-                            Spacer()
-
-                            Button(action: { showGroupTripInfo = true }) {
-                                Image(systemName: "info.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(Color.hbBrand.opacity(0.7))
-                            }
-                        }
-
-                        Toggle(isOn: $isGroupTrip) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "person.3.fill")
-                                    .foregroundStyle(isGroupTrip ? Color.hbBrand : .secondary)
-                                    .frame(width: 24)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Invite Friends to Join")
-                                        .font(.subheadline)
-                                    Text("Create a trip that friends can participate in together")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
-                        .padding()
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .cornerRadius(12)
-
-                        // Group trip settings (only visible when enabled)
-                        if isGroupTrip {
-                            VStack(spacing: 12) {
-                                // Participant selection
-                                Button(action: { showParticipantPicker = true }) {
-                                    HStack {
-                                        Image(systemName: "person.badge.plus")
-                                            .foregroundStyle(Color.hbBrand)
-
-                                        Text(groupParticipants.isEmpty ? "Select Participants" : "\(groupParticipants.count) participant\(groupParticipants.count == 1 ? "" : "s") selected")
-                                            .font(.subheadline)
-
-                                        Spacer()
-
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption)
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                    .padding()
-                                    .background(Color(.secondarySystemGroupedBackground))
-                                    .cornerRadius(12)
-                                }
-                                .foregroundStyle(.primary)
-
-                                // Selected participants preview
-                                if !groupParticipants.isEmpty {
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 8) {
-                                            ForEach(groupParticipants, id: \.user_id) { friend in
-                                                HStack(spacing: 6) {
-                                                    Text(friend.fullName)
-                                                        .font(.caption)
-
-                                                    Button(action: {
-                                                        groupParticipants.removeAll { $0.user_id == friend.user_id }
-                                                    }) {
-                                                        Image(systemName: "xmark.circle.fill")
-                                                            .font(.caption)
-                                                            .foregroundStyle(.secondary)
-                                                    }
-                                                }
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 6)
-                                                .background(Color.hbBrand.opacity(0.1))
-                                                .cornerRadius(16)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Checkout mode picker
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Who can end the trip?")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-
-                                    Picker("Checkout Mode", selection: $checkoutMode) {
-                                        Text("Anyone").tag("anyone")
-                                        Text("Vote").tag("vote")
-                                        Text("Only Me").tag("owner_only")
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
-                                .padding()
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .cornerRadius(12)
-
-                                // Vote threshold slider (only for vote mode)
-                                if checkoutMode == "vote" {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack {
-                                            Text("Vote threshold: \(Int(voteThreshold * 100))%")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                            Spacer()
-                                        }
-                                        Slider(value: $voteThreshold, in: 0.5...1.0, step: 0.1)
-                                            .tint(Color.hbBrand)
-                                    }
-                                    .padding()
-                                    .background(Color(.secondarySystemGroupedBackground))
-                                    .cornerRadius(12)
-                                }
-
-                                // Location sharing toggle
-                                Toggle(isOn: $shareLocationsBetweenParticipants) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Share locations between participants")
-                                            .font(.caption)
-                                        Text("Everyone can see each other on the map")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
-                                .padding()
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .cornerRadius(12)
-                            }
-                        }
-                    }
-                    .alert("Group Trips", isPresented: $showGroupTripInfo) {
-                        Button("OK", role: .cancel) { }
-                    } message: {
-                        Text("Group trips let you adventure together with friends. Each participant can check in with their own location, and you can configure how the trip ends (anyone can end it, vote required, or only you).")
-                    }
-                    .sheet(isPresented: $showParticipantPicker) {
-                        GroupParticipantPicker(
-                            selectedParticipants: $groupParticipants,
-                            friends: session.friends
-                        )
-                    }
-                }
-
                 // Ready to Go Section
                 VStack(spacing: 16) {
                     Image(systemName: isEditMode ? "pencil.circle.fill" : "checkmark.circle.fill")
@@ -2739,6 +2634,371 @@ struct Step4AdditionalNotes: View {
             HelpSheet(
                 title: "Additional Notes",
                 message: "Add any extra details your contacts might need to find you if needed, like your planned route, who you're with, what you're wearing, or specific locations you'll visit."
+            )
+        }
+    }
+}
+
+// MARK: - Step 4: Group Settings (Group trips only)
+struct Step4GroupSettings: View {
+    @EnvironmentObject var session: Session
+    @Binding var groupParticipants: [Friend]
+    @Binding var checkoutMode: String
+    @Binding var voteThreshold: Double
+    @Binding var shareLocationsBetweenParticipants: Bool
+
+    @State private var showParticipantPicker = false
+    @State private var showGroupTripInfo = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Group Settings")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+
+                        Button(action: { showGroupTripInfo = true }) {
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color.hbBrand.opacity(0.7))
+                        }
+                    }
+                    Text("Invite friends and configure how the trip works")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 20)
+
+                // Participant selection
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Participants", systemImage: "person.3.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button(action: { showParticipantPicker = true }) {
+                        HStack {
+                            Image(systemName: "person.badge.plus")
+                                .foregroundStyle(Color.hbBrand)
+
+                            Text(groupParticipants.isEmpty ? "Select Friends to Invite" : "\(groupParticipants.count) friend\(groupParticipants.count == 1 ? "" : "s") selected")
+                                .font(.subheadline)
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .cornerRadius(12)
+                    }
+                    .foregroundStyle(.primary)
+
+                    // Selected participants preview
+                    if !groupParticipants.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(groupParticipants, id: \.user_id) { friend in
+                                    HStack(spacing: 6) {
+                                        Text(friend.fullName)
+                                            .font(.caption)
+
+                                        Button(action: {
+                                            groupParticipants.removeAll { $0.user_id == friend.user_id }
+                                        }) {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.hbBrand.opacity(0.1))
+                                    .cornerRadius(16)
+                                }
+                            }
+                        }
+                    }
+
+                    if groupParticipants.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("Select at least one friend to invite")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                // Checkout mode picker
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Trip Completion", systemImage: "flag.checkered")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Who can end the trip?")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        Picker("Checkout Mode", selection: $checkoutMode) {
+                            Text("Anyone").tag("anyone")
+                            Text("Vote").tag("vote")
+                            Text("Only Me").tag("owner_only")
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text(checkoutModeDescription)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding()
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .cornerRadius(12)
+
+                    // Vote threshold slider (only for vote mode)
+                    if checkoutMode == "vote" {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Vote threshold: \(Int(voteThreshold * 100))%")
+                                    .font(.subheadline)
+                                Spacer()
+                            }
+                            Slider(value: $voteThreshold, in: 0.5...1.0, step: 0.1)
+                                .tint(Color.hbBrand)
+                            Text("Percentage of participants needed to agree before the trip ends")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .cornerRadius(12)
+                    }
+                }
+
+                // Location sharing toggle
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Location Sharing", systemImage: "location.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle(isOn: $shareLocationsBetweenParticipants) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Share locations between participants")
+                                .font(.subheadline)
+                            Text("Everyone can see each other on the map during the trip")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                    .padding()
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .cornerRadius(12)
+                }
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal)
+        }
+        .scrollIndicators(.hidden)
+        .alert("Group Trips", isPresented: $showGroupTripInfo) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Group trips let you adventure together with friends. Each participant can check in with their own location, and you can configure how the trip ends. When you start the trip, invitations will be sent to your selected friends.")
+        }
+        .sheet(isPresented: $showParticipantPicker) {
+            GroupParticipantPicker(
+                selectedParticipants: $groupParticipants,
+                friends: session.friends
+            )
+        }
+    }
+
+    var checkoutModeDescription: String {
+        switch checkoutMode {
+        case "anyone":
+            return "Any participant can end the trip for everyone"
+        case "vote":
+            return "A vote is required to end the trip"
+        case "owner_only":
+            return "Only you (the trip leader) can end the trip"
+        default:
+            return ""
+        }
+    }
+}
+
+// MARK: - Step 5: Final Notes (Group trips only)
+struct Step5FinalNotes: View {
+    @EnvironmentObject var session: Session
+    @Binding var notes: String
+    @Binding var shareLiveLocation: Bool
+    @Binding var isCreating: Bool
+    var isEditMode: Bool = false
+    var hasFriendContacts: Bool = false
+    let onSubmit: () -> Void
+    var onSaveAsTemplate: (() -> Void)? = nil
+    @State private var showNotesHelp = false
+    @State private var showLiveLocationInfo = false
+    @State private var showLocationPermissionAlert = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Final Details")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+
+                        Button(action: { showNotesHelp = true }) {
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color.hbBrand.opacity(0.7))
+                        }
+                    }
+                    Text("Any extra details? (Optional)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 20)
+
+                // Notes Input
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Notes", systemImage: "note.text")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 120)
+                        .padding(8)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.secondarySystemFill))
+                        .cornerRadius(12)
+
+                    Text("Add any additional information that might be helpful to your group or emergency contacts.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Live Location Sharing Toggle (only if friend contacts are selected)
+                if hasFriendContacts {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label("Friend Features", systemImage: "person.2.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button(action: { showLiveLocationInfo = true }) {
+                                Image(systemName: "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.hbBrand.opacity(0.7))
+                            }
+                        }
+
+                        Toggle(isOn: $shareLiveLocation) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "location.fill")
+                                    .foregroundStyle(shareLiveLocation ? Color.hbBrand : .secondary)
+                                    .frame(width: 24)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Share Live Location")
+                                        .font(.subheadline)
+                                    Text("Safety contacts can see your location during this trip")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .cornerRadius(12)
+                        .onChange(of: shareLiveLocation) { _, newValue in
+                            if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                LiveLocationManager.shared.requestPermissionIfNeeded()
+                                showLocationPermissionAlert = true
+                            }
+                        }
+                    }
+                    .alert("Live Location Sharing", isPresented: $showLiveLocationInfo) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text("When enabled, friends who are safety contacts can see your real-time location on a map during your trip.")
+                    }
+                    .alert("Location Permission Required", isPresented: $showLocationPermissionAlert) {
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("Live location sharing requires 'Always Allow' location permission. Please enable it in Settings.")
+                    }
+                }
+
+                // Ready to Go Section
+                VStack(spacing: 16) {
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 48))
+                        .foregroundStyle(Color.hbAccent)
+
+                    Text("Ready to start your group adventure?")
+                        .font(.headline)
+
+                    Text("Invitations will be sent to your selected friends")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+
+                // Start Adventure Button
+                Button(action: onSubmit) {
+                    HStack {
+                        if isCreating {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.9)
+                        } else {
+                            Image(systemName: "flag.checkered")
+                            Text("Start Group Adventure")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .background(Color.hbAccent)
+                    .foregroundStyle(.white)
+                    .cornerRadius(16)
+                }
+                .disabled(isCreating)
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal)
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .scrollIndicators(.hidden)
+        .sheet(isPresented: $showNotesHelp) {
+            HelpSheet(
+                title: "Additional Notes",
+                message: "Add any extra details your contacts might need to find you if needed, like your planned route, specific locations you'll visit, or special instructions."
             )
         }
     }

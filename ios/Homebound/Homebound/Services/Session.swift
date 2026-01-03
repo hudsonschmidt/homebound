@@ -2995,19 +2995,20 @@ final class Session: ObservableObject {
     }
 
     /// Accept an invitation to join a group trip
-    func acceptTripInvitation(tripId: Int) async -> Bool {
+    func acceptTripInvitation(tripId: Int, safetyContactIds: [Int]) async -> Bool {
         do {
+            let request = AcceptInvitationRequest(safety_contact_ids: safetyContactIds)
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.post(
                     self.url("/api/v1/trips/\(tripId)/participants/accept"),
-                    body: API.Empty(),
+                    body: request,
                     bearer: bearer
                 )
             }
             await MainActor.run {
                 self.notice = "Joined the trip!"
             }
-            debugLog("[Session] ✅ Accepted trip invitation for trip \(tripId)")
+            debugLog("[Session] ✅ Accepted trip invitation for trip \(tripId) with \(safetyContactIds.count) safety contacts")
             return true
         } catch {
             await MainActor.run {
