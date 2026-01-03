@@ -233,6 +233,190 @@ async def send_friend_request_accepted_push(
     log.info(f"Sent friend request accepted push to user {inviter_user_id}")
 
 
+# ==================== Group Trip Invitation Push Notifications ====================
+
+async def send_trip_invitation_push(
+    invited_user_id: int,
+    inviter_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification when a user is invited to a group trip."""
+    title = "Trip Invitation"
+    body = f"{inviter_name} invited you to join '{trip_title}'"
+
+    await send_push_to_user(
+        invited_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id, "action": "trip_invitation"},
+        notification_type="general"
+    )
+    log.info(f"Sent trip invitation push to user {invited_user_id} for trip {trip_id}")
+
+
+async def send_trip_invitation_accepted_push(
+    owner_user_id: int,
+    accepter_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification to trip owner when someone accepts their invitation."""
+    title = "Invitation Accepted"
+    body = f"{accepter_name} joined your trip '{trip_title}'"
+
+    await send_push_to_user(
+        owner_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id},
+        notification_type="general"
+    )
+    log.info(f"Sent invitation accepted push to trip owner {owner_user_id} for trip {trip_id}")
+
+
+async def send_trip_invitation_declined_push(
+    owner_user_id: int,
+    decliner_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification to trip owner when someone declines their invitation."""
+    title = "Invitation Declined"
+    body = f"{decliner_name} declined to join '{trip_title}'"
+
+    await send_push_to_user(
+        owner_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id},
+        notification_type="general"
+    )
+    log.info(f"Sent invitation declined push to trip owner {owner_user_id} for trip {trip_id}")
+
+
+async def send_participant_left_push(
+    owner_user_id: int,
+    leaver_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification to trip owner when a participant leaves the trip."""
+    title = "Participant Left"
+    body = f"{leaver_name} left '{trip_title}'"
+
+    await send_push_to_user(
+        owner_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id},
+        notification_type="general"
+    )
+    log.info(f"Sent participant left push to trip owner {owner_user_id} for trip {trip_id}")
+
+
+async def send_checkout_vote_push(
+    participant_user_id: int,
+    voter_name: str,
+    trip_title: str,
+    trip_id: int,
+    votes_count: int,
+    votes_needed: int
+):
+    """Send push notification to participants when someone votes to checkout."""
+    title = "Checkout Vote"
+    body = f"{voter_name} voted to end '{trip_title}' ({votes_count}/{votes_needed} votes)"
+
+    await send_push_to_user(
+        participant_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id, "action": "checkout_vote"},
+        notification_type="general"
+    )
+    log.info(f"Sent checkout vote push to participant {participant_user_id} for trip {trip_id}")
+
+
+async def send_trip_completed_by_vote_push(
+    participant_user_id: int,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification to participants when trip is completed by vote."""
+    title = "Trip Completed"
+    body = f"'{trip_title}' has ended - everyone voted to complete!"
+
+    await send_push_to_user(
+        participant_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id},
+        notification_type="general"
+    )
+    log.info(f"Sent trip completed by vote push to participant {participant_user_id} for trip {trip_id}")
+
+
+async def send_participant_checkin_push(
+    participant_user_id: int,
+    checker_name: str,
+    trip_title: str,
+    trip_id: int,
+    location_name: str | None = None,
+    coordinates: tuple[float, float] | None = None
+):
+    """Send push notification to other participants when someone checks in.
+
+    This notifies other group trip participants when a fellow participant checks in,
+    improving group situational awareness.
+    """
+    title = "Teammate Checked In"
+
+    # Include location in body if available
+    if location_name:
+        body = f"{checker_name} checked in at {location_name}"
+    else:
+        body = f"{checker_name} checked in on '{trip_title}'"
+
+    # Include coordinates in data for map deep linking
+    data: dict = {"trip_id": trip_id, "action": "participant_checkin"}
+    if coordinates:
+        data["checkin_lat"] = coordinates[0]
+        data["checkin_lon"] = coordinates[1]
+
+    await send_push_to_user(
+        participant_user_id,
+        title,
+        body,
+        data=data,
+        notification_type="general"
+    )
+    log.info(f"Sent participant check-in push to user {participant_user_id} for trip {trip_id}")
+
+
+async def send_trip_completed_push(
+    participant_user_id: int,
+    completer_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification to participants when trip is completed manually.
+
+    This notifies group trip participants when the trip owner or another participant
+    completes the trip (not via vote).
+    """
+    title = "Trip Completed"
+    body = f"{completer_name} completed '{trip_title}'"
+
+    await send_push_to_user(
+        participant_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id},
+        notification_type="general"
+    )
+    log.info(f"Sent trip completed push to participant {participant_user_id} for trip {trip_id}")
+
+
 async def send_friend_trip_update_silent_push(
     friend_user_id: int,
     trip_id: int

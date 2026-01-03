@@ -57,6 +57,13 @@ struct CreatePlanView: View {
     @State private var selectedFriends: [Friend] = []  // Friends as safety contacts (push notifications)
     @State private var shareLiveLocation = false  // Share live location with friends
 
+    // Group trip settings
+    @State private var isGroupTrip = false  // Is this a group trip?
+    @State private var groupParticipants: [Friend] = []  // Friends to invite as participants
+    @State private var checkoutMode = "anyone"  // "anyone" | "vote" | "owner_only"
+    @State private var voteThreshold: Double = 0.5  // For vote mode
+    @State private var shareLocationsBetweenParticipants = true
+
     // UI State
     @State private var isCreating = false
     @State private var showError = false
@@ -135,6 +142,11 @@ struct CreatePlanView: View {
                             Step4AdditionalNotes(
                                 notes: $notes,
                                 shareLiveLocation: $shareLiveLocation,
+                                isGroupTrip: $isGroupTrip,
+                                groupParticipants: $groupParticipants,
+                                checkoutMode: $checkoutMode,
+                                voteThreshold: $voteThreshold,
+                                shareLocationsBetweenParticipants: $shareLocationsBetweenParticipants,
                                 isCreating: $isCreating,
                                 isEditMode: isEditMode,
                                 hasFriendContacts: !selectedFriends.isEmpty,
@@ -547,6 +559,19 @@ struct CreatePlanView: View {
                     }
                 }
             } else {
+                // Build group settings if this is a group trip
+                let groupSettingsData: GroupSettings? = isGroupTrip ? GroupSettings(
+                    checkout_mode: checkoutMode,
+                    vote_threshold: voteThreshold,
+                    allow_participant_invites: false,
+                    share_locations_between_participants: shareLocationsBetweenParticipants
+                ) : nil
+
+                // Get participant IDs for group trip
+                let participantIds: [Int]? = isGroupTrip && !groupParticipants.isEmpty
+                    ? groupParticipants.map { $0.user_id }
+                    : nil
+
                 // Create new plan
                 let plan = TripCreateRequest(
                     title: planTitle.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -575,7 +600,10 @@ struct CreatePlanView: View {
                     notify_start_hour: useNotificationHours ? notifyStartHour : nil,
                     notify_end_hour: useNotificationHours ? notifyEndHour : nil,
                     notify_self: notifySelf,
-                    share_live_location: shareLiveLocation
+                    share_live_location: shareLiveLocation,
+                    is_group_trip: isGroupTrip,
+                    group_settings: groupSettingsData,
+                    participant_ids: participantIds
                 )
 
                 let createdPlan = await session.createPlan(plan)
@@ -2353,6 +2381,12 @@ struct Step4AdditionalNotes: View {
     @EnvironmentObject var session: Session
     @Binding var notes: String
     @Binding var shareLiveLocation: Bool
+    // Group trip settings
+    @Binding var isGroupTrip: Bool
+    @Binding var groupParticipants: [Friend]
+    @Binding var checkoutMode: String
+    @Binding var voteThreshold: Double
+    @Binding var shareLocationsBetweenParticipants: Bool
     @Binding var isCreating: Bool
     var isEditMode: Bool = false
     var hasFriendContacts: Bool = false  // Show live location only if friends are selected
@@ -2361,6 +2395,8 @@ struct Step4AdditionalNotes: View {
     @State private var showNotesHelp = false
     @State private var showLiveLocationInfo = false
     @State private var showLocationPermissionAlert = false
+    @State private var showGroupTripInfo = false
+    @State private var showParticipantPicker = false
 
     var body: some View {
         ScrollView {
@@ -2479,6 +2515,157 @@ struct Step4AdditionalNotes: View {
                         Button("Cancel", role: .cancel) { }
                     } message: {
                         Text("Live location sharing requires 'Always Allow' location permission so your friends can see your location even when the app is in the background. Please enable it in Settings.")
+                    }
+                }
+
+                // Group Trip Section (only show if user has friends)
+                if !session.friends.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Text("Group Trip")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button(action: { showGroupTripInfo = true }) {
+                                Image(systemName: "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.hbBrand.opacity(0.7))
+                            }
+                        }
+
+                        Toggle(isOn: $isGroupTrip) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "person.3.fill")
+                                    .foregroundStyle(isGroupTrip ? Color.hbBrand : .secondary)
+                                    .frame(width: 24)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Invite Friends to Join")
+                                        .font(.subheadline)
+                                    Text("Create a trip that friends can participate in together")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .cornerRadius(12)
+
+                        // Group trip settings (only visible when enabled)
+                        if isGroupTrip {
+                            VStack(spacing: 12) {
+                                // Participant selection
+                                Button(action: { showParticipantPicker = true }) {
+                                    HStack {
+                                        Image(systemName: "person.badge.plus")
+                                            .foregroundStyle(Color.hbBrand)
+
+                                        Text(groupParticipants.isEmpty ? "Select Participants" : "\(groupParticipants.count) participant\(groupParticipants.count == 1 ? "" : "s") selected")
+                                            .font(.subheadline)
+
+                                        Spacer()
+
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding()
+                                    .background(Color(.secondarySystemGroupedBackground))
+                                    .cornerRadius(12)
+                                }
+                                .foregroundStyle(.primary)
+
+                                // Selected participants preview
+                                if !groupParticipants.isEmpty {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 8) {
+                                            ForEach(groupParticipants, id: \.user_id) { friend in
+                                                HStack(spacing: 6) {
+                                                    Text(friend.fullName)
+                                                        .font(.caption)
+
+                                                    Button(action: {
+                                                        groupParticipants.removeAll { $0.user_id == friend.user_id }
+                                                    }) {
+                                                        Image(systemName: "xmark.circle.fill")
+                                                            .font(.caption)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                }
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(Color.hbBrand.opacity(0.1))
+                                                .cornerRadius(16)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Checkout mode picker
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Who can end the trip?")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    Picker("Checkout Mode", selection: $checkoutMode) {
+                                        Text("Anyone").tag("anyone")
+                                        Text("Vote").tag("vote")
+                                        Text("Only Me").tag("owner_only")
+                                    }
+                                    .pickerStyle(.segmented)
+                                }
+                                .padding()
+                                .background(Color(.secondarySystemGroupedBackground))
+                                .cornerRadius(12)
+
+                                // Vote threshold slider (only for vote mode)
+                                if checkoutMode == "vote" {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack {
+                                            Text("Vote threshold: \(Int(voteThreshold * 100))%")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            Spacer()
+                                        }
+                                        Slider(value: $voteThreshold, in: 0.5...1.0, step: 0.1)
+                                            .tint(Color.hbBrand)
+                                    }
+                                    .padding()
+                                    .background(Color(.secondarySystemGroupedBackground))
+                                    .cornerRadius(12)
+                                }
+
+                                // Location sharing toggle
+                                Toggle(isOn: $shareLocationsBetweenParticipants) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Share locations between participants")
+                                            .font(.caption)
+                                        Text("Everyone can see each other on the map")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                                .padding()
+                                .background(Color(.secondarySystemGroupedBackground))
+                                .cornerRadius(12)
+                            }
+                        }
+                    }
+                    .alert("Group Trips", isPresented: $showGroupTripInfo) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text("Group trips let you adventure together with friends. Each participant can check in with their own location, and you can configure how the trip ends (anyone can end it, vote required, or only you).")
+                    }
+                    .sheet(isPresented: $showParticipantPicker) {
+                        GroupParticipantPicker(
+                            selectedParticipants: $groupParticipants,
+                            friends: session.friends
+                        )
                     }
                 }
 
@@ -3195,6 +3382,125 @@ struct SaveTemplateSheet: View {
             }
         }
         .presentationDetents([.medium])
+    }
+}
+
+// MARK: - Group Participant Picker
+struct GroupParticipantPicker: View {
+    @Environment(\.dismiss) var dismiss
+    @Binding var selectedParticipants: [Friend]
+    let friends: [Friend]
+    @State private var searchText = ""
+
+    var filteredFriends: [Friend] {
+        if searchText.isEmpty {
+            return friends
+        }
+        return friends.filter { friend in
+            friend.fullName.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if friends.isEmpty {
+                    ContentUnavailableView(
+                        "No Friends",
+                        systemImage: "person.2.slash",
+                        description: Text("Add friends first to invite them to group trips")
+                    )
+                } else {
+                    ForEach(filteredFriends, id: \.user_id) { friend in
+                        Button(action: { toggleSelection(friend) }) {
+                            HStack {
+                                // Profile photo or initials
+                                if let photoUrl = friend.profile_photo_url,
+                                   let url = URL(string: photoUrl) {
+                                    AsyncImage(url: url) { image in
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        initialsCircle(for: friend)
+                                    }
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(Circle())
+                                } else {
+                                    initialsCircle(for: friend)
+                                }
+
+                                VStack(alignment: .leading) {
+                                    Text(friend.fullName)
+                                        .font(.body)
+                                }
+
+                                Spacer()
+
+                                if isSelected(friend) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Color.hbBrand)
+                                        .font(.title2)
+                                } else {
+                                    Image(systemName: "circle")
+                                        .foregroundStyle(.tertiary)
+                                        .font(.title2)
+                                }
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search friends")
+            .navigationTitle("Select Participants")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private func isSelected(_ friend: Friend) -> Bool {
+        selectedParticipants.contains { $0.user_id == friend.user_id }
+    }
+
+    private func toggleSelection(_ friend: Friend) {
+        if isSelected(friend) {
+            selectedParticipants.removeAll { $0.user_id == friend.user_id }
+        } else {
+            selectedParticipants.append(friend)
+        }
+    }
+
+    @ViewBuilder
+    private func initialsCircle(for friend: Friend) -> some View {
+        let initials = friend.fullName.split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+            .map { String($0) }
+            .joined()
+            .uppercased()
+
+        Circle()
+            .fill(Color.hbBrand.opacity(0.2))
+            .frame(width: 40, height: 40)
+            .overlay {
+                Text(initials.isEmpty ? "?" : initials)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(Color.hbBrand)
+            }
     }
 }
 

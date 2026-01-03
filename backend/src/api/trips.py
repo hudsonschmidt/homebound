@@ -168,6 +168,34 @@ def to_iso8601_required(dt: datetime | str | None) -> str:
     return result
 
 
+class GroupSettings(BaseModel):
+    """Settings for group trip behavior, configurable by trip owner."""
+    checkout_mode: str = "anyone"  # "anyone" | "vote" | "owner_only"
+    vote_threshold: float = 0.5  # For vote mode: percentage needed (0.0-1.0)
+    allow_participant_invites: bool = False  # Can participants invite others?
+    share_locations_between_participants: bool = True  # Can participants see each other's locations?
+
+
+def parse_group_settings(settings_json) -> GroupSettings | None:
+    """Parse group settings from JSON.
+
+    Args:
+        settings_json: Either None, a dict, or a JSON string
+
+    Returns:
+        GroupSettings object with parsed settings, or None if input was None
+    """
+    if settings_json is None:
+        return None
+    try:
+        if isinstance(settings_json, dict):
+            return GroupSettings(**settings_json)
+        return GroupSettings(**json.loads(settings_json))
+    except Exception as e:
+        log.warning(f"Failed to parse group_settings: {e}")
+        return None
+
+
 class TripCreate(BaseModel):
     title: str
     activity: str  # Activity name reference
@@ -196,6 +224,10 @@ class TripCreate(BaseModel):
     notify_end_hour: int | None = None  # Hour (0-23) when notifications end
     notify_self: bool = False  # Send copy of all emails to trip owner
     share_live_location: bool = False  # Share live location with friends during trip
+    # Group trip fields
+    is_group_trip: bool = False  # Is this a group trip?
+    group_settings: GroupSettings | None = None  # Settings for group trip behavior
+    participant_ids: list[int] | None = None  # Friend user IDs to invite as participants
 
 
 class TripUpdate(BaseModel):
@@ -265,6 +297,10 @@ class TripResponse(BaseModel):
     eta_timezone: str | None
     notify_self: bool
     share_live_location: bool
+    # Group trip fields
+    is_group_trip: bool = False
+    group_settings: GroupSettings | None = None
+    participant_count: int = 0  # Number of accepted participants
 
 
 class TimelineEvent(BaseModel):
@@ -453,6 +489,14 @@ def create_trip(
                 else:
                     log.warning("[Trips] Start geocoding failed, keeping 'Current Location'")
 
+        # Prepare group settings JSON if group trip
+        group_settings_json = None
+        if body.is_group_trip and body.group_settings:
+            group_settings_json = json.dumps(body.group_settings.model_dump())
+        elif body.is_group_trip:
+            # Use default group settings
+            group_settings_json = json.dumps(GroupSettings().model_dump())
+
         # Insert trip
         result = connection.execute(
             sqlalchemy.text(
@@ -465,7 +509,7 @@ def create_trip(
                     contact1, contact2, contact3, created_at,
                     checkin_token, checkout_token, timezone, start_timezone, eta_timezone,
                     checkin_interval_min, notify_start_hour, notify_end_hour, notify_self,
-                    share_live_location
+                    share_live_location, is_group_trip, group_settings
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
                     :location_text, :gen_lat, :gen_lon,
@@ -474,7 +518,7 @@ def create_trip(
                     :contact1, :contact2, :contact3, :created_at,
                     :checkin_token, :checkout_token, :timezone, :start_timezone, :eta_timezone,
                     :checkin_interval_min, :notify_start_hour, :notify_end_hour, :notify_self,
-                    :share_live_location
+                    :share_live_location, :is_group_trip, :group_settings
                 )
                 RETURNING id
                 """
@@ -508,12 +552,48 @@ def create_trip(
                 "notify_start_hour": body.notify_start_hour,
                 "notify_end_hour": body.notify_end_hour,
                 "notify_self": body.notify_self,
-                "share_live_location": body.share_live_location
+                "share_live_location": body.share_live_location,
+                "is_group_trip": body.is_group_trip,
+                "group_settings": group_settings_json
             }
         )
         row = result.fetchone()
         assert row is not None
         trip_id = row[0]
+
+        # If group trip, add owner and invited participants
+        participant_count = 0
+        if body.is_group_trip:
+            now = datetime.now(UTC).isoformat()
+
+            # Add owner as participant
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                    VALUES (:trip_id, :user_id, 'owner', 'accepted', :now, :user_id)
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": user_id, "now": now}
+            )
+            participant_count = 1
+
+            # Add invited participants
+            if body.participant_ids:
+                for participant_id in body.participant_ids:
+                    # Verify they're friends
+                    if _is_friend(connection, user_id, participant_id):
+                        connection.execute(
+                            sqlalchemy.text(
+                                """
+                                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_at, invited_by)
+                                VALUES (:trip_id, :participant_id, 'participant', 'invited', :now, :user_id)
+                                """
+                            ),
+                            {"trip_id": trip_id, "participant_id": participant_id, "now": now, "user_id": user_id}
+                        )
+                    else:
+                        log.warning(f"[Trips] User {participant_id} is not a friend, skipping invitation")
 
         # Save to trip_safety_contacts junction table (supports both email contacts and friends)
         _save_trip_safety_contacts(
@@ -535,6 +615,7 @@ def create_trip(
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
+                       t.is_group_trip, t.group_settings,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -666,6 +747,15 @@ def create_trip(
         else:
             log.info(f"[Trips] create_trip: No friend contacts to notify for trip {trip_id}")
 
+        # Parse group settings if present
+        trip_group_settings = None
+        if trip.get("group_settings"):
+            gs = trip["group_settings"]
+            if isinstance(gs, dict):
+                trip_group_settings = GroupSettings(**gs)
+            elif isinstance(gs, str):
+                trip_group_settings = GroupSettings(**json.loads(gs))
+
         return TripResponse(
             id=trip["id"],
             user_id=trip["user_id"],
@@ -701,7 +791,10 @@ def create_trip(
             start_timezone=trip["start_timezone"],
             eta_timezone=trip["eta_timezone"],
             notify_self=trip["notify_self"],
-            share_live_location=trip.get("share_live_location", False)
+            share_live_location=trip.get("share_live_location", False),
+            is_group_trip=trip.get("is_group_trip", False),
+            group_settings=trip_group_settings,
+            participant_count=participant_count
         )
 
 
@@ -720,9 +813,11 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
+                       t.is_group_trip, t.group_settings,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
-                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order,
+                       (SELECT COUNT(*) FROM trip_participants WHERE trip_id = t.id AND status = 'accepted') as participant_count
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.user_id = :user_id
@@ -785,7 +880,10 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     start_timezone=trip["start_timezone"],
                     eta_timezone=trip["eta_timezone"],
                     notify_self=trip["notify_self"],
-                    share_live_location=trip.get("share_live_location", False)
+                    share_live_location=trip.get("share_live_location", False),
+                    is_group_trip=trip.get("is_group_trip", False),
+                    group_settings=parse_group_settings(trip.get("group_settings")),
+                    participant_count=trip.get("participant_count", 0)
                 )
             )
 
@@ -895,9 +993,11 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
+                       t.is_group_trip, t.group_settings,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
-                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order,
+                       (SELECT COUNT(*) FROM trip_participants WHERE trip_id = t.id AND status = 'accepted') as participant_count
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.id = :trip_id AND t.user_id = :user_id
@@ -962,7 +1062,10 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             start_timezone=trip["start_timezone"],
             eta_timezone=trip["eta_timezone"],
             notify_self=trip["notify_self"],
-            share_live_location=trip.get("share_live_location", False)
+            share_live_location=trip.get("share_live_location", False),
+            is_group_trip=trip.get("is_group_trip", False),
+            group_settings=parse_group_settings(trip.get("group_settings")),
+            participant_count=trip.get("participant_count", 0)
         )
 
 
@@ -1770,28 +1873,52 @@ def update_live_location(
     sharing is enabled for a trip. Friends who are safety contacts can see
     the latest location on their map view.
 
+    For group trips, accepted participants can also update their live location.
+
     Requirements:
-    - Trip must belong to the user
+    - Trip must belong to the user OR user must be an accepted participant
     - Trip must be active (active, overdue, or overdue_notified status)
     - Trip must have share_live_location enabled
     """
     with db.engine.begin() as connection:
-        # Verify trip belongs to user and has live sharing enabled
+        # Get trip details
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, share_live_location, status
+                SELECT id, user_id, share_live_location, status, is_group_trip
                 FROM trips
-                WHERE id = :trip_id AND user_id = :user_id
+                WHERE id = :trip_id
                 """
             ),
-            {"trip_id": trip_id, "user_id": user_id}
+            {"trip_id": trip_id}
         ).fetchone()
 
         if not trip:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Trip not found"
+            )
+
+        # Check if user has access (owner or accepted participant)
+        is_owner = trip.user_id == user_id
+        is_accepted_participant = False
+
+        if not is_owner and trip.is_group_trip:
+            participant = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id = :user_id AND status = 'accepted'
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchone()
+            is_accepted_participant = participant is not None
+
+        if not is_owner and not is_accepted_participant:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not authorized to update location for this trip"
             )
 
         # Check if trip is in an active state

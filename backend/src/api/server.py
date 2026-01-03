@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
-from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, profile, stats, trips
+from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, participants, profile, stats, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
@@ -35,6 +35,7 @@ check in on time.
 tags_metadata = [
     {"name": "auth", "description": "Authentication and user management"},
     {"name": "trips", "description": "Create and manage safety trips"},
+    {"name": "participants", "description": "Group trip participant management"},
     {"name": "activities", "description": "Activity types and configurations"},
     {"name": "contacts", "description": "Manage emergency contacts"},
     {"name": "friends", "description": "Friend management and invites"},
@@ -90,6 +91,7 @@ if static_dir.exists():
 # Include routers
 app.include_router(auth_endpoints.router)
 app.include_router(trips.router)
+app.include_router(participants.router)
 app.include_router(activities.router)
 app.include_router(contacts.router)
 app.include_router(friends.router)

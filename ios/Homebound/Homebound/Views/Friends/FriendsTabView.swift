@@ -11,6 +11,7 @@ struct FriendsTabView: View {
     @EnvironmentObject var session: Session
     @State private var showingInviteSheet = false
     @State private var showingQRScanner = false
+    @State private var showingTripInvitations = false
     @State private var selectedFriend: Friend? = nil
     @State private var isLoading = false
 
@@ -30,6 +31,9 @@ struct FriendsTabView: View {
                     VStack(spacing: 24) {
                         // Header
                         headerView
+
+                        // Trip invitations banner (if any pending)
+                        tripInvitationsBanner
 
                         // Action buttons
                         actionButtonsView
@@ -63,6 +67,10 @@ struct FriendsTabView: View {
                     .id(friend.user_id)  // Force view recreation when friend changes
                     .environmentObject(session)
                     .environmentObject(AppPreferences.shared)
+            }
+            .sheet(isPresented: $showingTripInvitations) {
+                TripInvitationsView()
+                    .environmentObject(session)
             }
             .task {
                 await loadData()
@@ -124,6 +132,60 @@ struct FriendsTabView: View {
             Spacer()
         }
         .padding(.top, 8)
+    }
+
+    // MARK: - Trip Invitations Banner
+
+    @ViewBuilder
+    var tripInvitationsBanner: some View {
+        if !session.tripInvitations.isEmpty {
+            Button(action: { showingTripInvitations = true }) {
+                HStack(spacing: 12) {
+                    // Icon with badge
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "person.3.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.hbBrand)
+
+                        // Badge
+                        Text("\(session.tripInvitations.count)")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.orange)
+                            .clipShape(Capsule())
+                            .offset(x: 8, y: -4)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Trip Invitations")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+
+                        Text("\(session.tripInvitations.count) pending invitation\(session.tripInvitations.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     // MARK: - Action Buttons
@@ -231,7 +293,8 @@ struct FriendsTabView: View {
         isLoading = true
         async let friends = session.loadFriends()
         async let activeTrips = session.loadFriendActiveTrips()
-        _ = await (friends, activeTrips)
+        async let tripInvitations = session.loadTripInvitations()
+        _ = await (friends, activeTrips, tripInvitations)
         isLoading = false
     }
 

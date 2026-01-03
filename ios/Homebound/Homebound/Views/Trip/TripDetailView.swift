@@ -11,6 +11,8 @@ struct TripDetailView: View {
     @State private var isLoadingFriends = false
     @State private var contactsLoaded = false
     @State private var friendsLoaded = false
+    @State private var participants: [TripParticipant] = []
+    @State private var isLoadingParticipants = false
 
     // Computed property to always get fresh trip from session
     private var trip: Trip? {
@@ -23,7 +25,11 @@ struct TripDetailView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         // Map Section
-                        TripDetailMapSection(trip: trip, events: timelineEvents)
+                        TripDetailMapSection(
+                            trip: trip,
+                            events: timelineEvents,
+                            participants: trip.is_group_trip ? participants : []
+                        )
 
                         // Summary Card
                         TripDetailSummaryCard(trip: trip)
@@ -33,6 +39,14 @@ struct TripDetailView: View {
 
                         // Safety Contacts Section
                         TripDetailContactsSection(trip: trip, contactsReady: contactsLoaded && friendsLoaded)
+
+                        // Participants Section (for group trips)
+                        if trip.is_group_trip {
+                            TripDetailParticipantsSection(
+                                participants: participants,
+                                isLoading: isLoadingParticipants
+                            )
+                        }
 
                         // Statistics Section
                         TripDetailStatsSection(trip: trip, events: timelineEvents)
@@ -67,11 +81,23 @@ struct TripDetailView: View {
     }
 
     private func loadAllData() async {
-        // Load timeline, contacts, and friends in parallel
+        // Load timeline, contacts, friends, and participants in parallel
         async let timelineTask: Void = loadTimelineEvents()
         async let contactsTask: Void = ensureContactsLoaded()
         async let friendsTask: Void = ensureFriendsLoaded()
-        _ = await (timelineTask, contactsTask, friendsTask)
+        async let participantsTask: Void = loadParticipantsIfGroupTrip()
+        _ = await (timelineTask, contactsTask, friendsTask, participantsTask)
+    }
+
+    private func loadParticipantsIfGroupTrip() async {
+        guard let trip = trip, trip.is_group_trip else { return }
+        isLoadingParticipants = true
+        if let response = await session.getParticipants(tripId: tripId) {
+            await MainActor.run {
+                participants = response.participants
+            }
+        }
+        isLoadingParticipants = false
     }
 
     private func refreshAllData() async {
@@ -147,10 +173,25 @@ struct TripDetailView: View {
 private struct TripDetailMapSection: View {
     let trip: Trip
     let events: [TimelineEvent]
+    let participants: [TripParticipant]
     @State private var mapPosition: MapCameraPosition = .automatic
 
     private var checkinEvents: [TimelineEvent] {
         events.filter { $0.kind == "checkin" && $0.lat != nil && $0.lon != nil }
+    }
+
+    // Participants with valid locations
+    private var participantsWithLocations: [TripParticipant] {
+        participants.filter { $0.last_lat != nil && $0.last_lon != nil && $0.status == "accepted" }
+    }
+
+    // Colors for participant pins (cycle through these)
+    private let participantColors: [Color] = [
+        .blue, .purple, .orange, .pink, .cyan, .mint, .indigo
+    ]
+
+    private func colorForParticipant(at index: Int) -> Color {
+        participantColors[index % participantColors.count]
     }
 
     private var allCoordinates: [CLLocationCoordinate2D] {
@@ -168,6 +209,13 @@ private struct TripDetailMapSection: View {
             }
         }
 
+        // Participant locations (for group trips)
+        for participant in participantsWithLocations {
+            if let lat = participant.last_lat, let lon = participant.last_lon {
+                coords.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            }
+        }
+
         // Destination
         if let lat = trip.location_lat, let lng = trip.location_lng {
             coords.append(CLLocationCoordinate2D(latitude: lat, longitude: lng))
@@ -177,7 +225,7 @@ private struct TripDetailMapSection: View {
     }
 
     private var hasMapData: Bool {
-        trip.location_lat != nil || trip.start_lat != nil || !checkinEvents.isEmpty
+        trip.location_lat != nil || trip.start_lat != nil || !checkinEvents.isEmpty || !participantsWithLocations.isEmpty
     }
 
     private func calculateRegion() -> MKCoordinateRegion {
@@ -219,6 +267,19 @@ private struct TripDetailMapSection: View {
                     if let lat = event.lat, let lon = event.lon {
                         Annotation("Check-in \(index + 1)", coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon)) {
                             DetailCheckinPin(number: index + 1)
+                        }
+                    }
+                }
+
+                // Participant location pins (for group trips)
+                ForEach(Array(participantsWithLocations.enumerated()), id: \.element.id) { index, participant in
+                    if let lat = participant.last_lat, let lon = participant.last_lon {
+                        Annotation(participant.displayName, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon)) {
+                            ParticipantLocationPin(
+                                name: participant.displayName,
+                                color: colorForParticipant(at: index),
+                                isOwner: participant.role == "owner"
+                            )
                         }
                     }
                 }
@@ -616,6 +677,171 @@ private struct TripContactRow: View {
     }
 }
 
+// MARK: - Participants Section (for group trips)
+
+private struct TripDetailParticipantsSection: View {
+    let participants: [TripParticipant]
+    let isLoading: Bool
+
+    var acceptedParticipants: [TripParticipant] {
+        participants.filter { $0.status == "accepted" }
+    }
+
+    var pendingParticipants: [TripParticipant] {
+        participants.filter { $0.status == "invited" }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                Image(systemName: "person.3.fill")
+                    .foregroundStyle(Color.hbBrand)
+                Text("Participants")
+                    .font(.headline)
+
+                Spacer()
+
+                Text("\(acceptedParticipants.count) joined")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.vertical, 20)
+            } else if participants.isEmpty {
+                Text("No participants yet")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else {
+                VStack(spacing: 8) {
+                    // Accepted participants
+                    ForEach(acceptedParticipants, id: \.id) { participant in
+                        ParticipantRow(participant: participant)
+                    }
+
+                    // Pending participants
+                    if !pendingParticipants.isEmpty {
+                        Divider()
+                            .padding(.vertical, 4)
+
+                        Text("Pending")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        ForEach(pendingParticipants, id: \.id) { participant in
+                            ParticipantRow(participant: participant)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(16)
+    }
+}
+
+private struct ParticipantRow: View {
+    let participant: TripParticipant
+
+    private var statusColor: Color {
+        switch participant.status {
+        case "accepted": return .green
+        case "invited": return .orange
+        case "declined", "left": return .secondary
+        default: return .secondary
+        }
+    }
+
+    private var statusIcon: String {
+        switch participant.status {
+        case "accepted": return "checkmark.circle.fill"
+        case "invited": return "hourglass"
+        case "declined": return "xmark.circle"
+        case "left": return "arrow.right.circle"
+        default: return "circle"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Profile photo or initials
+            if let photoUrl = participant.profile_photo_url, let url = URL(string: photoUrl) {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    initialsCircle
+                }
+                .frame(width: 36, height: 36)
+                .clipShape(Circle())
+            } else {
+                initialsCircle
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(participant.displayName)
+                        .font(.subheadline)
+
+                    if participant.role == "owner" {
+                        Text("Owner")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.hbBrand.opacity(0.2))
+                            .foregroundStyle(Color.hbBrand)
+                            .cornerRadius(4)
+                    }
+                }
+
+                // Last check-in info
+                if let lastCheckin = participant.lastCheckinAtDate {
+                    Text("Last check-in: \(lastCheckin.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            // Status indicator
+            Image(systemName: statusIcon)
+                .font(.title3)
+                .foregroundStyle(statusColor)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var initialsCircle: some View {
+        let initials = participant.displayName.split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+            .map { String($0) }
+            .joined()
+            .uppercased()
+
+        return Circle()
+            .fill(Color.hbBrand.opacity(0.2))
+            .frame(width: 36, height: 36)
+            .overlay {
+                Text(initials.isEmpty ? "?" : initials)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(Color.hbBrand)
+            }
+    }
+}
+
 // MARK: - Statistics Section
 
 private struct TripDetailStatsSection: View {
@@ -807,6 +1033,51 @@ private struct DetailCheckinPin: View {
             Image(systemName: "triangle.fill")
                 .font(.system(size: 10))
                 .foregroundStyle(.green)
+                .rotationEffect(.degrees(180))
+                .offset(y: -3)
+        }
+    }
+}
+
+private struct ParticipantLocationPin: View {
+    let name: String
+    let color: Color
+    let isOwner: Bool
+
+    private var initials: String {
+        name.split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+            .map { String($0) }
+            .joined()
+            .uppercased()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Circle()
+                    .fill(color)
+                    .frame(width: 36, height: 36)
+
+                Text(initials.isEmpty ? "?" : initials)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+
+                // Owner crown badge
+                if isOwner {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.yellow)
+                        .offset(x: 12, y: -12)
+                }
+            }
+            .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 2)
+
+            // Pin point
+            Image(systemName: "triangle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(color)
                 .rotationEffect(.degrees(180))
                 .offset(y: -3)
         }

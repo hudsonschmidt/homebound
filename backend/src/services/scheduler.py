@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import namedtuple
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -205,6 +206,14 @@ async def _process_overdue_trip(trip, now: datetime):
 
         # Fetch contacts and user info in read-only query
         with db.engine.connect() as conn:
+            # Check if this is a group trip
+            is_group_trip_row = conn.execute(
+                sqlalchemy.text("SELECT is_group_trip FROM trips WHERE id = :trip_id"),
+                {"trip_id": trip_id}
+            ).fetchone()
+            is_group_trip = is_group_trip_row and is_group_trip_row.is_group_trip
+
+            # Get trip owner's designated safety contacts (email contacts)
             contacts = conn.execute(
                 sqlalchemy.text("""
                     SELECT c.name, c.email
@@ -218,12 +227,52 @@ async def _process_overdue_trip(trip, now: datetime):
                 """),
                 {"trip_id": trip_id}
             ).fetchall()
+            contacts = list(contacts)
+
+            # For group trips, also fetch contacts for all accepted participants
+            participant_user_ids = []
+            if is_group_trip:
+                # Get all accepted participants (excluding owner, already handled above)
+                participants = conn.execute(
+                    sqlalchemy.text("""
+                        SELECT user_id FROM trip_participants
+                        WHERE trip_id = :trip_id AND status = 'accepted' AND role = 'participant'
+                    """),
+                    {"trip_id": trip_id}
+                ).fetchall()
+
+                participant_user_ids = [p.user_id for p in participants]
+                log.info(f"[Scheduler] Trip {trip_id}: Group trip with {len(participant_user_ids)} participants")
+
+                # Get each participant's contacts
+                if participant_user_ids:
+                    # Build dynamic IN clause for cross-database compatibility
+                    placeholders = ", ".join([f":uid{i}" for i in range(len(participant_user_ids))])
+                    params = {f"uid{i}": uid for i, uid in enumerate(participant_user_ids)}
+                    participant_contacts = conn.execute(
+                        sqlalchemy.text(f"""
+                            SELECT DISTINCT c.name, c.email
+                            FROM contacts c
+                            WHERE c.owner_id IN ({placeholders}) AND c.email IS NOT NULL
+                        """),
+                        params
+                    ).fetchall()
+
+                    # Deduplicate by email (keep unique emails)
+                    existing_emails = {c.email.lower() for c in contacts}
+                    for pc in participant_contacts:
+                        if pc.email.lower() not in existing_emails:
+                            contacts.append(pc)
+                            existing_emails.add(pc.email.lower())
+
+                    log.info(f"[Scheduler] Trip {trip_id}: Added {len(participant_contacts)} contacts from participants (total unique: {len(contacts)})")
 
             user = conn.execute(
                 sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
                 {"user_id": trip.user_id}
             ).fetchone()
 
+            # Get friend safety contacts for the trip
             friend_contacts = conn.execute(
                 sqlalchemy.text("""
                     SELECT tsc.friend_user_id
@@ -233,6 +282,19 @@ async def _process_overdue_trip(trip, now: datetime):
                 """),
                 {"trip_id": trip_id}
             ).fetchall()
+            friend_contacts = list(friend_contacts)
+
+            # For group trips, also notify all participants as friend contacts
+            # (they should know the group is overdue)
+            if is_group_trip and participant_user_ids:
+                existing_friend_ids = {f.friend_user_id for f in friend_contacts}
+                ParticipantAsFriend = namedtuple('ParticipantAsFriend', ['friend_user_id'])
+                for participant_id in participant_user_ids:
+                    if participant_id not in existing_friend_ids:
+                        friend_contacts.append(ParticipantAsFriend(participant_id))
+                        existing_friend_ids.add(participant_id)
+
+                log.info(f"[Scheduler] Trip {trip_id}: Total friend contacts (including participants): {len(friend_contacts)}")
 
         log.info(f"[Scheduler] Trip {trip_id}: Found {len(contacts)} contacts with email")
 

@@ -237,6 +237,7 @@ final class Session: ObservableObject {
     @Published var pendingInvites: [PendingInvite] = []
     @Published var friendActiveTrips: [FriendActiveTrip] = []
     @Published var friendVisibilitySettings: FriendVisibilitySettings = .defaults
+    @Published var tripInvitations: [TripInvitation] = []  // Pending group trip invitations
 
     // Update request cooldowns (trip_id -> cooldown_end_time)
     var updateRequestCooldowns: [Int: Date] = [:]
@@ -2950,6 +2951,238 @@ final class Session: ObservableObject {
         } catch {
             debugLog("[Session] ❌ Failed to get friend: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    // MARK: - Group Trip Participants
+
+    /// Invite friends to a group trip
+    func inviteParticipants(tripId: Int, friendUserIds: [Int]) async -> [TripParticipant]? {
+        do {
+            let request = ParticipantInviteRequest(friend_user_ids: friendUserIds)
+            let participants: [TripParticipant] = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(tripId)/participants"),
+                    body: request,
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Invited \(friendUserIds.count) friends to trip \(tripId)")
+            return participants
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to invite participants: \(error.localizedDescription)"
+            }
+            return nil
+        }
+    }
+
+    /// Get all participants for a group trip
+    func getParticipants(tripId: Int) async -> ParticipantListResponse? {
+        do {
+            let response: ParticipantListResponse = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/trips/\(tripId)/participants"),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Loaded \(response.participants.count) participants for trip \(tripId)")
+            return response
+        } catch {
+            debugLog("[Session] ❌ Failed to get participants: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Accept an invitation to join a group trip
+    func acceptTripInvitation(tripId: Int) async -> Bool {
+        do {
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(tripId)/participants/accept"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+            await MainActor.run {
+                self.notice = "Joined the trip!"
+            }
+            debugLog("[Session] ✅ Accepted trip invitation for trip \(tripId)")
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to accept invitation: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    /// Decline an invitation to join a group trip
+    func declineTripInvitation(tripId: Int) async -> Bool {
+        do {
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(tripId)/participants/decline"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Declined trip invitation for trip \(tripId)")
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to decline invitation: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    /// Leave a group trip
+    func leaveTrip(tripId: Int) async -> Bool {
+        do {
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(tripId)/participants/leave"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+            await MainActor.run {
+                self.notice = "Left the trip"
+            }
+            debugLog("[Session] ✅ Left trip \(tripId)")
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to leave trip: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    /// Remove a participant from a group trip (owner only)
+    func removeParticipant(tripId: Int, userId: Int) async -> Bool {
+        do {
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.delete(
+                    self.url("/api/v1/trips/\(tripId)/participants/\(userId)"),
+                    bearer: bearer
+                )
+            }
+            await MainActor.run {
+                self.notice = "Participant removed"
+            }
+            debugLog("[Session] ✅ Removed participant \(userId) from trip \(tripId)")
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to remove participant: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    /// Get all participant locations for a group trip
+    func getParticipantLocations(tripId: Int) async -> [ParticipantLocation]? {
+        do {
+            let locations: [ParticipantLocation] = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/trips/\(tripId)/locations"),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Loaded \(locations.count) participant locations for trip \(tripId)")
+            return locations
+        } catch {
+            debugLog("[Session] ❌ Failed to get participant locations: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Check in to a group trip as a participant
+    func checkinGroupTrip(tripId: Int, lat: Double? = nil, lon: Double? = nil) async -> Bool {
+        do {
+            var urlString = "/api/v1/trips/\(tripId)/checkin"
+            var queryParams: [String] = []
+            if let lat = lat {
+                queryParams.append("lat=\(lat)")
+            }
+            if let lon = lon {
+                queryParams.append("lon=\(lon)")
+            }
+            if !queryParams.isEmpty {
+                urlString += "?" + queryParams.joined(separator: "&")
+            }
+
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url(urlString),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+            await MainActor.run {
+                self.notice = "Checked in!"
+            }
+            debugLog("[Session] ✅ Checked in to group trip \(tripId)")
+            return true
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to check in: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    /// Cast a vote to checkout (end) the group trip
+    func voteCheckout(tripId: Int) async -> CheckoutVoteResponse? {
+        do {
+            let response: CheckoutVoteResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    self.url("/api/v1/trips/\(tripId)/checkout/vote"),
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+            await MainActor.run {
+                if response.trip_completed {
+                    self.notice = "Trip completed!"
+                } else {
+                    self.notice = "Vote recorded (\(response.votes_cast)/\(response.votes_needed))"
+                }
+            }
+            debugLog("[Session] ✅ Checkout vote for trip \(tripId): \(response.votes_cast)/\(response.votes_needed)")
+            return response
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to vote: \(error.localizedDescription)"
+            }
+            return nil
+        }
+    }
+
+    /// Get pending trip invitations for the current user
+    func getPendingTripInvitations() async -> [TripInvitation]? {
+        do {
+            let invitations: [TripInvitation] = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/trips/invitations/pending"),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Loaded \(invitations.count) pending trip invitations")
+            return invitations
+        } catch {
+            debugLog("[Session] ❌ Failed to get pending invitations: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Load trip invitations and update the published property
+    @MainActor
+    func loadTripInvitations() async {
+        if let invitations = await getPendingTripInvitations() {
+            self.tripInvitations = invitations
         }
     }
 

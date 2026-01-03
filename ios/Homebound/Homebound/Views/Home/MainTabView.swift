@@ -432,6 +432,9 @@ struct ActivePlanCardCompact: View {
     @State private var pulseAnimation = false
     @State private var showingError = false
     @State private var errorMessage = ""
+    // Checkout voting state (for group trips)
+    @State private var showingVoteConfirmation = false
+    @State private var voteResponse: CheckoutVoteResponse? = nil
 
     let extendOptions = [
         (15, "15 min"),
@@ -690,10 +693,30 @@ struct ActivePlanCardCompact: View {
                     .font(.system(size: 32))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(plan.title)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(plan.title)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.primary)
+
+                        // Group trip badge
+                        if plan.is_group_trip {
+                            HStack(spacing: 2) {
+                                Image(systemName: "person.3.fill")
+                                    .font(.caption2)
+                                if plan.participant_count > 0 {
+                                    Text("\(plan.participant_count)")
+                                        .font(.caption2)
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .foregroundStyle(Color.hbBrand)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.hbBrand.opacity(0.15))
+                            .cornerRadius(6)
+                        }
+                    }
 
                     Text(plan.activity.name)
                         .font(.caption)
@@ -781,35 +804,98 @@ struct ActivePlanCardCompact: View {
                 .disabled(plan.checkin_token == nil || isPerformingAction)
             }
 
-            // I'm Safe button - always shown
-            Button(action: {
-                if preferences.hapticFeedbackEnabled {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                }
-                Task {
-                    isPerformingAction = true
-                    _ = await session.completePlan()
+            // I'm Safe / Vote to End button
+            if plan.is_group_trip, let settings = plan.group_settings, settings.checkout_mode == "vote" {
+                // Group trip with vote mode - show Vote to End button
+                Button(action: {
                     if preferences.hapticFeedbackEnabled {
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }
-                    // Note: completePlan() already calls loadActivePlan() internally
-                    // and sets activeTrip to nil, so no need to call it again here
-                    await MainActor.run {
-                        isPerformingAction = false
+                    Task {
+                        isPerformingAction = true
+                        if let response = await session.voteCheckout(tripId: plan.id) {
+                            await MainActor.run {
+                                voteResponse = response
+                                if response.trip_completed {
+                                    if preferences.hapticFeedbackEnabled {
+                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                    }
+                                } else {
+                                    showingVoteConfirmation = true
+                                    if preferences.hapticFeedbackEnabled {
+                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                    }
+                                }
+                            }
+                        } else {
+                            if preferences.hapticFeedbackEnabled {
+                                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                            }
+                            await MainActor.run {
+                                errorMessage = session.lastError.isEmpty ? "Vote failed. Please try again." : session.lastError
+                                showingError = true
+                            }
+                        }
+                        await MainActor.run {
+                            isPerformingAction = false
+                        }
                     }
-                }
-            }) {
-                Label("I'm Safe", systemImage: "house.fill")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                }) {
+                    VStack(spacing: 2) {
+                        Label("Vote to End", systemImage: "hand.raised.fill")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        if let response = voteResponse, !response.trip_completed {
+                            Text("\(response.votes_cast)/\(response.votes_needed) votes")
+                                .font(.caption2)
+                        }
+                    }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Color.hbAccent)
+                    .background(Color.purple)
                     .cornerRadius(12)
-                    .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
+                    .shadow(color: Color.purple.opacity(0.3), radius: 8, y: 4)
+                }
+                .disabled(isPerformingAction)
+                .alert("Vote Recorded", isPresented: $showingVoteConfirmation) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    if let response = voteResponse {
+                        Text("Your vote has been recorded (\(response.votes_cast)/\(response.votes_needed) votes). The trip will end when enough participants vote.")
+                    }
+                }
+            } else {
+                // Regular trip or group trip with "anyone" or "owner_only" mode - show I'm Safe button
+                Button(action: {
+                    if preferences.hapticFeedbackEnabled {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }
+                    Task {
+                        isPerformingAction = true
+                        _ = await session.completePlan()
+                        if preferences.hapticFeedbackEnabled {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        }
+                        // Note: completePlan() already calls loadActivePlan() internally
+                        // and sets activeTrip to nil, so no need to call it again here
+                        await MainActor.run {
+                            isPerformingAction = false
+                        }
+                    }
+                }) {
+                    Label("I'm Safe", systemImage: "house.fill")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.hbAccent)
+                        .cornerRadius(12)
+                        .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
+                }
+                .disabled(plan.checkout_token == nil || isPerformingAction)
             }
-            .disabled(plan.checkout_token == nil || isPerformingAction)
         }
         .disabled(isPerformingAction)
     }

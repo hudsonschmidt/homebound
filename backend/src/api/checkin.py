@@ -18,6 +18,7 @@ from src.services.notifications import (
     send_overdue_resolved_emails,
     send_push_to_user,
     send_trip_completed_emails,
+    send_trip_completed_push,
 )
 
 log = logging.getLogger(__name__)
@@ -96,6 +97,27 @@ def checkin_with_token(
             ),
             {"last_checkin_event_id": event_id, "trip_id": trip.id, "now": now.isoformat()}
         )
+
+        # For group trips, also update the participant's location
+        # Check if trip is a group trip and if user is a participant
+        is_group = connection.execute(
+            sqlalchemy.text("SELECT is_group_trip FROM trips WHERE id = :trip_id"),
+            {"trip_id": trip.id}
+        ).fetchone()
+
+        if is_group and is_group.is_group_trip:
+            # Update participant's last check-in location
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    UPDATE trip_participants
+                    SET last_checkin_at = :now, last_lat = :lat, last_lon = :lon
+                    WHERE trip_id = :trip_id AND user_id = :user_id
+                    """
+                ),
+                {"trip_id": trip.id, "user_id": trip.user_id, "now": now.isoformat(), "lat": lat, "lon": lon}
+            )
+            log.info(f"[Checkin] Updated participant location for user {trip.user_id} in group trip {trip.id}")
 
         # Fetch user name and email for notification
         user = connection.execute(
@@ -250,7 +272,8 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
-                       t.timezone, t.location_text, t.notify_self, a.name as activity_name
+                       t.timezone, t.location_text, t.notify_self, t.is_group_trip,
+                       a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkout_token = :token
@@ -405,6 +428,36 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             background_tasks.add_task(send_friend_push_sync)
             push_type = "overdue resolved" if was_overdue else "completed"
             log.info(f"[Checkout] Scheduled {push_type} push notifications for {len(friend_user_ids)} friend contacts")
+
+        # For group trips, notify all other accepted participants
+        if trip.is_group_trip:
+            group_participants = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT user_id FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id != :owner_id AND status = 'accepted'
+                    """
+                ),
+                {"trip_id": trip.id, "owner_id": trip.user_id}
+            ).fetchall()
+            participant_ids = [p.user_id for p in group_participants]
+
+            if participant_ids:
+                trip_title_for_participants = trip.title
+                owner_name_for_participants = user_name
+                trip_id_for_participants = trip.id
+
+                def send_participant_completion_push():
+                    for pid in participant_ids:
+                        asyncio.run(send_trip_completed_push(
+                            participant_user_id=pid,
+                            completer_name=owner_name_for_participants,
+                            trip_title=trip_title_for_participants,
+                            trip_id=trip_id_for_participants
+                        ))
+
+                background_tasks.add_task(send_participant_completion_push)
+                log.info(f"[Checkout] Scheduled completion push to {len(participant_ids)} group trip participants")
 
         return CheckinResponse(
             ok=True,

@@ -428,6 +428,10 @@ struct TripCreateRequest: Codable {
     var notify_end_hour: Int?    // Hour (0-23) when notifications end (nil = no restriction)
     var notify_self: Bool = false  // Send copy of all emails to trip owner
     var share_live_location: Bool = false  // Share live location with friends during trip
+    // Group trip fields
+    var is_group_trip: Bool = false  // Is this a group trip?
+    var group_settings: GroupSettings? = nil  // Settings for group trip behavior
+    var participant_ids: [Int]? = nil  // Friend user IDs to invite as participants
 }
 
 struct TripUpdateRequest: Codable {
@@ -496,9 +500,17 @@ struct Trip: Codable, Identifiable, Equatable {
     var eta_timezone: String?       // Timezone for return time
     var notify_self: Bool           // Send copy of all emails to trip owner
     var share_live_location: Bool   // Share live location with friends during trip
+    // Group trip fields
+    var is_group_trip: Bool         // Is this a group trip?
+    var group_settings: GroupSettings?  // Settings for group trip behavior
+    var participant_count: Int      // Number of accepted participants
 
     // Legacy field name for backward compatibility
     var activity_type: String { activity.name }
+
+    // Computed properties for group trips
+    var isGroupTrip: Bool { is_group_trip }
+    var hasParticipants: Bool { participant_count > 1 }
 
     enum CodingKeys: String, CodingKey {
         case id, user_id, title, activity, status, notes
@@ -513,6 +525,7 @@ struct Trip: Codable, Identifiable, Equatable {
         case checkin_token, checkout_token
         case checkin_interval_min, notify_start_hour, notify_end_hour
         case timezone, start_timezone, eta_timezone, notify_self, share_live_location
+        case is_group_trip, group_settings, participant_count
     }
 
     init(from decoder: Decoder) throws {
@@ -586,6 +599,10 @@ struct Trip: Codable, Identifiable, Equatable {
         eta_timezone = try container.decodeIfPresent(String.self, forKey: .eta_timezone)
         notify_self = try container.decodeIfPresent(Bool.self, forKey: .notify_self) ?? false
         share_live_location = try container.decodeIfPresent(Bool.self, forKey: .share_live_location) ?? false
+        // Group trip fields
+        is_group_trip = try container.decodeIfPresent(Bool.self, forKey: .is_group_trip) ?? false
+        group_settings = try container.decodeIfPresent(GroupSettings.self, forKey: .group_settings)
+        participant_count = try container.decodeIfPresent(Int.self, forKey: .participant_count) ?? 0
     }
 
     func encode(to encoder: Encoder) throws {
@@ -628,6 +645,10 @@ struct Trip: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(eta_timezone, forKey: .eta_timezone)
         try container.encode(notify_self, forKey: .notify_self)
         try container.encode(share_live_location, forKey: .share_live_location)
+        // Group trip fields
+        try container.encode(is_group_trip, forKey: .is_group_trip)
+        try container.encodeIfPresent(group_settings, forKey: .group_settings)
+        try container.encode(participant_count, forKey: .participant_count)
     }
 
     /// Memberwise initializer for local storage
@@ -666,7 +687,10 @@ struct Trip: Codable, Identifiable, Equatable {
         start_timezone: String? = nil,
         eta_timezone: String? = nil,
         notify_self: Bool = false,
-        share_live_location: Bool = false
+        share_live_location: Bool = false,
+        is_group_trip: Bool = false,
+        group_settings: GroupSettings? = nil,
+        participant_count: Int = 0
     ) {
         self.id = id
         self.user_id = user_id
@@ -703,6 +727,9 @@ struct Trip: Codable, Identifiable, Equatable {
         self.eta_timezone = eta_timezone
         self.notify_self = notify_self
         self.share_live_location = share_live_location
+        self.is_group_trip = is_group_trip
+        self.group_settings = group_settings
+        self.participant_count = participant_count
     }
 }
 
@@ -929,4 +956,161 @@ extension Array where Element == Activity {
 struct GlobalStats: Codable {
     let total_users: Int
     let total_completed_trips: Int
+}
+
+// MARK: - Group Trip Models
+
+/// Settings for group trip behavior, configurable by trip owner
+struct GroupSettings: Codable, Equatable {
+    var checkout_mode: String  // "anyone" | "vote" | "owner_only"
+    var vote_threshold: Double  // For vote mode: percentage needed (0.0-1.0)
+    var allow_participant_invites: Bool  // Can participants invite others?
+    var share_locations_between_participants: Bool  // Can participants see each other's locations?
+
+    static var defaults: GroupSettings {
+        GroupSettings(
+            checkout_mode: "anyone",
+            vote_threshold: 0.5,
+            allow_participant_invites: false,
+            share_locations_between_participants: true
+        )
+    }
+}
+
+/// A participant in a group trip
+struct TripParticipant: Codable, Identifiable, Equatable {
+    let id: Int
+    let user_id: Int
+    let role: String  // "owner" or "participant"
+    let status: String  // "invited", "accepted", "declined", "left"
+    let invited_at: String
+    let invited_by: Int?
+    let joined_at: String?
+    let left_at: String?
+    let last_checkin_at: String?
+    let last_lat: Double?
+    let last_lon: Double?
+    // User info
+    let user_name: String?
+    let user_email: String?
+    let profile_photo_url: String?
+
+    var isOwner: Bool { role == "owner" }
+    var isAccepted: Bool { status == "accepted" }
+    var isInvited: Bool { status == "invited" }
+    var hasCheckedIn: Bool { last_checkin_at != nil }
+
+    var displayName: String {
+        if let userName = user_name, !userName.isEmpty {
+            return userName
+        }
+        if let email = user_email {
+            return email
+        }
+        return "Unknown"
+    }
+
+    var invitedAtDate: Date? {
+        DateUtils.parseISO8601(invited_at)
+    }
+
+    var joinedAtDate: Date? {
+        guard let joined_at else { return nil }
+        return DateUtils.parseISO8601(joined_at)
+    }
+
+    var lastCheckinAtDate: Date? {
+        guard let last_checkin_at else { return nil }
+        return DateUtils.parseISO8601(last_checkin_at)
+    }
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let lat = last_lat, let lon = last_lon else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    /// Safe initial for display (handles nil/empty user_name)
+    var initial: String {
+        user_name?.first.map { String($0).uppercased() } ?? "?"
+    }
+}
+
+/// Response when listing participants for a group trip
+struct ParticipantListResponse: Codable {
+    let participants: [TripParticipant]
+    let checkout_votes: Int
+    let checkout_votes_needed: Int
+    let group_settings: GroupSettings
+}
+
+/// Response for checkout vote action
+struct CheckoutVoteResponse: Codable {
+    let ok: Bool
+    let message: String
+    let votes_cast: Int
+    let votes_needed: Int
+    let trip_completed: Bool
+}
+
+/// Location data for a participant in a group trip
+struct ParticipantLocation: Codable, Identifiable {
+    let user_id: Int
+    let user_name: String?
+    let last_checkin_at: String?
+    let last_lat: Double?
+    let last_lon: Double?
+    let live_lat: Double?
+    let live_lon: Double?
+    let live_timestamp: String?
+
+    var id: Int { user_id }
+
+    var lastCheckinCoordinate: CLLocationCoordinate2D? {
+        guard let lat = last_lat, let lon = last_lon else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    var liveCoordinate: CLLocationCoordinate2D? {
+        guard let lat = live_lat, let lon = live_lon else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    var bestCoordinate: CLLocationCoordinate2D? {
+        liveCoordinate ?? lastCheckinCoordinate
+    }
+}
+
+/// A pending trip invitation for the current user
+struct TripInvitation: Codable, Identifiable {
+    let id: Int
+    let trip_id: Int
+    let invited_at: String?
+    let invited_by: Int?
+    let inviter_name: String?
+    let trip_title: String
+    let trip_start: String?
+    let trip_eta: String?
+    let trip_location: String?
+    let activity_name: String
+    let activity_icon: String
+
+    var invitedAtDate: Date? {
+        guard let invited_at else { return nil }
+        return DateUtils.parseISO8601(invited_at)
+    }
+
+    var tripStartDate: Date? {
+        guard let trip_start else { return nil }
+        return DateUtils.parseISO8601(trip_start)
+    }
+
+    var tripEtaDate: Date? {
+        guard let trip_eta else { return nil }
+        return DateUtils.parseISO8601(trip_eta)
+    }
+}
+
+/// Request to invite friends to a group trip
+struct ParticipantInviteRequest: Codable {
+    let friend_user_ids: [Int]
 }

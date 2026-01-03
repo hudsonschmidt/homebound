@@ -103,6 +103,9 @@ class Trip(Base):
     eta_notified_at = Column(DateTime, nullable=True)
     grace_notified_at = Column(DateTime, nullable=True)
     notify_self = Column(Boolean, nullable=True, default=False)
+    # Group trip fields
+    is_group_trip = Column(Boolean, nullable=False, default=False)
+    group_settings = Column(JSON, nullable=True)
 
 
 class Event(Base):
@@ -188,6 +191,30 @@ class LiveActivityToken(Base):
     env = Column(String(32), nullable=False, default="development")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TripParticipant(Base):
+    __tablename__ = "trip_participants"
+    id = Column(Integer, primary_key=True)
+    trip_id = Column(Integer, ForeignKey("trips.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String(32), nullable=False, default="participant")  # 'owner' or 'participant'
+    status = Column(String(32), nullable=False, default="invited")  # 'invited', 'accepted', 'declined', 'left'
+    invited_at = Column(DateTime, default=datetime.utcnow)
+    invited_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    joined_at = Column(DateTime, nullable=True)
+    left_at = Column(DateTime, nullable=True)
+    last_checkin_at = Column(DateTime, nullable=True)
+    last_lat = Column(Float, nullable=True)
+    last_lon = Column(Float, nullable=True)
+
+
+class CheckoutVote(Base):
+    __tablename__ = "checkout_votes"
+    id = Column(Integer, primary_key=True)
+    trip_id = Column(Integer, ForeignKey("trips.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    voted_at = Column(DateTime, default=datetime.utcnow)
 
 
 # Activity seed data

@@ -4094,10 +4094,10 @@ def test_update_live_location_wrong_user():
             latitude=37.7749,
             longitude=-122.4194
         )
-        # Other user tries to update - should fail
+        # Other user tries to update - should fail with 403 (not authorized)
         with pytest.raises(HTTPException) as exc_info:
             update_live_location(trip_id, location_update, user_id=other_user_id)
-        assert exc_info.value.status_code == 404  # Trip not found for this user
+        assert exc_info.value.status_code == 403  # Not authorized to update location for this trip
     finally:
         cleanup_test_data(user_id)
         with db.engine.begin() as connection:
