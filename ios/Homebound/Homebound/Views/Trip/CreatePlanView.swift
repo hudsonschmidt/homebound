@@ -120,6 +120,7 @@ struct CreatePlanView: View {
                                 graceMinutes: $graceMinutes,
                                 showZeroGraceWarning: $showZeroGraceWarning,
                                 isEditMode: isEditMode,
+                                isGroupTrip: isGroupTrip,
                                 checkinIntervalMinutes: $checkinIntervalMinutes,
                                 useNotificationHours: $useNotificationHours,
                                 notifyStartHour: $notifyStartHour,
@@ -933,6 +934,7 @@ struct Step2TimeSettings: View {
     @Binding var graceMinutes: Double
     @Binding var showZeroGraceWarning: Bool
     var isEditMode: Bool = false
+    var isGroupTrip: Bool = false
 
     // Notification settings bindings
     @Binding var checkinIntervalMinutes: Int
@@ -1474,6 +1476,27 @@ struct Step2TimeSettings: View {
             Label("Check-in Reminders", systemImage: "bell.badge")
                 .font(.headline)
                 .foregroundStyle(Color.orange)
+
+            // Group trip disclaimer
+            if isGroupTrip {
+                HStack(spacing: 12) {
+                    Image(systemName: "person.3.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.hbBrand)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Your Personal Settings")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("These settings apply only to you. Each participant will configure their own check-in frequency and notification hours when they join.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding()
+                .background(Color.hbBrand.opacity(0.1))
+                .cornerRadius(12)
+            }
 
             VStack(spacing: 16) {
                 // Check-in interval picker

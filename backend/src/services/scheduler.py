@@ -492,14 +492,14 @@ async def check_push_notifications():
                 except Exception as e:
                     log.error(f"[Push] Error sending 'ETA reached' for trip {trip.id}: {e}")
 
-        # 5. Check-in Reminders
+        # 5. Check-in Reminders (Trip Owner)
         with db.engine.begin() as conn:
             need_checkin_reminder = conn.execute(
                 sqlalchemy.text("""
                     SELECT id, user_id, title, last_checkin_reminder,
                            COALESCE(checkin_interval_min, :default_interval) as interval_min,
                            notify_start_hour, notify_end_hour, timezone,
-                           checkin_token, checkout_token
+                           checkin_token, checkout_token, is_group_trip
                     FROM trips
                     WHERE status = 'active'
                     FOR UPDATE SKIP LOCKED
@@ -552,6 +552,85 @@ async def check_push_notifications():
                         log.info(f"[Push] Sent check-in reminder for trip {trip.id}")
                 except Exception as e:
                     log.error(f"[Push] Error sending check-in reminder for trip {trip.id}: {e}")
+
+        # 5b. Check-in Reminders for Group Trip Participants (using their individual settings)
+        with db.engine.begin() as conn:
+            # Get all participants in active group trips with their individual settings
+            participant_reminders = conn.execute(
+                sqlalchemy.text("""
+                    SELECT tp.trip_id, tp.user_id, tp.last_checkin_reminder,
+                           COALESCE(tp.checkin_interval_min, :default_interval) as interval_min,
+                           tp.notify_start_hour, tp.notify_end_hour,
+                           t.title, t.checkin_token, t.checkout_token, t.timezone
+                    FROM trip_participants tp
+                    JOIN trips t ON tp.trip_id = t.id
+                    WHERE t.status = 'active'
+                    AND t.is_group_trip = true
+                    AND tp.status = 'accepted'
+                    AND tp.role = 'participant'
+                    FOR UPDATE OF tp SKIP LOCKED
+                """),
+                {"default_interval": DEFAULT_CHECKIN_REMINDER_INTERVAL}
+            ).fetchall()
+
+            for participant in participant_reminders:
+                try:
+                    interval_min = participant.interval_min
+                    cutoff = now - timedelta(minutes=interval_min)
+
+                    # Parse last_checkin_reminder
+                    last_reminder = parse_datetime_robust(participant.last_checkin_reminder)
+                    if last_reminder is not None and last_reminder > cutoff:
+                        continue
+
+                    # Check quiet hours using participant's settings
+                    if participant.notify_start_hour is not None and participant.notify_end_hour is not None:
+                        user_tz = pytz.timezone(participant.timezone) if participant.timezone else pytz.UTC
+                        user_now = datetime.now(user_tz)
+                        current_hour = user_now.hour
+
+                        if participant.notify_start_hour <= participant.notify_end_hour:
+                            in_active_hours = participant.notify_start_hour <= current_hour < participant.notify_end_hour
+                        else:
+                            in_active_hours = current_hour >= participant.notify_start_hour or current_hour < participant.notify_end_hour
+
+                        if not in_active_hours:
+                            continue
+
+                    if last_reminder is None:
+                        # Initialize last reminder timestamp
+                        conn.execute(
+                            sqlalchemy.text("""
+                                UPDATE trip_participants
+                                SET last_checkin_reminder = :now
+                                WHERE trip_id = :trip_id AND user_id = :user_id
+                            """),
+                            {"now": now, "trip_id": participant.trip_id, "user_id": participant.user_id}
+                        )
+                    else:
+                        await send_push_to_user(
+                            participant.user_id,
+                            "Check-in Reminder",
+                            f"Hope your trip '{participant.title}' is going well! Don't forget to check in!",
+                            data={
+                                "trip_id": participant.trip_id,
+                                "checkin_token": participant.checkin_token,
+                                "checkout_token": participant.checkout_token
+                            },
+                            notification_type="checkin",
+                            category="CHECKIN_REMINDER"
+                        )
+                        conn.execute(
+                            sqlalchemy.text("""
+                                UPDATE trip_participants
+                                SET last_checkin_reminder = :now
+                                WHERE trip_id = :trip_id AND user_id = :user_id
+                            """),
+                            {"now": now, "trip_id": participant.trip_id, "user_id": participant.user_id}
+                        )
+                        log.info(f"[Push] Sent check-in reminder for participant {participant.user_id} on trip {participant.trip_id}")
+                except Exception as e:
+                    log.error(f"[Push] Error sending check-in reminder for participant {participant.user_id}: {e}")
 
         # 6. Grace Period Warnings (only for 'overdue' status - 'overdue_notified' means contacts were already alerted)
         with db.engine.begin() as conn:

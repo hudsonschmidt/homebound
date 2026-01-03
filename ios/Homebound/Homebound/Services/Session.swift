@@ -2994,10 +2994,21 @@ final class Session: ObservableObject {
         }
     }
 
-    /// Accept an invitation to join a group trip
-    func acceptTripInvitation(tripId: Int, safetyContactIds: [Int]) async -> Bool {
+    /// Accept an invitation to join a group trip with personal notification settings
+    func acceptTripInvitation(
+        tripId: Int,
+        safetyContactIds: [Int],
+        checkinIntervalMin: Int = 30,
+        notifyStartHour: Int? = nil,
+        notifyEndHour: Int? = nil
+    ) async -> Bool {
         do {
-            let request = AcceptInvitationRequest(safety_contact_ids: safetyContactIds)
+            let request = AcceptInvitationRequest(
+                safety_contact_ids: safetyContactIds,
+                checkin_interval_min: checkinIntervalMin,
+                notify_start_hour: notifyStartHour,
+                notify_end_hour: notifyEndHour
+            )
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.post(
                     self.url("/api/v1/trips/\(tripId)/participants/accept"),

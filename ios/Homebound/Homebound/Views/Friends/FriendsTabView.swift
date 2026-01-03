@@ -293,8 +293,8 @@ struct FriendsTabView: View {
         isLoading = true
         async let friends = session.loadFriends()
         async let activeTrips = session.loadFriendActiveTrips()
-        async let tripInvitations = session.loadTripInvitations()
-        _ = await (friends, activeTrips, tripInvitations)
+        _ = await (friends, activeTrips)
+        await session.loadTripInvitations()
         isLoading = false
     }
 

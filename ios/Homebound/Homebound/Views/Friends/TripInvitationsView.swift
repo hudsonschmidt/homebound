@@ -68,8 +68,14 @@ struct TripInvitationsView: View {
             .sheet(item: $invitationToJoin) { invitation in
                 JoinTripContactSelectionView(
                     invitation: invitation,
-                    onJoin: { contactIds in
-                        await acceptInvitation(invitation, withContactIds: contactIds)
+                    onJoin: { contactIds, checkinInterval, notifyStart, notifyEnd in
+                        await acceptInvitation(
+                            invitation,
+                            withContactIds: contactIds,
+                            checkinInterval: checkinInterval,
+                            notifyStart: notifyStart,
+                            notifyEnd: notifyEnd
+                        )
                     }
                 )
                 .environmentObject(session)
@@ -77,9 +83,21 @@ struct TripInvitationsView: View {
         }
     }
 
-    private func acceptInvitation(_ invitation: TripInvitation, withContactIds contactIds: [Int]) async {
+    private func acceptInvitation(
+        _ invitation: TripInvitation,
+        withContactIds contactIds: [Int],
+        checkinInterval: Int,
+        notifyStart: Int?,
+        notifyEnd: Int?
+    ) async {
         processingTripId = invitation.trip_id
-        let success = await session.acceptTripInvitation(tripId: invitation.trip_id, safetyContactIds: contactIds)
+        let success = await session.acceptTripInvitation(
+            tripId: invitation.trip_id,
+            safetyContactIds: contactIds,
+            checkinIntervalMin: checkinInterval,
+            notifyStartHour: notifyStart,
+            notifyEndHour: notifyEnd
+        )
         if success {
             // Refresh invitations list
             await session.loadTripInvitations()
@@ -228,12 +246,18 @@ struct JoinTripContactSelectionView: View {
     @Environment(\.dismiss) var dismiss
 
     let invitation: TripInvitation
-    let onJoin: ([Int]) async -> Void
+    let onJoin: ([Int], Int, Int?, Int?) async -> Void
 
     @State private var selectedContactIds: Set<Int> = []
     @State private var savedContacts: [Contact] = []
     @State private var isLoading = true
     @State private var isJoining = false
+
+    // Notification settings
+    @State private var checkinInterval: Int = 30
+    @State private var useQuietHours: Bool = false
+    @State private var notifyStartHour: Int = 8
+    @State private var notifyEndHour: Int = 22
 
     var body: some View {
         NavigationStack {
@@ -270,10 +294,10 @@ struct JoinTripContactSelectionView: View {
                             .foregroundStyle(Color.hbBrand)
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Select Your Safety Contacts")
+                            Text("Your Personal Safety Settings")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
-                            Text("These contacts will be notified if you don't check in during the trip. Select 1-3 contacts.")
+                            Text("Configure your own check-in frequency and contacts. These settings are personal to you and separate from other participants.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -307,8 +331,9 @@ struct JoinTripContactSelectionView: View {
                     }
                     Spacer()
                 } else {
-                    // Contact selection list
+                    // Contact selection list and notification settings
                     List {
+                        // Safety contacts section
                         Section {
                             ForEach(savedContacts) { contact in
                                 JoinTripContactRow(
@@ -331,6 +356,47 @@ struct JoinTripContactSelectionView: View {
                                     .foregroundStyle(.orange)
                             }
                         }
+
+                        // Check-in frequency section
+                        Section {
+                            Picker("Check-in Frequency", selection: $checkinInterval) {
+                                Text("Every 15 minutes").tag(15)
+                                Text("Every 30 minutes").tag(30)
+                                Text("Every hour").tag(60)
+                                Text("Every 2 hours").tag(120)
+                            }
+                        } header: {
+                            Text("Check-in Settings")
+                        } footer: {
+                            Text("How often you'll need to check in during the trip. If you miss a check-in, your contacts will be notified.")
+                        }
+
+                        // Quiet hours section
+                        Section {
+                            Toggle("Enable Quiet Hours", isOn: $useQuietHours)
+
+                            if useQuietHours {
+                                Picker("Start Time", selection: $notifyStartHour) {
+                                    ForEach(0..<24, id: \.self) { hour in
+                                        Text(formatHour(hour)).tag(hour)
+                                    }
+                                }
+
+                                Picker("End Time", selection: $notifyEndHour) {
+                                    ForEach(0..<24, id: \.self) { hour in
+                                        Text(formatHour(hour)).tag(hour)
+                                    }
+                                }
+                            }
+                        } header: {
+                            Text("Notification Hours")
+                        } footer: {
+                            if useQuietHours {
+                                Text("You'll only receive check-in reminders between \(formatHour(notifyStartHour)) and \(formatHour(notifyEndHour)).")
+                            } else {
+                                Text("You'll receive check-in reminders at any time during the trip.")
+                            }
+                        }
                     }
                     .listStyle(.insetGrouped)
                 }
@@ -340,7 +406,12 @@ struct JoinTripContactSelectionView: View {
                     Button(action: {
                         Task {
                             isJoining = true
-                            await onJoin(Array(selectedContactIds))
+                            await onJoin(
+                                Array(selectedContactIds),
+                                checkinInterval,
+                                useQuietHours ? notifyStartHour : nil,
+                                useQuietHours ? notifyEndHour : nil
+                            )
                             isJoining = false
                             dismiss()
                         }
@@ -380,6 +451,13 @@ struct JoinTripContactSelectionView: View {
                 isLoading = false
             }
         }
+    }
+
+    private func formatHour(_ hour: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h a"
+        let date = Calendar.current.date(from: DateComponents(hour: hour)) ?? Date()
+        return formatter.string(from: date)
     }
 }
 

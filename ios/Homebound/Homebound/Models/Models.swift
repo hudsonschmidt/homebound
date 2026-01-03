@@ -1115,7 +1115,11 @@ struct ParticipantInviteRequest: Codable {
     let friend_user_ids: [Int]
 }
 
-/// Request body for accepting a trip invitation with safety contacts
+/// Request body for accepting a trip invitation with safety contacts and notification settings
 struct AcceptInvitationRequest: Codable {
     let safety_contact_ids: [Int]
+    // Personal notification settings
+    let checkin_interval_min: Int
+    let notify_start_hour: Int?  // nil = no quiet hours
+    let notify_end_hour: Int?    // nil = no quiet hours
 }

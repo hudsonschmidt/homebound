@@ -1,7 +1,7 @@
-"""Add participant_trip_contacts table for per-participant safety contacts in group trips
+"""Add participant_trip_contacts table and notification settings for group trip participants
 
-When a user joins a group trip, they select their own safety contacts.
-This table stores those per-participant contacts, separate from the trip owner's contacts.
+When a user joins a group trip, they select their own safety contacts and
+configure their personal notification settings (check-in frequency, quiet hours).
 
 Revision ID: t0o1p2q3r4s5
 Revises: s9n0o1p2q3r4
@@ -22,7 +22,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Create participant_trip_contacts junction table."""
+    """Create participant_trip_contacts table and add notification settings to trip_participants."""
+
+    # Create participant_trip_contacts junction table
     op.create_table('participant_trip_contacts',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('trip_id', sa.Integer(), nullable=False),
@@ -43,9 +45,24 @@ def upgrade() -> None:
     # Index for efficient lookup by contact (for cascade operations)
     op.create_index('idx_participant_trip_contacts_contact', 'participant_trip_contacts', ['contact_id'])
 
+    # Add personal notification settings to trip_participants table
+    # Each participant can set their own check-in frequency and quiet hours
+    op.add_column('trip_participants', sa.Column('checkin_interval_min', sa.Integer(), nullable=True))
+    op.add_column('trip_participants', sa.Column('notify_start_hour', sa.Integer(), nullable=True))
+    op.add_column('trip_participants', sa.Column('notify_end_hour', sa.Integer(), nullable=True))
+    # Track when each participant last received a check-in reminder
+    op.add_column('trip_participants', sa.Column('last_checkin_reminder', sa.DateTime(), nullable=True))
+
 
 def downgrade() -> None:
-    """Drop participant_trip_contacts table."""
+    """Drop participant_trip_contacts table and notification columns."""
+    # Remove notification settings from trip_participants
+    op.drop_column('trip_participants', 'last_checkin_reminder')
+    op.drop_column('trip_participants', 'notify_end_hour')
+    op.drop_column('trip_participants', 'notify_start_hour')
+    op.drop_column('trip_participants', 'checkin_interval_min')
+
+    # Drop participant_trip_contacts table
     op.drop_index('idx_participant_trip_contacts_contact', table_name='participant_trip_contacts')
     op.drop_index('idx_participant_trip_contacts_trip_user', table_name='participant_trip_contacts')
     op.drop_table('participant_trip_contacts')

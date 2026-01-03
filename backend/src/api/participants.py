@@ -41,8 +41,12 @@ class ParticipantInviteRequest(BaseModel):
 
 
 class AcceptInvitationRequest(BaseModel):
-    """Request to accept a group trip invitation with safety contacts."""
+    """Request to accept a group trip invitation with safety contacts and notification settings."""
     safety_contact_ids: list[int]  # Contact IDs (1-3) to be notified if participant doesn't check in
+    # Personal notification settings (optional, defaults applied if not provided)
+    checkin_interval_min: int = 30  # How often to send check-in reminders (minutes)
+    notify_start_hour: int | None = None  # Quiet hours start (0-23), None = no quiet hours
+    notify_end_hour: int | None = None  # Quiet hours end (0-23), None = no quiet hours
 
 
 class ParticipantResponse(BaseModel):
@@ -547,17 +551,28 @@ def accept_invitation(
                 detail=f"Cannot accept invitation with status '{participant.status}'"
             )
 
-        # Accept the invitation
+        # Accept the invitation and store personal notification settings
         now = datetime.now(UTC).isoformat()
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trip_participants
-                SET status = 'accepted', joined_at = :now
+                SET status = 'accepted',
+                    joined_at = :now,
+                    checkin_interval_min = :checkin_interval,
+                    notify_start_hour = :notify_start,
+                    notify_end_hour = :notify_end
                 WHERE trip_id = :trip_id AND user_id = :user_id
                 """
             ),
-            {"trip_id": trip_id, "user_id": user_id, "now": now}
+            {
+                "trip_id": trip_id,
+                "user_id": user_id,
+                "now": now,
+                "checkin_interval": request.checkin_interval_min,
+                "notify_start": request.notify_start_hour,
+                "notify_end": request.notify_end_hour
+            }
         )
 
         # Store participant's safety contacts
