@@ -800,7 +800,12 @@ def create_trip(
 
 @router.get("/", response_model=list[TripResponse])
 def get_trips(user_id: int = Depends(auth.get_current_user_id)):
-    """Get all trips for the current user with full activity data"""
+    """Get all trips for the current user with full activity data.
+
+    Returns trips where user is either:
+    - The owner (t.user_id = user_id)
+    - An accepted participant (trip_participants.user_id = user_id AND status = 'accepted')
+    """
     with db.engine.begin() as connection:
         trips = connection.execute(
             sqlalchemy.text(
@@ -820,7 +825,8 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                        (SELECT COUNT(*) FROM trip_participants WHERE trip_id = t.id AND status = 'accepted') as participant_count
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
-                WHERE t.user_id = :user_id
+                LEFT JOIN trip_participants tp ON t.id = tp.trip_id AND tp.user_id = :user_id AND tp.status = 'accepted'
+                WHERE t.user_id = :user_id OR tp.user_id IS NOT NULL
                 ORDER BY t.created_at DESC
                 """
             ),
@@ -895,6 +901,7 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
     """Get the current active trip with full activity data including safety tips.
 
     Returns trips that are active, overdue, or overdue_notified - all require user action.
+    Includes trips where user is owner OR an accepted participant.
     """
     with db.engine.begin() as connection:
         trip = connection.execute(
@@ -908,12 +915,16 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
+                       t.is_group_trip, t.group_settings,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
-                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order
+                       a.messages as activity_messages, a.safety_tips, a."order" as activity_order,
+                       (SELECT COUNT(*) FROM trip_participants WHERE trip_id = t.id AND status = 'accepted') as participant_count
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
-                WHERE t.user_id = :user_id AND t.status IN ('active', 'overdue', 'overdue_notified')
+                LEFT JOIN trip_participants tp ON t.id = tp.trip_id AND tp.user_id = :user_id AND tp.status = 'accepted'
+                WHERE (t.user_id = :user_id OR tp.user_id IS NOT NULL)
+                  AND t.status IN ('active', 'overdue', 'overdue_notified')
                 ORDER BY t.created_at DESC
                 LIMIT 1
                 """
@@ -974,7 +985,10 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             start_timezone=trip["start_timezone"],
             eta_timezone=trip["eta_timezone"],
             notify_self=trip["notify_self"],
-            share_live_location=trip.get("share_live_location", False)
+            share_live_location=trip.get("share_live_location", False),
+            is_group_trip=trip.get("is_group_trip", False),
+            group_settings=parse_group_settings(trip.get("group_settings")),
+            participant_count=trip.get("participant_count", 0)
         )
 
 

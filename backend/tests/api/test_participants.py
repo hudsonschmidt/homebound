@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from src import database as db
 from src.api.participants import (
+    AcceptInvitationRequest,
     CheckinResponse,
     CheckoutVoteResponse,
     GroupSettings,
@@ -25,7 +26,7 @@ from src.api.participants import (
     remove_participant,
     vote_checkout,
 )
-from src.api.trips import TripCreate, TripResponse, create_trip
+from src.api.trips import TripCreate, TripResponse, create_trip, get_trips, get_active_trip
 
 
 # ==================== Test Helpers ====================
@@ -320,9 +321,30 @@ def test_accept_invitation():
             {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
         )
 
+        # Create a safety contact for the friend
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": friend_id,
+                "name": "Test Contact",
+                "email": "testcontact4@test.com"
+            }
+        )
+        contact_id = result.fetchone()[0]
+
     try:
         background_tasks = MagicMock(spec=BackgroundTasks)
-        result = accept_invitation(trip_id, background_tasks, user_id=friend_id)
+        request = AcceptInvitationRequest(
+            safety_contact_ids=[contact_id],
+            checkin_interval_min=30
+        )
+        result = accept_invitation(trip_id, request, background_tasks, user_id=friend_id)
 
         assert result["ok"] is True
         assert "accepted" in result["message"].lower() or "joined" in result["message"].lower()
@@ -386,11 +408,32 @@ def test_accept_without_invitation_fails():
         stranger_id = _create_test_user(connection, "stranger6@test.com", "Stranger", "User")
         trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
 
+        # Create a safety contact for the stranger so request is valid
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": stranger_id,
+                "name": "Test Contact",
+                "email": "testcontact6@test.com"
+            }
+        )
+        contact_id = result.fetchone()[0]
+
     try:
         background_tasks = MagicMock(spec=BackgroundTasks)
+        request = AcceptInvitationRequest(
+            safety_contact_ids=[contact_id],
+            checkin_interval_min=30
+        )
 
         with pytest.raises(HTTPException) as exc_info:
-            accept_invitation(trip_id, background_tasks, user_id=stranger_id)
+            accept_invitation(trip_id, request, background_tasks, user_id=stranger_id)
 
         assert exc_info.value.status_code in [403, 404]
 
@@ -1205,3 +1248,352 @@ def test_checkin_inactive_trip_fails():
 
     finally:
         _cleanup_test_data(owner_id)
+
+
+# ==================== Accept Invitation with Contacts Tests ====================
+
+def test_accept_invitation_with_safety_contacts():
+    """Test accepting an invitation with safety contacts and notification settings."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner27@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend27@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        # Create invitation
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'invited', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+        # Create safety contacts for the friend
+        contact_ids = []
+        for i in range(2):
+            result = connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO contacts (user_id, name, email)
+                    VALUES (:user_id, :name, :email)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "user_id": friend_id,
+                    "name": f"Contact {i}",
+                    "email": f"contact{i}@test.com"
+                }
+            )
+            contact_ids.append(result.fetchone()[0])
+
+    try:
+        background_tasks = MagicMock(spec=BackgroundTasks)
+        request = AcceptInvitationRequest(
+            safety_contact_ids=contact_ids,
+            checkin_interval_min=45,
+            notify_start_hour=8,
+            notify_end_hour=22
+        )
+        result = accept_invitation(trip_id, request, background_tasks, user_id=friend_id)
+
+        assert result["ok"] is True
+
+        # Verify participant was updated with notification settings
+        with db.engine.begin() as connection:
+            participant = connection.execute(
+                sqlalchemy.text(
+                    "SELECT * FROM trip_participants WHERE trip_id = :trip_id AND user_id = :user_id"
+                ),
+                {"trip_id": trip_id, "user_id": friend_id}
+            ).fetchone()
+            assert participant.status == "accepted"
+            assert participant.joined_at is not None
+            assert participant.checkin_interval_min == 45
+            assert participant.notify_start_hour == 8
+            assert participant.notify_end_hour == 22
+
+            # Verify safety contacts were stored
+            contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT * FROM participant_trip_contacts
+                    WHERE trip_id = :trip_id AND participant_user_id = :user_id
+                    ORDER BY position
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": friend_id}
+            ).fetchall()
+            assert len(contacts) == 2
+            assert contacts[0].contact_id == contact_ids[0]
+            assert contacts[1].contact_id == contact_ids[1]
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
+
+
+def test_accept_invitation_requires_contacts():
+    """Test that accepting invitation without safety contacts fails."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner28@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend28@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'invited', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+    try:
+        background_tasks = MagicMock(spec=BackgroundTasks)
+        request = AcceptInvitationRequest(
+            safety_contact_ids=[],  # Empty contacts
+            checkin_interval_min=30
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invitation(trip_id, request, background_tasks, user_id=friend_id)
+        assert exc_info.value.status_code == 400
+        assert "safety contact" in exc_info.value.detail.lower()
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
+
+
+def test_accept_invitation_max_three_contacts():
+    """Test that accepting invitation with more than 3 contacts fails."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner29@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend29@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'invited', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+        # Create 4 contacts
+        contact_ids = []
+        for i in range(4):
+            result = connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO contacts (user_id, name, email)
+                    VALUES (:user_id, :name, :email)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "user_id": friend_id,
+                    "name": f"Contact {i}",
+                    "email": f"contact29_{i}@test.com"
+                }
+            )
+            contact_ids.append(result.fetchone()[0])
+
+    try:
+        background_tasks = MagicMock(spec=BackgroundTasks)
+        request = AcceptInvitationRequest(
+            safety_contact_ids=contact_ids,  # 4 contacts - should fail
+            checkin_interval_min=30
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invitation(trip_id, request, background_tasks, user_id=friend_id)
+        assert exc_info.value.status_code == 400
+        assert "3" in exc_info.value.detail  # Should mention max 3 contacts
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
+
+
+def test_accept_invitation_contacts_must_belong_to_user():
+    """Test that contacts must belong to the accepting user."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner30@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend30@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'invited', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+        # Create contact belonging to OWNER (not friend)
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, :name, :email)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": owner_id,  # Contact belongs to owner, not friend
+                "name": "Owner Contact",
+                "email": "ownercontact@test.com"
+            }
+        )
+        contact_id = result.fetchone()[0]
+
+    try:
+        background_tasks = MagicMock(spec=BackgroundTasks)
+        request = AcceptInvitationRequest(
+            safety_contact_ids=[contact_id],  # This contact doesn't belong to friend
+            checkin_interval_min=30
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            accept_invitation(trip_id, request, background_tasks, user_id=friend_id)
+        assert exc_info.value.status_code == 400
+        assert "do not belong to you" in exc_info.value.detail.lower()
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
+
+
+# ==================== Get Trips / Get Active Trip with Participants Tests ====================
+
+def test_get_trips_includes_trips_as_participant():
+    """Test that get_trips returns trips where user is an accepted participant."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner31@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend31@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        # Add friend as accepted participant
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'accepted', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+    try:
+        # Friend should see the trip in their trips list
+        result = get_trips(user_id=friend_id)
+
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+        # Find our trip
+        trip_ids = [t.id for t in result]
+        assert trip_id in trip_ids
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
+
+
+def test_get_trips_excludes_invited_trips():
+    """Test that get_trips does NOT return trips where user is only invited (not accepted)."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner32@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend32@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        # Add friend as INVITED (not accepted) participant
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'invited', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+    try:
+        # Friend should NOT see the trip in their trips list (only invited)
+        result = get_trips(user_id=friend_id)
+
+        trip_ids = [t.id for t in result]
+        assert trip_id not in trip_ids
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
+
+
+def test_get_active_trip_includes_participant_trips():
+    """Test that get_active_trip returns trips where user is an accepted participant."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner33@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend33@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        # Add friend as accepted participant
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'accepted', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+    try:
+        # Friend should see the trip as their active trip
+        result = get_active_trip(user_id=friend_id)
+
+        assert result is not None
+        assert result.id == trip_id
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
+
+
+def test_get_active_trip_excludes_invited_participant():
+    """Test that get_active_trip does NOT return trips where user is only invited."""
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner34@test.com", "Owner", "User")
+        friend_id = _create_test_user(connection, "friend34@test.com", "Friend", "User")
+        _create_friendship(connection, owner_id, friend_id)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True)
+
+        # Add friend as INVITED (not accepted) participant
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'invited', :now, :owner_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": friend_id, "now": datetime.now(UTC).isoformat(), "owner_id": owner_id}
+        )
+
+    try:
+        # Friend should NOT see the trip as active (only invited, not accepted)
+        result = get_active_trip(user_id=friend_id)
+
+        # Should be None since friend has no accepted trips
+        assert result is None
+
+    finally:
+        _cleanup_test_data(owner_id, friend_id)
