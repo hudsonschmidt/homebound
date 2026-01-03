@@ -6,6 +6,7 @@ struct TripInvitationsView: View {
     @Environment(\.dismiss) var dismiss
 
     @State private var isLoading = false
+    @State private var hasLoadedOnce = false
     @State private var processingTripId: Int? = nil
     @State private var invitationToJoin: TripInvitation? = nil  // Triggers contact selection sheet
 
@@ -61,11 +62,15 @@ struct TripInvitationsView: View {
                 }
             }
             .task {
+                guard !hasLoadedOnce else { return }
+                hasLoadedOnce = true
                 isLoading = true
                 await session.loadTripInvitations()
                 isLoading = false
             }
-            .sheet(item: $invitationToJoin) { invitation in
+            .sheet(item: $invitationToJoin, onDismiss: {
+                // Do nothing on dismiss - invitation remains in list unless explicitly accepted/declined
+            }) { invitation in
                 JoinTripContactSelectionView(
                     invitation: invitation,
                     onJoin: { contactIds, checkinInterval, notifyStart, notifyEnd in
@@ -103,9 +108,12 @@ struct TripInvitationsView: View {
             await session.loadTripInvitations()
             // Also refresh trips list since user is now part of this trip
             _ = await session.loadAllTrips()
+            // Close the contact selection sheet
+            invitationToJoin = nil
+            // Close TripInvitationsView and return to Friends page
+            dismiss()
         }
         processingTripId = nil
-        invitationToJoin = nil
     }
 
     private func declineInvitation(_ invitation: TripInvitation) async {
@@ -259,6 +267,12 @@ struct JoinTripContactSelectionView: View {
     @State private var notifyStartHour: Int = 8
     @State private var notifyEndHour: Int = 22
 
+    // Add contact state
+    @State private var showAddContact: Bool = false
+    @State private var newContactName: String = ""
+    @State private var newContactEmail: String = ""
+    @State private var isAddingContact: Bool = false
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -312,24 +326,91 @@ struct JoinTripContactSelectionView: View {
                     Spacer()
                     ProgressView()
                     Spacer()
-                } else if savedContacts.isEmpty {
-                    // No contacts available
+                } else if savedContacts.isEmpty && !showAddContact {
+                    // No contacts available - show add contact option
                     Spacer()
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.crop.circle.badge.exclamationmark")
+                    VStack(spacing: 20) {
+                        Image(systemName: "person.crop.circle.badge.plus")
                             .font(.system(size: 50))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.hbBrand)
 
-                        Text("No Contacts Available")
+                        Text("Add a Safety Contact")
                             .font(.headline)
 
-                        Text("You need to add at least one contact before joining a group trip. Go to Settings > Contacts to add contacts.")
+                        Text("You need at least one safety contact before joining. They'll be notified if you don't check in during the trip.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
+
+                        Button(action: { showAddContact = true }) {
+                            HStack {
+                                Image(systemName: "plus.circle.fill")
+                                Text("Add Contact")
+                                    .fontWeight(.semibold)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.hbBrand)
+                            .foregroundStyle(.white)
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal, 40)
                     }
                     Spacer()
+                } else if showAddContact || savedContacts.isEmpty {
+                    // Add contact form
+                    List {
+                        Section {
+                            TextField("Name", text: $newContactName)
+                                .textContentType(.name)
+                                .autocapitalization(.words)
+
+                            TextField("Email", text: $newContactEmail)
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .autocapitalization(.none)
+                        } header: {
+                            Text("New Contact")
+                        } footer: {
+                            Text("This person will receive an email if you don't check in on time.")
+                        }
+
+                        Section {
+                            Button(action: {
+                                Task {
+                                    await addContact()
+                                }
+                            }) {
+                                HStack {
+                                    if isAddingContact {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle())
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "plus.circle.fill")
+                                        Text("Save Contact")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .foregroundStyle(canAddContact ? Color.hbBrand : .secondary)
+                            }
+                            .disabled(!canAddContact || isAddingContact)
+                        }
+
+                        if !savedContacts.isEmpty {
+                            Section {
+                                Button("Cancel") {
+                                    showAddContact = false
+                                    newContactName = ""
+                                    newContactEmail = ""
+                                }
+                                .frame(maxWidth: .infinity)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
                 } else {
                     // Contact selection list and notification settings
                     List {
@@ -458,6 +539,28 @@ struct JoinTripContactSelectionView: View {
         formatter.dateFormat = "h a"
         let date = Calendar.current.date(from: DateComponents(hour: hour)) ?? Date()
         return formatter.string(from: date)
+    }
+
+    private var canAddContact: Bool {
+        !newContactName.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !newContactEmail.trimmingCharacters(in: .whitespaces).isEmpty &&
+        newContactEmail.contains("@")
+    }
+
+    private func addContact() async {
+        isAddingContact = true
+        let contact = await session.addContact(
+            name: newContactName.trimmingCharacters(in: .whitespaces),
+            email: newContactEmail.trimmingCharacters(in: .whitespaces)
+        )
+        if let contact = contact {
+            savedContacts.append(contact)
+            selectedContactIds.insert(contact.id)
+            showAddContact = false
+            newContactName = ""
+            newContactEmail = ""
+        }
+        isAddingContact = false
     }
 }
 

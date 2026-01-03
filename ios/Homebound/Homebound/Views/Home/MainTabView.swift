@@ -28,6 +28,7 @@ struct MainTabView: View {
                     Label("Friends", systemImage: "person.2.fill")
                 }
                 .tag(2)
+                .badge(session.tripInvitations.count)
 
             // Map Tab
             TripMapView()
@@ -585,6 +586,13 @@ struct ActivePlanCardCompact: View {
         } message: {
             Text(errorMessage)
         }
+        .alert("Vote Recorded", isPresented: $showingVoteConfirmation) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            if let response = voteResponse {
+                Text("Your vote has been recorded (\(response.votes_cast)/\(response.votes_needed) votes). The trip will end when enough participants vote.")
+            }
+        }
         .onChange(of: plan.eta_at) { _, _ in
             updateTimeRemaining()
         }
@@ -858,13 +866,6 @@ struct ActivePlanCardCompact: View {
                     .shadow(color: Color.purple.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(isPerformingAction)
-                .alert("Vote Recorded", isPresented: $showingVoteConfirmation) {
-                    Button("OK", role: .cancel) { }
-                } message: {
-                    if let response = voteResponse {
-                        Text("Your vote has been recorded (\(response.votes_cast)/\(response.votes_needed) votes). The trip will end when enough participants vote.")
-                    }
-                }
             } else {
                 // Regular trip or group trip with "anyone" or "owner_only" mode - show I'm Safe button
                 Button(action: {

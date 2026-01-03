@@ -516,7 +516,7 @@ def accept_invitation(
             sqlalchemy.text(
                 f"""
                 SELECT COUNT(*) FROM contacts
-                WHERE id IN ({placeholders}) AND owner_id = :user_id
+                WHERE id IN ({placeholders}) AND user_id = :user_id
                 """
             ),
             params
