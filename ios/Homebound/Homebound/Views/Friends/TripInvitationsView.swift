@@ -218,6 +218,7 @@ struct TripInvitationRow: View {
                     .foregroundStyle(.secondary)
                     .cornerRadius(10)
                 }
+                .buttonStyle(.borderless)
                 .disabled(isProcessing)
 
                 Button(action: {
@@ -239,6 +240,7 @@ struct TripInvitationRow: View {
                     .foregroundStyle(.white)
                     .cornerRadius(10)
                 }
+                .buttonStyle(.borderless)
                 .disabled(isProcessing)
             }
         }
