@@ -541,12 +541,18 @@ def accept_invitation(
         ).fetchone()
 
         if not participant:
+            log.warning(f"[ACCEPT] No invitation found for trip {trip_id}, user {user_id}")
             raise HTTPException(status_code=404, detail="No invitation found for this trip")
 
+        log.info(f"[ACCEPT] Found participant record: trip={trip_id}, user={user_id}, current_status='{participant.status}'")
+
         if participant.status == 'accepted':
+            log.info(f"[ACCEPT] Already accepted for trip {trip_id}, user {user_id}")
             return {"ok": True, "message": "Already accepted"}
 
-        if participant.status not in ('invited',):
+        # Allow accepting from 'invited' or 'declined' status (re-accepting after decline)
+        if participant.status not in ('invited', 'declined'):
+            log.warning(f"[ACCEPT] Cannot accept - invalid status '{participant.status}' for trip {trip_id}, user {user_id}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Cannot accept invitation with status '{participant.status}'"
@@ -577,6 +583,14 @@ def accept_invitation(
             }
         )
         log.info(f"[ACCEPT] Status updated successfully for trip {trip_id}, user {user_id}")
+
+        # Clear any existing contacts (in case of re-acceptance)
+        connection.execute(
+            sqlalchemy.text(
+                "DELETE FROM participant_trip_contacts WHERE trip_id = :trip_id AND participant_user_id = :user_id"
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        )
 
         # Store participant's safety contacts
         for position, contact_id in enumerate(request.safety_contact_ids, start=1):
