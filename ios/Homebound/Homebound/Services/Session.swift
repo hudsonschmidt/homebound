@@ -3002,6 +3002,7 @@ final class Session: ObservableObject {
         notifyStartHour: Int? = nil,
         notifyEndHour: Int? = nil
     ) async -> Bool {
+        debugLog("[Session] 🔵 ACCEPT called for trip \(tripId) with contacts \(safetyContactIds)")
         do {
             let request = AcceptInvitationRequest(
                 safety_contact_ids: safetyContactIds,
@@ -3009,6 +3010,7 @@ final class Session: ObservableObject {
                 notify_start_hour: notifyStartHour,
                 notify_end_hour: notifyEndHour
             )
+            debugLog("[Session] 🔵 Sending POST to /accept endpoint for trip \(tripId)")
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.post(
                     self.url("/api/v1/trips/\(tripId)/participants/accept"),
@@ -3022,6 +3024,7 @@ final class Session: ObservableObject {
             debugLog("[Session] ✅ Accepted trip invitation for trip \(tripId) with \(safetyContactIds.count) safety contacts")
             return true
         } catch {
+            debugLog("[Session] ❌ FAILED to accept trip \(tripId): \(error)")
             await MainActor.run {
                 self.lastError = "Failed to accept invitation: \(error.localizedDescription)"
             }
@@ -3031,6 +3034,7 @@ final class Session: ObservableObject {
 
     /// Decline an invitation to join a group trip
     func declineTripInvitation(tripId: Int) async -> Bool {
+        debugLog("[Session] 🔴 DECLINE called for trip \(tripId)")
         do {
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.post(
@@ -3042,6 +3046,7 @@ final class Session: ObservableObject {
             debugLog("[Session] ✅ Declined trip invitation for trip \(tripId)")
             return true
         } catch {
+            debugLog("[Session] ❌ FAILED to decline trip \(tripId): \(error)")
             await MainActor.run {
                 self.lastError = "Failed to decline invitation: \(error.localizedDescription)"
             }

@@ -492,6 +492,7 @@ def accept_invitation(
     user_id: int = Depends(auth.get_current_user_id)
 ):
     """Accept an invitation to join a group trip with safety contacts."""
+    log.info(f"[ACCEPT] User {user_id} accepting trip {trip_id} with contacts {request.safety_contact_ids}")
     # Validate safety contacts
     if not request.safety_contact_ids:
         raise HTTPException(
@@ -553,6 +554,7 @@ def accept_invitation(
 
         # Accept the invitation and store personal notification settings
         now = datetime.now(UTC).isoformat()
+        log.info(f"[ACCEPT] Updating status to 'accepted' for trip {trip_id}, user {user_id}")
         connection.execute(
             sqlalchemy.text(
                 """
@@ -574,6 +576,7 @@ def accept_invitation(
                 "notify_end": request.notify_end_hour
             }
         )
+        log.info(f"[ACCEPT] Status updated successfully for trip {trip_id}, user {user_id}")
 
         # Store participant's safety contacts
         for position, contact_id in enumerate(request.safety_contact_ids, start=1):
@@ -629,6 +632,7 @@ def decline_invitation(
     user_id: int = Depends(auth.get_current_user_id)
 ):
     """Decline an invitation to join a group trip."""
+    log.info(f"[DECLINE] User {user_id} declining trip {trip_id}")
     with db.engine.begin() as connection:
         # Check if user has a pending invitation
         participant = connection.execute(
