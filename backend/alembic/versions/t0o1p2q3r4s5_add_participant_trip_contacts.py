@@ -50,14 +50,11 @@ def upgrade() -> None:
     op.add_column('trip_participants', sa.Column('checkin_interval_min', sa.Integer(), nullable=True))
     op.add_column('trip_participants', sa.Column('notify_start_hour', sa.Integer(), nullable=True))
     op.add_column('trip_participants', sa.Column('notify_end_hour', sa.Integer(), nullable=True))
-    # Track when each participant last received a check-in reminder
-    op.add_column('trip_participants', sa.Column('last_checkin_reminder', sa.DateTime(), nullable=True))
 
 
 def downgrade() -> None:
     """Drop participant_trip_contacts table and notification columns."""
     # Remove notification settings from trip_participants
-    op.drop_column('trip_participants', 'last_checkin_reminder')
     op.drop_column('trip_participants', 'notify_end_hour')
     op.drop_column('trip_participants', 'notify_start_hour')
     op.drop_column('trip_participants', 'checkin_interval_min')
