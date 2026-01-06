@@ -150,7 +150,9 @@ struct WhatsNewView: View {
                             .padding(.horizontal, 24),
                             alignment: .top
                         )
+                        .ignoresSafeArea(edges: .bottom)
                 }
+                .background(Color(.systemBackground))
             }
             .allowsHitTesting(true)
         }
