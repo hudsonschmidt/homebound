@@ -350,6 +350,8 @@ class TimelineEvent(BaseModel):
     lat: float | None
     lon: float | None
     extended_by: int | None
+    user_id: int | None = None
+    user_name: str | None = None
 
 
 @router.post("/", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
@@ -1886,14 +1888,16 @@ def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user
                 detail="Trip not found"
             )
 
-        # Fetch timeline events
+        # Fetch timeline events with user info
         events = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, what AS kind, timestamp AS at, lat, lon, extended_by
-                FROM events
-                WHERE trip_id = :trip_id
-                ORDER BY timestamp DESC
+                SELECT e.id, e.what AS kind, e.timestamp AS at, e.lat, e.lon, e.extended_by,
+                       e.user_id, u.first_name, u.last_name
+                FROM events e
+                LEFT JOIN users u ON e.user_id = u.id
+                WHERE e.trip_id = :trip_id
+                ORDER BY e.timestamp DESC
                 """
             ),
             {"trip_id": trip_id}
@@ -1906,7 +1910,9 @@ def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user
                 at=e.at.isoformat() if e.at else "",
                 lat=e.lat,
                 lon=e.lon,
-                extended_by=e.extended_by
+                extended_by=e.extended_by,
+                user_id=e.user_id,
+                user_name=f"{e.first_name} {e.last_name}".strip() if e.first_name else None
             )
             for e in events
         ]

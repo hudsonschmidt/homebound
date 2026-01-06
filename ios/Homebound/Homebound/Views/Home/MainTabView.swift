@@ -512,6 +512,30 @@ struct ActivePlanCardCompact: View {
         checkinEvents.compactMap(\.atDate).max()
     }
 
+    /// Get the most recent check-in event (for displaying who checked in)
+    var lastCheckinEvent: TimelineEvent? {
+        checkinEvents.max(by: { ($0.atDate ?? .distantPast) < ($1.atDate ?? .distantPast) })
+    }
+
+    /// Format the "by USER" text for the last check-in
+    var lastCheckinByText: String? {
+        guard let event = lastCheckinEvent else { return nil }
+
+        // Check if it's the current user
+        if let eventUserId = event.user_id, let currentUserId = session.userId, eventUserId == currentUserId {
+            return "by you"
+        }
+
+        // Use the user name from the event
+        if let userName = event.user_name, !userName.isEmpty {
+            // Just use first name for brevity
+            let firstName = userName.components(separatedBy: " ").first ?? userName
+            return "by \(firstName)"
+        }
+
+        return nil
+    }
+
     /// Check if the current user is the trip owner
     var isOwner: Bool {
         guard let userId = session.userId else { return true } // Assume owner if no userId yet
@@ -870,7 +894,14 @@ struct ActivePlanCardCompact: View {
                         Label("Vote to End", systemImage: "hand.raised.fill")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                        if let response = voteResponse, !response.trip_completed {
+                        // Show vote count from realtime updates or local response
+                        if let voteStatus = session.activeVoteStatus, voteStatus.tripId == plan.id, voteStatus.votesNeeded > 0 {
+                            let remaining = voteStatus.votesNeeded - voteStatus.votesCast
+                            if remaining > 0 {
+                                Text(remaining == 1 ? "1 more vote needed" : "\(remaining) more votes needed")
+                                    .font(.caption2)
+                            }
+                        } else if let response = voteResponse, !response.trip_completed {
                             let remaining = response.votes_needed - response.votes_cast
                             Text(remaining == 1 ? "1 more vote needed" : "\(remaining) more votes needed")
                                 .font(.caption2)
@@ -1053,9 +1084,15 @@ struct ActivePlanCardCompact: View {
 
                 Spacer()
 
-                Text("Last: \(relativeTimeString(from: lastCheckin))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let byText = lastCheckinByText {
+                    Text("Last: \(relativeTimeString(from: lastCheckin)) \(byText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Last: \(relativeTimeString(from: lastCheckin))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

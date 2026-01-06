@@ -1193,16 +1193,11 @@ def participant_checkin(
 
         friend_user_ids = [f.friend_user_id for f in participant_friend_contacts]
 
-        # Prepare location info for notifications
-        coordinates_str = None
-        location_name = None
-        if lat is not None and lon is not None:
-            coordinates_str = f"{lat:.6f}, {lon:.6f}"
-            location_name = reverse_geocode_sync(lat, lon)
-            if location_name:
-                log.info(f"[Participants] Reverse geocoded to: {location_name}")
+        # Prepare location info for notifications (geocoding moved to background)
+        coordinates_str = f"{lat:.6f}, {lon:.6f}" if lat is not None and lon is not None else None
+        coordinates_for_background = (lat, lon) if lat is not None and lon is not None else None
 
-        # Send check-in emails to participant's contacts (in background)
+        # Send check-in emails to participant's contacts (in background, including geocoding)
         if contacts_for_email:
             trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
             activity_name = trip.activity_name
@@ -1210,6 +1205,13 @@ def participant_checkin(
             checker_name_for_email = checker_name
 
             def send_contact_emails():
+                # Do geocoding in background to avoid blocking the response
+                location_name = None
+                if coordinates_for_background:
+                    location_name = reverse_geocode_sync(coordinates_for_background[0], coordinates_for_background[1])
+                    if location_name:
+                        log.info(f"[Participants] Reverse geocoded to: {location_name}")
+
                 asyncio.run(send_checkin_update_emails(
                     trip=trip_data,
                     contacts=contacts_for_email,
@@ -1223,21 +1225,24 @@ def participant_checkin(
             background_tasks.add_task(send_contact_emails)
             log.info(f"[Participants] Scheduled check-in emails for {len(contacts_for_email)} contacts")
 
-        # Send friend check-in pushes (in background)
+        # Send friend check-in pushes (in background, including geocoding)
         if friend_user_ids:
             trip_title_for_friends = trip.title
             checker_name_for_friends = checker_name
-            location_name_for_friends = location_name
-            coordinates_for_friends = (lat, lon) if lat is not None and lon is not None else None
 
             def send_friend_pushes():
+                # Do geocoding in background to avoid blocking the response
+                location_name = None
+                if coordinates_for_background:
+                    location_name = reverse_geocode_sync(coordinates_for_background[0], coordinates_for_background[1])
+
                 for friend_id in friend_user_ids:
                     asyncio.run(send_friend_checkin_push(
                         friend_user_id=friend_id,
                         user_name=checker_name_for_friends,
                         trip_title=trip_title_for_friends,
-                        location_name=location_name_for_friends,
-                        coordinates=coordinates_for_friends
+                        location_name=location_name,
+                        coordinates=coordinates_for_background
                     ))
 
             background_tasks.add_task(send_friend_pushes)

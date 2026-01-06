@@ -12,6 +12,7 @@ final class RealtimeManager: ObservableObject {
     private var tripsChannel: RealtimeChannelV2?
     private var participantsChannel: RealtimeChannelV2?
     private var eventsChannel: RealtimeChannelV2?
+    private var votesChannel: RealtimeChannelV2?
 
     private var currentUserId: Int?
     private var isRunning = false
@@ -36,6 +37,7 @@ final class RealtimeManager: ObservableObject {
         await subscribeToTrips()
         await subscribeToParticipants()
         await subscribeToEvents()
+        await subscribeToVotes()
 
         debugLog("[Realtime] All subscriptions started")
     }
@@ -51,11 +53,13 @@ final class RealtimeManager: ObservableObject {
         await tripsChannel?.unsubscribe()
         await participantsChannel?.unsubscribe()
         await eventsChannel?.unsubscribe()
+        await votesChannel?.unsubscribe()
 
         friendshipsChannel = nil
         tripsChannel = nil
         participantsChannel = nil
         eventsChannel = nil
+        votesChannel = nil
         currentUserId = nil
         isRunning = false
 
@@ -154,12 +158,21 @@ final class RealtimeManager: ObservableObject {
 
         // Handle trip updates
         Task {
-            for await _ in updates {
+            for await update in updates {
                 // Refresh trip data - Session will filter to relevant trips
-                debugLog("[Realtime] Trip update detected")
+                let record = update.record
+                let tripId = record["trip_id"]?.intValue ?? record["id"]?.intValue
+                debugLog("[Realtime] Trip update detected: tripId=\(String(describing: tripId))")
+
                 await Session.shared.loadActivePlan()
                 _ = await Session.shared.loadAllTrips()
                 _ = await Session.shared.loadFriendActiveTrips()
+
+                // If the active trip is a group trip, refresh vote status
+                if let activeTripId = Session.shared.activeTrip?.id,
+                   Session.shared.activeTrip?.is_group_trip == true {
+                    await Session.shared.refreshVoteStatus(tripId: activeTripId)
+                }
             }
         }
 
@@ -249,15 +262,76 @@ final class RealtimeManager: ObservableObject {
 
         // Handle new events
         Task {
-            for await _ in inserts {
+            for await insert in inserts {
                 // Someone checked in or performed an action
-                debugLog("[Realtime] New event detected (check-in, extension, etc.)")
+                let record = insert.record
+                let eventType = record["what"]?.stringValue ?? "unknown"
+                let tripId = record["trip_id"]?.intValue
+                debugLog("[Realtime] New event detected: type=\(eventType), tripId=\(String(describing: tripId))")
+
+                // Refresh all trip data
                 await Session.shared.loadActivePlan()
                 _ = await Session.shared.loadAllTrips()
                 _ = await Session.shared.loadFriendActiveTrips()
+
+                // Notify views to refresh timeline (for check-in counter updates)
+                Session.shared.notifyTimelineUpdated()
             }
         }
 
         debugLog("[Realtime] Subscribed to events")
+    }
+
+    /// Subscribe to checkout_votes table for vote updates
+    private func subscribeToVotes() async {
+        let channel = supabase.channel("checkout-votes")
+        votesChannel = channel
+
+        // Listen for new votes
+        let inserts = channel.postgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "checkout_votes"
+        )
+
+        // Listen for deleted votes (e.g., when trip completes, votes are cleared)
+        let deletes = channel.postgresChange(
+            DeleteAction.self,
+            schema: "public",
+            table: "checkout_votes"
+        )
+
+        do {
+            try await channel.subscribe()
+        } catch {
+            debugLog("[Realtime] Failed to subscribe to checkout_votes: \(error)")
+            return
+        }
+
+        // Handle new votes
+        Task {
+            for await insert in inserts {
+                let record = insert.record
+                let tripId = record["trip_id"]?.intValue
+                debugLog("[Realtime] Vote cast detected: tripId=\(String(describing: tripId))")
+
+                // Refresh vote status for the active trip
+                if let activeTripId = Session.shared.activeTrip?.id,
+                   Session.shared.activeTrip?.is_group_trip == true {
+                    await Session.shared.refreshVoteStatus(tripId: activeTripId)
+                }
+            }
+        }
+
+        // Handle vote deletions (trip completed)
+        Task {
+            for await _ in deletes {
+                debugLog("[Realtime] Vote deleted (trip may have completed)")
+                await Session.shared.loadActivePlan()
+                _ = await Session.shared.loadAllTrips()
+            }
+        }
+
+        debugLog("[Realtime] Subscribed to checkout_votes")
     }
 }

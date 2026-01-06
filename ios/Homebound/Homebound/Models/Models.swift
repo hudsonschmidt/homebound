@@ -771,6 +771,8 @@ struct TimelineEvent: Codable, Identifiable, Equatable {
     var lat: Double?
     var lon: Double?
     var extended_by: Int?
+    var user_id: Int?
+    var user_name: String?
 
     // Computed property to get Date - uses DateUtils for robust parsing
     var atDate: Date? {
@@ -778,12 +780,14 @@ struct TimelineEvent: Codable, Identifiable, Equatable {
     }
 
     // Memberwise initializer for LocalStorage
-    init(kind: String, at: String, lat: Double?, lon: Double?, extended_by: Int?) {
+    init(kind: String, at: String, lat: Double?, lon: Double?, extended_by: Int?, user_id: Int? = nil, user_name: String? = nil) {
         self.kind = kind
         self.at = at
         self.lat = lat
         self.lon = lon
         self.extended_by = extended_by
+        self.user_id = user_id
+        self.user_name = user_name
     }
 }
 

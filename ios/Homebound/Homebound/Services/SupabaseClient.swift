@@ -9,7 +9,13 @@ enum SupabaseConfig {
 }
 
 /// Global Supabase client instance for Realtime connections
+/// Note: We only use Supabase for Realtime, not for authentication (handled by Python backend)
 let supabase = SupabaseClient(
     supabaseURL: SupabaseConfig.url,
-    supabaseKey: SupabaseConfig.anonKey
+    supabaseKey: SupabaseConfig.anonKey,
+    options: SupabaseClientOptions(
+        auth: SupabaseClientOptions.AuthOptions(
+            emitLocalSessionAsInitialSession: true
+        )
+    )
 )

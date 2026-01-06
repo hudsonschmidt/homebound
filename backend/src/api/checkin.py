@@ -149,18 +149,13 @@ def checkin_with_token(
         activity_name = trip.activity_name
         user_timezone = trip.timezone
 
-        # Format coordinates if provided and perform reverse geocoding
+        # Format coordinates if provided (geocoding moved to background to avoid blocking response)
         coordinates_str = None
-        location_name = None
+        coordinates_for_background = None
         if lat is not None and lon is not None:
             coordinates_str = f"{lat:.6f}, {lon:.6f}"
+            coordinates_for_background = (lat, lon)
             log.info(f"[Checkin] Received coordinates: {coordinates_str}")
-            # Reverse geocode to get human-readable location name
-            location_name = reverse_geocode_sync(lat, lon)
-            if location_name:
-                log.info(f"[Checkin] Reverse geocoded to: {location_name}")
-            else:
-                log.info("[Checkin] Reverse geocoding returned no result")
 
         # Get check-in count for Live Activity update
         checkin_count_row = connection.execute(
@@ -212,6 +207,13 @@ def checkin_with_token(
                 "Checked In",
                 f"You've checked in to '{trip.title}'. Stay safe!"
             ))
+
+            # Do geocoding in background to avoid blocking the response
+            location_name = None
+            if coordinates_for_background:
+                location_name = reverse_geocode_sync(coordinates_for_background[0], coordinates_for_background[1])
+                if location_name:
+                    log.info(f"[Checkin] Reverse geocoded to: {location_name}")
 
             # Send emails to contacts
             asyncio.run(send_checkin_update_emails(

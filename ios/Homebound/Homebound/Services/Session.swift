@@ -244,6 +244,12 @@ final class Session: ObservableObject {
     @Published var friendVisibilitySettings: FriendVisibilitySettings = .defaults
     @Published var tripInvitations: [TripInvitation] = []  // Pending group trip invitations
 
+    // Realtime update triggers - views observe these to know when to refresh
+    @Published var timelineLastUpdated: Date = Date()
+
+    // Active trip vote status (for group trips with vote checkout mode)
+    @Published var activeVoteStatus: (tripId: Int, votesCast: Int, votesNeeded: Int)? = nil
+
     // Update request cooldowns (trip_id -> cooldown_end_time)
     var updateRequestCooldowns: [Int: Date] = [:]
 
@@ -2181,6 +2187,12 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Notify views that timeline data has been updated (called by RealtimeManager)
+    func notifyTimelineUpdated() {
+        timelineLastUpdated = Date()
+        debugLog("[Session] Timeline update notification sent")
+    }
+
     // MARK: - Profile Management
     func updateProfile(firstName: String? = nil, lastName: String? = nil, age: Int? = nil) async -> Bool {
         struct UpdateProfileRequest: Encodable {
@@ -3032,6 +3044,15 @@ final class Session: ObservableObject {
         } catch {
             debugLog("[Session] ❌ Failed to get participants: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    /// Refresh the vote status for a group trip (called by RealtimeManager)
+    func refreshVoteStatus(tripId: Int) async {
+        guard let response = await getParticipants(tripId: tripId) else { return }
+        if response.checkout_votes_needed > 0 {
+            activeVoteStatus = (tripId: tripId, votesCast: response.checkout_votes, votesNeeded: response.checkout_votes_needed)
+            debugLog("[Session] Vote status updated: \(response.checkout_votes)/\(response.checkout_votes_needed)")
         }
     }
 

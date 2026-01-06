@@ -78,6 +78,13 @@ struct TripDetailView: View {
         .refreshable {
             await refreshAllData()
         }
+        .onChange(of: session.timelineLastUpdated) { _, _ in
+            // Realtime event detected - refresh timeline for updated check-in count
+            Task {
+                await loadTimelineEvents()
+                await loadParticipantsIfGroupTrip()
+            }
+        }
     }
 
     private func loadAllData() async {
