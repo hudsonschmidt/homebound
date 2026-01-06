@@ -1045,6 +1045,7 @@ struct ParticipantListResponse: Codable {
     let checkout_votes: Int
     let checkout_votes_needed: Int
     let group_settings: GroupSettings
+    let user_has_voted: Bool?
 }
 
 /// Response for checkout vote action
@@ -1054,6 +1055,7 @@ struct CheckoutVoteResponse: Codable {
     let votes_cast: Int
     let votes_needed: Int
     let trip_completed: Bool
+    let user_has_voted: Bool?
 }
 
 /// Location data for a participant in a group trip

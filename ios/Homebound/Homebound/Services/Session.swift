@@ -248,7 +248,7 @@ final class Session: ObservableObject {
     @Published var timelineLastUpdated: Date = Date()
 
     // Active trip vote status (for group trips with vote checkout mode)
-    @Published var activeVoteStatus: (tripId: Int, votesCast: Int, votesNeeded: Int)? = nil
+    @Published var activeVoteStatus: (tripId: Int, votesCast: Int, votesNeeded: Int, userHasVoted: Bool)? = nil
 
     // Update request cooldowns (trip_id -> cooldown_end_time)
     var updateRequestCooldowns: [Int: Date] = [:]
@@ -3051,8 +3051,9 @@ final class Session: ObservableObject {
     func refreshVoteStatus(tripId: Int) async {
         guard let response = await getParticipants(tripId: tripId) else { return }
         if response.checkout_votes_needed > 0 {
-            activeVoteStatus = (tripId: tripId, votesCast: response.checkout_votes, votesNeeded: response.checkout_votes_needed)
-            debugLog("[Session] Vote status updated: \(response.checkout_votes)/\(response.checkout_votes_needed)")
+            let hasVoted = response.user_has_voted ?? false
+            activeVoteStatus = (tripId: tripId, votesCast: response.checkout_votes, votesNeeded: response.checkout_votes_needed, userHasVoted: hasVoted)
+            debugLog("[Session] Vote status updated: \(response.checkout_votes)/\(response.checkout_votes_needed), userHasVoted=\(hasVoted)")
         }
     }
 
@@ -3237,6 +3238,28 @@ final class Session: ObservableObject {
         } catch {
             await MainActor.run {
                 self.lastError = "Failed to vote: \(error.localizedDescription)"
+            }
+            return nil
+        }
+    }
+
+    /// Remove a previously cast checkout vote
+    func removeVote(tripId: Int) async -> CheckoutVoteResponse? {
+        do {
+            let response: CheckoutVoteResponse = try await withAuth { bearer in
+                try await self.api.delete(
+                    self.url("/api/v1/trips/\(tripId)/checkout/vote"),
+                    bearer: bearer
+                )
+            }
+            await MainActor.run {
+                self.notice = "Vote removed (\(response.votes_cast)/\(response.votes_needed))"
+            }
+            debugLog("[Session] ✅ Removed vote for trip \(tripId): \(response.votes_cast)/\(response.votes_needed)")
+            return response
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to remove vote: \(error.localizedDescription)"
             }
             return nil
         }

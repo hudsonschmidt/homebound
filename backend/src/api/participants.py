@@ -79,6 +79,7 @@ class ParticipantListResponse(BaseModel):
     checkout_votes: int  # Number of checkout votes cast
     checkout_votes_needed: int  # Number needed to trigger checkout (if vote mode)
     group_settings: GroupSettings
+    user_has_voted: bool = False  # Whether the current user has voted
 
 
 class CheckoutVoteResponse(BaseModel):
@@ -88,6 +89,7 @@ class CheckoutVoteResponse(BaseModel):
     votes_cast: int
     votes_needed: int
     trip_completed: bool
+    user_has_voted: bool = False  # Whether the current user has a vote
 
 
 class CheckinResponse(BaseModel):
@@ -459,6 +461,15 @@ def get_participants(
         ).fetchone()
         vote_count = votes.count if votes else 0
 
+        # Check if current user has voted
+        user_vote = connection.execute(
+            sqlalchemy.text(
+                "SELECT id FROM checkout_votes WHERE trip_id = :trip_id AND user_id = :user_id"
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+        has_voted = user_vote is not None
+
         # Calculate votes needed (use ceiling to ensure threshold is met)
         # e.g., 3 participants * 50% = 1.5 -> 2 votes needed
         accepted_count = sum(1 for p in participants if p.status == 'accepted')
@@ -486,7 +497,8 @@ def get_participants(
             ],
             checkout_votes=vote_count,
             checkout_votes_needed=votes_needed,
-            group_settings=settings
+            group_settings=settings,
+            user_has_voted=has_voted
         )
 
 
@@ -1478,7 +1490,8 @@ def vote_checkout(
                 message="Trip completed!",
                 votes_cast=vote_count,
                 votes_needed=votes_needed,
-                trip_completed=True
+                trip_completed=True,
+                user_has_voted=True
             )
 
         # Trip not completed yet - send vote notification to other participants
@@ -1503,7 +1516,115 @@ def vote_checkout(
             message=f"Vote recorded ({vote_count}/{votes_needed})",
             votes_cast=vote_count,
             votes_needed=votes_needed,
-            trip_completed=False
+            trip_completed=False,
+            user_has_voted=True
+        )
+
+
+@router.delete("/{trip_id}/checkout/vote", response_model=CheckoutVoteResponse)
+def remove_vote(
+    trip_id: int,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Remove a previously cast checkout vote.
+
+    Allows a participant to change their mind about ending the trip.
+    """
+    with db.engine.begin() as connection:
+        # Verify trip exists and user is participant
+        trip = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT t.id, t.user_id, t.status, t.title,
+                       gs.checkout_mode, gs.checkout_vote_threshold
+                FROM trips t
+                LEFT JOIN group_settings gs ON t.id = gs.trip_id
+                WHERE t.id = :trip_id
+                """
+            ),
+            {"trip_id": trip_id}
+        ).fetchone()
+
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+
+        if trip.status not in ('active', 'overdue', 'overdue_notified'):
+            raise HTTPException(status_code=400, detail="Trip is not active")
+
+        # Check if user has a vote to remove
+        existing_vote = connection.execute(
+            sqlalchemy.text(
+                "SELECT id FROM checkout_votes WHERE trip_id = :trip_id AND user_id = :user_id"
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if not existing_vote:
+            # No vote to remove - return current vote count
+            vote_count = connection.execute(
+                sqlalchemy.text("SELECT COUNT(*) FROM checkout_votes WHERE trip_id = :trip_id"),
+                {"trip_id": trip_id}
+            ).scalar() or 0
+
+            votes_needed = trip.checkout_vote_threshold or 2
+
+            return CheckoutVoteResponse(
+                ok=True,
+                message="No vote to remove",
+                votes_cast=vote_count,
+                votes_needed=votes_needed,
+                trip_completed=False,
+                user_has_voted=False
+            )
+
+        # Remove the vote
+        connection.execute(
+            sqlalchemy.text("DELETE FROM checkout_votes WHERE trip_id = :trip_id AND user_id = :user_id"),
+            {"trip_id": trip_id, "user_id": user_id}
+        )
+
+        # Get updated vote count
+        vote_count = connection.execute(
+            sqlalchemy.text("SELECT COUNT(*) FROM checkout_votes WHERE trip_id = :trip_id"),
+            {"trip_id": trip_id}
+        ).scalar() or 0
+
+        votes_needed = trip.checkout_vote_threshold or 2
+
+        log.info(f"[Participants] User {user_id} removed vote from trip {trip_id} ({vote_count}/{votes_needed})")
+
+        # Send refresh push to other participants
+        other_participant_ids = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT user_id FROM trip_participants
+                WHERE trip_id = :trip_id AND user_id != :user_id AND status = 'accepted'
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchall()
+
+        # Also include owner if not the current user
+        if trip.user_id != user_id:
+            other_participant_ids = list(other_participant_ids) + [type('obj', (object,), {'user_id': trip.user_id})]
+
+        if other_participant_ids:
+            trip_id_for_refresh = trip_id
+
+            def send_refresh_pushes():
+                for p in other_participant_ids:
+                    asyncio.run(send_data_refresh_push(p.user_id, "trip", trip_id_for_refresh))
+
+            background_tasks.add_task(send_refresh_pushes)
+
+        return CheckoutVoteResponse(
+            ok=True,
+            message=f"Vote removed ({vote_count}/{votes_needed})",
+            votes_cast=vote_count,
+            votes_needed=votes_needed,
+            trip_completed=False,
+            user_has_voted=False
         )
 
 

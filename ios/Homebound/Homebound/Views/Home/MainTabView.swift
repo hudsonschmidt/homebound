@@ -521,6 +521,8 @@ struct ActivePlanCardCompact: View {
     var lastCheckinByText: String? {
         guard let event = lastCheckinEvent else { return nil }
 
+        debugLog("[MainTabView] Last check-in: user_id=\(String(describing: event.user_id)), user_name=\(String(describing: event.user_name)), session.userId=\(String(describing: session.userId))")
+
         // Check if it's the current user
         if let eventUserId = event.user_id, let currentUserId = session.userId, eventUserId == currentUserId {
             return "by you"
@@ -618,15 +620,23 @@ struct ActivePlanCardCompact: View {
         } message: {
             Text(errorMessage)
         }
-        .alert("Vote Recorded", isPresented: $showingVoteConfirmation) {
+        .alert(voteResponse?.user_has_voted == true ? "Vote Recorded" : "Vote Removed", isPresented: $showingVoteConfirmation) {
             Button("OK", role: .cancel) { }
         } message: {
             if let response = voteResponse {
                 let remaining = response.votes_needed - response.votes_cast
-                if remaining == 1 {
-                    Text("Your vote has been recorded! 1 more vote needed to end the trip.")
+                if response.user_has_voted == true {
+                    if remaining == 1 {
+                        Text("Your vote has been recorded! 1 more vote needed to end the trip.")
+                    } else {
+                        Text("Your vote has been recorded! \(remaining) more votes needed to end the trip.")
+                    }
                 } else {
-                    Text("Your vote has been recorded! \(remaining) more votes needed to end the trip.")
+                    if remaining == 1 {
+                        Text("Your vote has been removed. 1 more vote needed to end the trip.")
+                    } else {
+                        Text("Your vote has been removed. \(remaining) more votes needed to end the trip.")
+                    }
                 }
             }
         }
@@ -851,14 +861,28 @@ struct ActivePlanCardCompact: View {
 
             // I'm Safe / Vote to End button
             if plan.is_group_trip, let settings = plan.group_settings, settings.checkout_mode == "vote" {
-                // Group trip with vote mode - show Vote to End button
+                // Check if user has voted from realtime status or local response
+                let hasVoted = session.activeVoteStatus?.tripId == plan.id
+                    ? session.activeVoteStatus?.userHasVoted ?? false
+                    : (voteResponse?.user_has_voted ?? false)
+
+                // Group trip with vote mode - show Vote to End or Remove Vote button
                 Button(action: {
                     if preferences.hapticFeedbackEnabled {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }
                     Task {
                         isPerformingAction = true
-                        if let response = await session.voteCheckout(tripId: plan.id) {
+                        let response: CheckoutVoteResponse?
+                        if hasVoted {
+                            // Remove vote
+                            response = await session.removeVote(tripId: plan.id)
+                        } else {
+                            // Cast vote
+                            response = await session.voteCheckout(tripId: plan.id)
+                        }
+
+                        if let response = response {
                             await MainActor.run {
                                 voteResponse = response
                             }
@@ -875,13 +899,15 @@ struct ActivePlanCardCompact: View {
                                 if preferences.hapticFeedbackEnabled {
                                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                                 }
+                                // Refresh vote status to update UI
+                                await session.refreshVoteStatus(tripId: plan.id)
                             }
                         } else {
                             if preferences.hapticFeedbackEnabled {
                                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                             }
                             await MainActor.run {
-                                errorMessage = session.lastError.isEmpty ? "Vote failed. Please try again." : session.lastError
+                                errorMessage = session.lastError.isEmpty ? "Action failed. Please try again." : session.lastError
                                 showingError = true
                             }
                         }
@@ -891,9 +917,15 @@ struct ActivePlanCardCompact: View {
                     }
                 }) {
                     VStack(spacing: 2) {
-                        Label("Vote to End", systemImage: "hand.raised.fill")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                        if hasVoted {
+                            Label("Remove Vote", systemImage: "hand.raised.slash.fill")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        } else {
+                            Label("Vote to End", systemImage: "hand.raised.fill")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
                         // Show vote count from realtime updates or local response
                         if let voteStatus = session.activeVoteStatus, voteStatus.tripId == plan.id, voteStatus.votesNeeded > 0 {
                             let remaining = voteStatus.votesNeeded - voteStatus.votesCast
@@ -910,9 +942,9 @@ struct ActivePlanCardCompact: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Color.purple)
+                    .background(hasVoted ? Color.orange : Color.purple)
                     .cornerRadius(12)
-                    .shadow(color: Color.purple.opacity(0.3), radius: 8, y: 4)
+                    .shadow(color: (hasVoted ? Color.orange : Color.purple).opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(isPerformingAction)
             } else if plan.is_group_trip, let settings = plan.group_settings, settings.checkout_mode == "owner_only" {
