@@ -1536,11 +1536,9 @@ def remove_vote(
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT t.id, t.user_id, t.status, t.title,
-                       gs.checkout_mode, gs.checkout_vote_threshold
-                FROM trips t
-                LEFT JOIN group_settings gs ON t.id = gs.trip_id
-                WHERE t.id = :trip_id
+                SELECT id, user_id, status, title, group_settings, is_group_trip
+                FROM trips
+                WHERE id = :trip_id
                 """
             ),
             {"trip_id": trip_id}
@@ -1551,6 +1549,27 @@ def remove_vote(
 
         if trip.status not in ('active', 'overdue', 'overdue_notified'):
             raise HTTPException(status_code=400, detail="Trip is not active")
+
+        # Parse group settings
+        settings = _parse_group_settings(trip.group_settings)
+
+        # Count accepted participants + owner
+        accepted_count_result = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT COUNT(*) as count FROM trip_participants
+                WHERE trip_id = :trip_id AND status = 'accepted'
+                """
+            ),
+            {"trip_id": trip_id}
+        ).fetchone()
+        accepted_count = (accepted_count_result.count if accepted_count_result else 0) + 1  # +1 for owner
+
+        # Calculate votes needed based on mode
+        if settings.checkout_mode == "vote":
+            votes_needed = max(1, math.ceil(accepted_count * settings.vote_threshold))
+        else:
+            votes_needed = 1
 
         # Check if user has a vote to remove
         existing_vote = connection.execute(
@@ -1566,8 +1585,6 @@ def remove_vote(
                 sqlalchemy.text("SELECT COUNT(*) FROM checkout_votes WHERE trip_id = :trip_id"),
                 {"trip_id": trip_id}
             ).scalar() or 0
-
-            votes_needed = trip.checkout_vote_threshold or 2
 
             return CheckoutVoteResponse(
                 ok=True,
@@ -1589,8 +1606,6 @@ def remove_vote(
             sqlalchemy.text("SELECT COUNT(*) FROM checkout_votes WHERE trip_id = :trip_id"),
             {"trip_id": trip_id}
         ).scalar() or 0
-
-        votes_needed = trip.checkout_vote_threshold or 2
 
         log.info(f"[Participants] User {user_id} removed vote from trip {trip_id} ({vote_count}/{votes_needed})")
 

@@ -643,6 +643,15 @@ struct ActivePlanCardCompact: View {
         .onChange(of: plan.eta_at) { _, _ in
             updateTimeRemaining()
         }
+        .onChange(of: session.timelineLastUpdated) { _, _ in
+            // Realtime update detected - refresh timeline to update check-in count
+            Task {
+                let events = await session.loadTimeline(planId: plan.id)
+                await MainActor.run {
+                    timeline = events
+                }
+            }
+        }
     }
 
     var glowColor: Color {

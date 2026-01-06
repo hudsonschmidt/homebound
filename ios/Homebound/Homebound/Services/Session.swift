@@ -1756,18 +1756,29 @@ final class Session: ObservableObject {
     }
 
     func checkIn() async -> Bool {
-        guard let plan = activeTrip,
-              let token = plan.checkin_token else { return false }
+        guard let plan = activeTrip else { return false }
 
         debugLog("[Session] 📍 Check-in started, fetching location...")
 
-        // Get current location for check-in email (non-blocking, 5s timeout)
+        // Get current location for check-in (non-blocking, 5s timeout)
         let location = await LocationManager.shared.getCurrentLocation()
 
         if let loc = location {
             debugLog("[Session] 📍 Got location for check-in: \(loc.latitude), \(loc.longitude)")
         } else {
             debugLog("[Session] ⚠️ No location available for check-in")
+        }
+
+        // For group trips, use authenticated endpoint so the correct user is recorded
+        if plan.is_group_trip {
+            debugLog("[Session] 👥 Group trip - using authenticated check-in endpoint")
+            return await authenticatedCheckIn(plan: plan, location: location)
+        }
+
+        // For solo trips, use token-based endpoint
+        guard let token = plan.checkin_token else {
+            debugLog("[Session] ❌ No check-in token available")
+            return false
         }
 
         // Check if offline FIRST - queue immediately without waiting for network timeout
@@ -1880,6 +1891,126 @@ final class Session: ObservableObject {
         }
 
         debugLog("[Session] ℹ️ Check-in queued for offline sync")
+        return true
+    }
+
+    /// Authenticated check-in for group trips - uses the participant check-in endpoint
+    /// which records the correct user_id for the check-in event.
+    private func authenticatedCheckIn(plan: Trip, location: CLLocationCoordinate2D?) async -> Bool {
+        // Check if offline FIRST - queue immediately without waiting for network timeout
+        if !NetworkMonitor.shared.isConnected {
+            // For group trips offline, queue with authenticated flag
+            return await queueOfflineAuthenticatedCheckIn(plan: plan, location: location)
+        }
+
+        do {
+            // Build URL with coordinates if available
+            guard var urlComponents = URLComponents(url: url("/api/v1/trips/\(plan.id)/checkin"), resolvingAgainstBaseURL: false) else {
+                debugLog("[Session] ❌ Failed to construct authenticated check-in URL")
+                return false
+            }
+
+            if let loc = location {
+                urlComponents.queryItems = [
+                    URLQueryItem(name: "lat", value: String(loc.latitude)),
+                    URLQueryItem(name: "lon", value: String(loc.longitude))
+                ]
+                debugLog("[Session] 📍 Authenticated check-in URL with coords: \(urlComponents.url?.absoluteString ?? "nil")")
+            } else {
+                debugLog("[Session] ⚠️ Authenticated check-in URL without coords: \(urlComponents.url?.absoluteString ?? "nil")")
+            }
+
+            guard let requestURL = urlComponents.url else {
+                debugLog("[Session] ❌ Failed to build authenticated check-in request URL")
+                return false
+            }
+
+            // Use authenticated participant checkin endpoint
+            let _: GenericResponse = try await withAuth { bearer in
+                try await self.api.post(
+                    requestURL,
+                    body: API.Empty(),
+                    bearer: bearer
+                )
+            }
+
+            // Update local activeTrip with new last_checkin timestamp immediately
+            let checkinTimestamp = ISO8601DateFormatter().string(from: Date())
+            let hasLocation = location != nil
+
+            await MainActor.run {
+                // Update local activeTrip state so UI reflects the check-in
+                if var updatedTrip = self.activeTrip {
+                    updatedTrip.last_checkin = checkinTimestamp
+                    self.activeTrip = updatedTrip
+                    // Sync to allTrips as well
+                    self.syncTripInAllTrips(updatedTrip)
+                }
+                // Show appropriate notice based on location availability
+                self.notice = hasLocation ? "Checked in successfully!" : "Checked in (location unavailable)"
+                // Update widget data with new check-in
+                self.updateWidgetData()
+            }
+
+            // Also update local cache for consistency
+            LocalStorage.shared.updateCachedTripFields(
+                tripId: plan.id,
+                updates: ["last_checkin": checkinTimestamp]
+            )
+
+            debugLog("[Session] ✅ Authenticated check-in successful, local state updated")
+            return true
+        } catch let error as URLError where error.code == .notConnectedToInternet ||
+                                            error.code == .networkConnectionLost {
+            // Only queue for actual network connectivity issues
+            debugLog("[Session] ⚠️ Authenticated check-in network error - queueing offline: \(error.code)")
+            return await queueOfflineAuthenticatedCheckIn(plan: plan, location: location)
+        } catch let error as URLError where error.code == .timedOut {
+            // Timeout is tricky - server may have processed. Queue but log warning.
+            debugLog("[Session] ⚠️ Authenticated check-in timed out - server may have processed, queueing anyway")
+            return await queueOfflineAuthenticatedCheckIn(plan: plan, location: location)
+        } catch {
+            // Other errors (server errors, decode errors) - don't queue, show error
+            debugLog("[Session] ❌ Authenticated check-in failed with non-network error: \(error)")
+            await MainActor.run {
+                self.lastError = "Check-in failed. Please try again."
+            }
+            return false
+        }
+    }
+
+    private func queueOfflineAuthenticatedCheckIn(plan: Trip, location: CLLocationCoordinate2D?) async -> Bool {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        var payload: [String: Any] = ["trip_id": plan.id, "timestamp": timestamp, "authenticated": true]
+        if let loc = location {
+            payload["lat"] = loc.latitude
+            payload["lon"] = loc.longitude
+        }
+        LocalStorage.shared.queuePendingAction(
+            type: "checkin_authenticated",
+            tripId: plan.id,
+            payload: payload
+        )
+
+        // Update local cache with check-in timestamp
+        LocalStorage.shared.updateCachedTripFields(
+            tripId: plan.id,
+            updates: ["last_checkin": timestamp]
+        )
+
+        await MainActor.run {
+            // Update local activeTrip state so UI reflects the check-in
+            if var updatedTrip = self.activeTrip {
+                updatedTrip.last_checkin = timestamp
+                self.activeTrip = updatedTrip
+                // Sync to allTrips as well
+                self.syncTripInAllTrips(updatedTrip)
+            }
+            self.notice = "Check-in saved (will sync when online)"
+            self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
+        }
+
+        debugLog("[Session] ℹ️ Authenticated check-in queued for offline sync")
         return true
     }
 
