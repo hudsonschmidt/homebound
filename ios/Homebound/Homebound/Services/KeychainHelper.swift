@@ -9,6 +9,7 @@ final class KeychainHelper {
     private let service = "com.hudsonschmidt.Homebound"
     private let accessTokenKey = "accessToken"
     private let refreshTokenKey = "refreshToken"
+    private let userIdKey = "userId"
     private let userNameKey = "userName"
     private let userEmailKey = "userEmail"
     private let userAgeKey = "userAge"
@@ -29,10 +30,13 @@ final class KeychainHelper {
         save(token, for: refreshTokenKey)
     }
 
-    func saveUserData(name: String?, email: String?, age: Int?, profileCompleted: Bool) {
+    func saveUserData(id: Int? = nil, name: String?, email: String?, age: Int?, profileCompleted: Bool) {
         lock.lock()
         defer { lock.unlock() }
 
+        if let id = id {
+            saveUnlocked("\(id)", for: userIdKey)
+        }
         if let name = name {
             saveUnlocked(name, for: userNameKey)
         }
@@ -53,6 +57,11 @@ final class KeychainHelper {
 
     func getRefreshToken() -> String? {
         return load(for: refreshTokenKey)
+    }
+
+    func getUserId() -> Int? {
+        guard let idString = load(for: userIdKey) else { return nil }
+        return Int(idString)
     }
 
     func getUserName() -> String? {
@@ -81,6 +90,7 @@ final class KeychainHelper {
 
         deleteUnlocked(for: accessTokenKey)
         deleteUnlocked(for: refreshTokenKey)
+        deleteUnlocked(for: userIdKey)
         deleteUnlocked(for: userNameKey)
         deleteUnlocked(for: userEmailKey)
         deleteUnlocked(for: userAgeKey)

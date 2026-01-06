@@ -185,6 +185,11 @@ final class Session: ObservableObject {
     }
 
     // User profile
+    @Published var userId: Int? = nil {
+        didSet {
+            saveUserDataToKeychain()
+        }
+    }
     @Published var userName: String? = nil {
         didSet {
             saveUserDataToKeychain()
@@ -349,6 +354,7 @@ final class Session: ObservableObject {
             }
         }
 
+        userId = keychain.getUserId()
         userName = keychain.getUserName()
         userEmail = keychain.getUserEmail()
         userAge = keychain.getUserAge()
@@ -372,6 +378,7 @@ final class Session: ObservableObject {
 
     private func saveUserDataToKeychain() {
         keychain.saveUserData(
+            id: userId,
             name: userName,
             email: userEmail,
             age: userAge,
@@ -2346,6 +2353,10 @@ final class Session: ObservableObject {
             }
 
             await MainActor.run {
+                // Store user ID for ownership checks
+                if let id = response.id {
+                    self.userId = id
+                }
                 // Combine first and last name
                 if let first = response.first_name, let last = response.last_name {
                     self.userName = "\(first) \(last)"
@@ -2998,14 +3009,16 @@ final class Session: ObservableObject {
     func acceptTripInvitation(
         tripId: Int,
         safetyContactIds: [Int],
+        safetyFriendIds: [Int] = [],
         checkinIntervalMin: Int = 30,
         notifyStartHour: Int? = nil,
         notifyEndHour: Int? = nil
     ) async -> Bool {
-        debugLog("[Session] 🔵 ACCEPT called for trip \(tripId) with contacts \(safetyContactIds)")
+        debugLog("[Session] 🔵 ACCEPT called for trip \(tripId) with contacts \(safetyContactIds), friends \(safetyFriendIds)")
         do {
             let request = AcceptInvitationRequest(
                 safety_contact_ids: safetyContactIds,
+                safety_friend_ids: safetyFriendIds,
                 checkin_interval_min: checkinIntervalMin,
                 notify_start_hour: notifyStartHour,
                 notify_end_hour: notifyEndHour
@@ -3021,7 +3034,7 @@ final class Session: ObservableObject {
             await MainActor.run {
                 self.notice = "Joined the trip!"
             }
-            debugLog("[Session] ✅ Accepted trip invitation for trip \(tripId) with \(safetyContactIds.count) safety contacts")
+            debugLog("[Session] ✅ Accepted trip invitation for trip \(tripId) with \(safetyContactIds.count) contacts, \(safetyFriendIds.count) friends")
             return true
         } catch {
             debugLog("[Session] ❌ FAILED to accept trip \(tripId): \(error)")

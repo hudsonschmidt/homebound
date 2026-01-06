@@ -434,6 +434,33 @@ async def send_friend_trip_update_silent_push(
     log.info(f"Sent friend trip update silent push to user {friend_user_id} for trip {trip_id}")
 
 
+async def send_data_refresh_push(
+    user_id: int,
+    sync_type: str,
+    trip_id: int | None = None
+):
+    """Send silent push to trigger app data refresh.
+
+    Used when data changes that the user needs to see, such as:
+    - Friend request accepted
+    - Trip invitation accepted/declined
+    - Participant left trip
+    - Checkout vote cast
+    - Trip completed by vote
+
+    Args:
+        user_id: The user to refresh data for
+        sync_type: Type of sync needed (e.g., "friends", "trip", "trip_invitations")
+        trip_id: Optional trip ID if related to a specific trip
+    """
+    data = {"sync": sync_type}
+    if trip_id:
+        data["trip_id"] = str(trip_id)
+
+    await send_background_push_to_user(user_id, data=data)
+    log.info(f"Sent data refresh push to user {user_id}: sync={sync_type}, trip_id={trip_id}")
+
+
 def log_notification(
     user_id: int,
     notification_type: str,

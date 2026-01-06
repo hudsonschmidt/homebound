@@ -436,6 +436,8 @@ struct ActivePlanCardCompact: View {
     // Checkout voting state (for group trips)
     @State private var showingVoteConfirmation = false
     @State private var voteResponse: CheckoutVoteResponse? = nil
+    // Group trip checkout confirmation
+    @State private var showingGroupCheckoutConfirmation = false
 
     let extendOptions = [
         (15, "15 min"),
@@ -508,6 +510,12 @@ struct ActivePlanCardCompact: View {
 
     var lastCheckinTime: Date? {
         checkinEvents.compactMap(\.atDate).max()
+    }
+
+    /// Check if the current user is the trip owner
+    var isOwner: Bool {
+        guard let userId = session.userId else { return true } // Assume owner if no userId yet
+        return plan.user_id == userId
     }
 
     func relativeTimeString(from date: Date) -> String {
@@ -590,7 +598,12 @@ struct ActivePlanCardCompact: View {
             Button("OK", role: .cancel) { }
         } message: {
             if let response = voteResponse {
-                Text("Your vote has been recorded (\(response.votes_cast)/\(response.votes_needed) votes). The trip will end when enough participants vote.")
+                let remaining = response.votes_needed - response.votes_cast
+                if remaining == 1 {
+                    Text("Your vote has been recorded! 1 more vote needed to end the trip.")
+                } else {
+                    Text("Your vote has been recorded! \(remaining) more votes needed to end the trip.")
+                }
             }
         }
         .onChange(of: plan.eta_at) { _, _ in
@@ -824,15 +837,19 @@ struct ActivePlanCardCompact: View {
                         if let response = await session.voteCheckout(tripId: plan.id) {
                             await MainActor.run {
                                 voteResponse = response
-                                if response.trip_completed {
-                                    if preferences.hapticFeedbackEnabled {
-                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                    }
-                                } else {
+                            }
+                            if response.trip_completed {
+                                // Trip was completed by vote - reload to clear active trip
+                                await session.loadActivePlan()
+                                if preferences.hapticFeedbackEnabled {
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                }
+                            } else {
+                                await MainActor.run {
                                     showingVoteConfirmation = true
-                                    if preferences.hapticFeedbackEnabled {
-                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                    }
+                                }
+                                if preferences.hapticFeedbackEnabled {
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                                 }
                             }
                         } else {
@@ -854,7 +871,8 @@ struct ActivePlanCardCompact: View {
                             .font(.subheadline)
                             .fontWeight(.semibold)
                         if let response = voteResponse, !response.trip_completed {
-                            Text("\(response.votes_cast)/\(response.votes_needed) votes")
+                            let remaining = response.votes_needed - response.votes_cast
+                            Text(remaining == 1 ? "1 more vote needed" : "\(remaining) more votes needed")
                                 .font(.caption2)
                         }
                     }
@@ -866,8 +884,60 @@ struct ActivePlanCardCompact: View {
                     .shadow(color: Color.purple.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(isPerformingAction)
+            } else if plan.is_group_trip, let settings = plan.group_settings, settings.checkout_mode == "owner_only" {
+                // Group trip with owner_only mode - only owner can end
+                if isOwner {
+                    // Owner can end the trip - show confirmation first
+                    Button(action: {
+                        if preferences.hapticFeedbackEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                        showingGroupCheckoutConfirmation = true
+                    }) {
+                        Label("End Trip", systemImage: "house.fill")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.hbAccent)
+                            .cornerRadius(12)
+                            .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
+                    }
+                    .disabled(plan.checkout_token == nil || isPerformingAction)
+                } else {
+                    // Non-owner cannot end the trip
+                    HStack {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                        Text("Only the trip owner can end this trip")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+            } else if plan.is_group_trip {
+                // Group trip with "anyone" mode - show confirmation before ending
+                Button(action: {
+                    if preferences.hapticFeedbackEnabled {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }
+                    showingGroupCheckoutConfirmation = true
+                }) {
+                    Label("I'm Safe", systemImage: "house.fill")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.hbAccent)
+                        .cornerRadius(12)
+                        .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
+                }
+                .disabled(plan.checkout_token == nil || isPerformingAction)
             } else {
-                // Regular trip or group trip with "anyone" or "owner_only" mode - show I'm Safe button
+                // Regular solo trip - show I'm Safe button directly
                 Button(action: {
                     if preferences.hapticFeedbackEnabled {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -878,8 +948,6 @@ struct ActivePlanCardCompact: View {
                         if preferences.hapticFeedbackEnabled {
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
                         }
-                        // Note: completePlan() already calls loadActivePlan() internally
-                        // and sets activeTrip to nil, so no need to call it again here
                         await MainActor.run {
                             isPerformingAction = false
                         }
@@ -899,6 +967,23 @@ struct ActivePlanCardCompact: View {
             }
         }
         .disabled(isPerformingAction)
+        .alert("End Group Trip", isPresented: $showingGroupCheckoutConfirmation) {
+            Button("End Trip", role: .destructive) {
+                Task {
+                    isPerformingAction = true
+                    _ = await session.completePlan()
+                    if preferences.hapticFeedbackEnabled {
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
+                    await MainActor.run {
+                        isPerformingAction = false
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will end the trip for all \(plan.participant_count) participants. Are you sure?")
+        }
     }
 
     @ViewBuilder

@@ -14,6 +14,7 @@ from src import database as db
 from src.api import auth
 from src.services.notifications import (
     send_checkout_vote_push,
+    send_data_refresh_push,
     send_participant_checkin_push,
     send_participant_left_push,
     send_trip_completed_by_vote_push,
@@ -42,7 +43,8 @@ class ParticipantInviteRequest(BaseModel):
 
 class AcceptInvitationRequest(BaseModel):
     """Request to accept a group trip invitation with safety contacts and notification settings."""
-    safety_contact_ids: list[int]  # Contact IDs (1-3) to be notified if participant doesn't check in
+    safety_contact_ids: list[int] = []  # Email contact IDs (from contacts table)
+    safety_friend_ids: list[int] = []   # Friend user IDs (from users table)
     # Personal notification settings (optional, defaults applied if not provided)
     checkin_interval_min: int = 30  # How often to send check-in reminders (minutes)
     notify_start_hour: int | None = None  # Quiet hours start (0-23), None = no quiet hours
@@ -454,9 +456,10 @@ def get_participants(
         ).fetchone()
         vote_count = votes.count if votes else 0
 
-        # Calculate votes needed
+        # Calculate votes needed (use ceiling to ensure threshold is met)
+        # e.g., 3 participants * 50% = 1.5 -> 2 votes needed
         accepted_count = sum(1 for p in participants if p.status == 'accepted')
-        votes_needed = max(1, int(accepted_count * settings.vote_threshold)) if settings.checkout_mode == "vote" else 0
+        votes_needed = max(1, math.ceil(accepted_count * settings.vote_threshold)) if settings.checkout_mode == "vote" else 0
 
         return ParticipantListResponse(
             participants=[
@@ -492,42 +495,60 @@ def accept_invitation(
     user_id: int = Depends(auth.get_current_user_id)
 ):
     """Accept an invitation to join a group trip with safety contacts."""
-    log.info(f"[ACCEPT] User {user_id} accepting trip {trip_id} with contacts {request.safety_contact_ids}")
-    # Validate safety contacts
-    if not request.safety_contact_ids:
+    log.info(f"[ACCEPT] User {user_id} accepting trip {trip_id} with contacts={request.safety_contact_ids}, friends={request.safety_friend_ids}")
+
+    # Validate total safety contacts (email + friends)
+    total_contacts = len(request.safety_contact_ids) + len(request.safety_friend_ids)
+    if total_contacts == 0:
         raise HTTPException(
             status_code=400,
             detail="At least one safety contact is required to join a group trip"
         )
-    if len(request.safety_contact_ids) > 3:
+    if total_contacts > 3:
         raise HTTPException(
             status_code=400,
             detail="Maximum of 3 safety contacts allowed"
         )
 
     with db.engine.begin() as connection:
-        # Verify all contacts belong to this user
-        # Use IN clause with dynamic placeholders for SQLite compatibility
-        placeholders = ", ".join([f":contact_id_{i}" for i in range(len(request.safety_contact_ids))])
-        params = {"user_id": user_id}
-        for i, cid in enumerate(request.safety_contact_ids):
-            params[f"contact_id_{i}"] = cid
+        # Verify all email contacts belong to this user
+        if request.safety_contact_ids:
+            placeholders = ", ".join([f":contact_id_{i}" for i in range(len(request.safety_contact_ids))])
+            params = {"user_id": user_id}
+            for i, cid in enumerate(request.safety_contact_ids):
+                params[f"contact_id_{i}"] = cid
 
-        contact_count = connection.execute(
-            sqlalchemy.text(
-                f"""
-                SELECT COUNT(*) FROM contacts
-                WHERE id IN ({placeholders}) AND user_id = :user_id
-                """
-            ),
-            params
-        ).scalar()
+            contact_count = connection.execute(
+                sqlalchemy.text(
+                    f"""
+                    SELECT COUNT(*) FROM contacts
+                    WHERE id IN ({placeholders}) AND user_id = :user_id
+                    """
+                ),
+                params
+            ).scalar()
 
-        if contact_count != len(request.safety_contact_ids):
-            raise HTTPException(
-                status_code=400,
-                detail="One or more contacts do not belong to you"
-            )
+            if contact_count != len(request.safety_contact_ids):
+                raise HTTPException(
+                    status_code=400,
+                    detail="One or more contacts do not belong to you"
+                )
+
+        # Verify all friend IDs are actually friends
+        if request.safety_friend_ids:
+            for friend_id in request.safety_friend_ids:
+                id1, id2 = min(user_id, friend_id), max(user_id, friend_id)
+                is_friend = connection.execute(
+                    sqlalchemy.text(
+                        "SELECT 1 FROM friends WHERE user_id_1 = :id1 AND user_id_2 = :id2"
+                    ),
+                    {"id1": id1, "id2": id2}
+                ).fetchone()
+                if not is_friend:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"User {friend_id} is not your friend"
+                    )
 
         # Check if user has a pending invitation
         participant = connection.execute(
@@ -592,8 +613,9 @@ def accept_invitation(
             {"trip_id": trip_id, "user_id": user_id}
         )
 
-        # Store participant's safety contacts
-        for position, contact_id in enumerate(request.safety_contact_ids, start=1):
+        # Store participant's safety contacts (email contacts first, then friends)
+        position = 1
+        for contact_id in request.safety_contact_ids:
             connection.execute(
                 sqlalchemy.text(
                     """
@@ -608,6 +630,25 @@ def accept_invitation(
                     "position": position
                 }
             )
+            position += 1
+
+        # Store friend contacts
+        for friend_id in request.safety_friend_ids:
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO participant_trip_contacts (trip_id, participant_user_id, friend_user_id, position)
+                    VALUES (:trip_id, :user_id, :friend_user_id, :position)
+                    """
+                ),
+                {
+                    "trip_id": trip_id,
+                    "user_id": user_id,
+                    "friend_user_id": friend_id,
+                    "position": position
+                }
+            )
+            position += 1
 
         # Get trip owner and trip title for notification
         trip = connection.execute(
@@ -635,6 +676,22 @@ def accept_invitation(
                 ))
 
             background_tasks.add_task(send_accepted_push)
+
+        # Send data refresh push to all other accepted participants
+        other_participants = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT user_id FROM trip_participants
+                WHERE trip_id = :trip_id AND user_id != :user_id AND status = 'accepted'
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchall()
+
+        for participant in other_participants:
+            def send_refresh(uid=participant.user_id):
+                asyncio.run(send_data_refresh_push(uid, "trip", trip_id))
+            background_tasks.add_task(send_refresh)
 
         return {"ok": True, "message": "Invitation accepted"}
 
@@ -791,6 +848,22 @@ def leave_trip(
                 ))
 
             background_tasks.add_task(send_left_push)
+
+        # Send data refresh push to all other accepted participants
+        other_participants = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT user_id FROM trip_participants
+                WHERE trip_id = :trip_id AND user_id != :user_id AND status = 'accepted'
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchall()
+
+        for participant in other_participants:
+            def send_refresh(uid=participant.user_id):
+                asyncio.run(send_data_refresh_push(uid, "trip", trip_id))
+            background_tasks.add_task(send_refresh)
 
         return {"ok": True, "message": "Left the trip"}
 
@@ -1270,6 +1343,8 @@ def vote_checkout(
                             trip_title=trip_title,
                             trip_id=trip_id
                         ))
+                        # Also send refresh push to update UI
+                        asyncio.run(send_data_refresh_push(pid, "trip", trip_id))
 
                 background_tasks.add_task(send_completed_pushes)
 
@@ -1295,6 +1370,8 @@ def vote_checkout(
                         votes_count=vote_count,
                         votes_needed=votes_needed
                     ))
+                    # Also send refresh push to update vote count in UI
+                    asyncio.run(send_data_refresh_push(pid, "trip", trip_id))
 
             background_tasks.add_task(send_vote_pushes)
 
@@ -1338,8 +1415,21 @@ def get_pending_invitations(
             {"user_id": user_id, "now": now}
         ).fetchall()
 
-        return [
-            {
+        result = []
+        for inv in invitations:
+            # Get all participant user IDs for this trip (to filter out from friend contacts)
+            participants = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT user_id FROM trip_participants
+                    WHERE trip_id = :trip_id
+                    """
+                ),
+                {"trip_id": inv.trip_id}
+            ).fetchall()
+            participant_user_ids = [p.user_id for p in participants]
+
+            result.append({
                 "id": inv.id,
                 "trip_id": inv.trip_id,
                 "invited_at": _to_iso8601(inv.invited_at),
@@ -1350,7 +1440,8 @@ def get_pending_invitations(
                 "trip_eta": _to_iso8601(inv.eta),
                 "trip_location": inv.location_text,
                 "activity_name": inv.activity_name,
-                "activity_icon": inv.activity_icon
-            }
-            for inv in invitations
-        ]
+                "activity_icon": inv.activity_icon,
+                "participant_user_ids": participant_user_ids
+            })
+
+        return result

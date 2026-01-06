@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from src import database as db
 from src.api import auth
-from src.services.notifications import send_friend_request_accepted_push
+from src.services.notifications import send_data_refresh_push, send_friend_request_accepted_push
 
 router = APIRouter(
     prefix="/api/v1/friends",
@@ -522,6 +522,8 @@ def accept_invite(
                 inviter_user_id=inviter_id,
                 accepter_name=accepter_name
             ))
+            # Also send refresh push to update friends list
+            asyncio.run(send_data_refresh_push(inviter_id, "friends"))
 
         background_tasks.add_task(send_push_sync)
 

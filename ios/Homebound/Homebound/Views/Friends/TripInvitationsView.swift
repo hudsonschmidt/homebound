@@ -73,10 +73,11 @@ struct TripInvitationsView: View {
             }) { invitation in
                 JoinTripContactSelectionView(
                     invitation: invitation,
-                    onJoin: { contactIds, checkinInterval, notifyStart, notifyEnd in
+                    onJoin: { contactIds, friendIds, checkinInterval, notifyStart, notifyEnd in
                         await acceptInvitation(
                             invitation,
                             withContactIds: contactIds,
+                            friendIds: friendIds,
                             checkinInterval: checkinInterval,
                             notifyStart: notifyStart,
                             notifyEnd: notifyEnd
@@ -91,6 +92,7 @@ struct TripInvitationsView: View {
     private func acceptInvitation(
         _ invitation: TripInvitation,
         withContactIds contactIds: [Int],
+        friendIds: [Int],
         checkinInterval: Int,
         notifyStart: Int?,
         notifyEnd: Int?
@@ -99,6 +101,7 @@ struct TripInvitationsView: View {
         let success = await session.acceptTripInvitation(
             tripId: invitation.trip_id,
             safetyContactIds: contactIds,
+            safetyFriendIds: friendIds,
             checkinIntervalMin: checkinInterval,
             notifyStartHour: notifyStart,
             notifyEndHour: notifyEnd
@@ -256,10 +259,12 @@ struct JoinTripContactSelectionView: View {
     @Environment(\.dismiss) var dismiss
 
     let invitation: TripInvitation
-    let onJoin: ([Int], Int, Int?, Int?) async -> Void
+    let onJoin: ([Int], [Int], Int, Int?, Int?) async -> Void  // (contactIds, friendIds, interval, start, end)
 
     @State private var selectedContactIds: Set<Int> = []
+    @State private var selectedFriendIds: Set<Int> = []
     @State private var savedContacts: [Contact] = []
+    @State private var availableFriends: [Friend] = []  // Friends not already in the trip
     @State private var isLoading = true
     @State private var isJoining = false
 
@@ -274,6 +279,16 @@ struct JoinTripContactSelectionView: View {
     @State private var newContactName: String = ""
     @State private var newContactEmail: String = ""
     @State private var isAddingContact: Bool = false
+
+    /// Total number of selected safety contacts (email + friends)
+    private var totalSelectedCount: Int {
+        selectedContactIds.count + selectedFriendIds.count
+    }
+
+    /// Whether the user can select more contacts (max 3 total)
+    private var canSelectMore: Bool {
+        totalSelectedCount < 3
+    }
 
     var body: some View {
         NavigationStack {
@@ -328,8 +343,8 @@ struct JoinTripContactSelectionView: View {
                     Spacer()
                     ProgressView()
                     Spacer()
-                } else if savedContacts.isEmpty && !showAddContact {
-                    // No contacts available - show add contact option
+                } else if savedContacts.isEmpty && availableFriends.isEmpty && !showAddContact {
+                    // No contacts or friends available - show add contact option
                     Spacer()
                     VStack(spacing: 20) {
                         Image(systemName: "person.crop.circle.badge.plus")
@@ -360,7 +375,7 @@ struct JoinTripContactSelectionView: View {
                         .padding(.horizontal, 40)
                     }
                     Spacer()
-                } else if showAddContact || savedContacts.isEmpty {
+                } else if showAddContact || (savedContacts.isEmpty && availableFriends.isEmpty) {
                     // Add contact form
                     List {
                         Section {
@@ -416,27 +431,72 @@ struct JoinTripContactSelectionView: View {
                 } else {
                     // Contact selection list and notification settings
                     List {
-                        // Safety contacts section
-                        Section {
-                            ForEach(savedContacts) { contact in
-                                JoinTripContactRow(
-                                    contact: contact,
-                                    isSelected: selectedContactIds.contains(contact.id),
-                                    canSelect: selectedContactIds.count < 3 || selectedContactIds.contains(contact.id)
-                                ) { selected in
-                                    if selected {
-                                        selectedContactIds.insert(contact.id)
-                                    } else {
-                                        selectedContactIds.remove(contact.id)
+                        // Friends section (if any available)
+                        if !availableFriends.isEmpty {
+                            Section {
+                                ForEach(availableFriends) { friend in
+                                    JoinTripFriendRow(
+                                        friend: friend,
+                                        isSelected: selectedFriendIds.contains(friend.user_id),
+                                        canSelect: canSelectMore || selectedFriendIds.contains(friend.user_id)
+                                    ) { selected in
+                                        if selected {
+                                            selectedFriendIds.insert(friend.user_id)
+                                        } else {
+                                            selectedFriendIds.remove(friend.user_id)
+                                        }
                                     }
                                 }
+                            } header: {
+                                Text("Friends")
+                            } footer: {
+                                Text("Friends receive push notifications instantly")
                             }
-                        } header: {
-                            Text("\(selectedContactIds.count)/3 contacts selected")
-                        } footer: {
-                            if selectedContactIds.isEmpty {
-                                Text("Select at least one contact to join the trip")
-                                    .foregroundStyle(.orange)
+                        }
+
+                        // Email contacts section
+                        if !savedContacts.isEmpty {
+                            Section {
+                                ForEach(savedContacts) { contact in
+                                    JoinTripContactRow(
+                                        contact: contact,
+                                        isSelected: selectedContactIds.contains(contact.id),
+                                        canSelect: canSelectMore || selectedContactIds.contains(contact.id)
+                                    ) { selected in
+                                        if selected {
+                                            selectedContactIds.insert(contact.id)
+                                        } else {
+                                            selectedContactIds.remove(contact.id)
+                                        }
+                                    }
+                                }
+                            } header: {
+                                Text("Email Contacts")
+                            } footer: {
+                                Text("Email contacts receive notifications via email")
+                            }
+                        }
+
+                        // Selection status
+                        if totalSelectedCount == 0 {
+                            Section {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.orange)
+                                    Text("Select at least one contact to join the trip")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } else {
+                            Section {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                    Text("\(totalSelectedCount)/3 contacts selected")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
 
@@ -491,6 +551,7 @@ struct JoinTripContactSelectionView: View {
                             isJoining = true
                             await onJoin(
                                 Array(selectedContactIds),
+                                Array(selectedFriendIds),
                                 checkinInterval,
                                 useQuietHours ? notifyStartHour : nil,
                                 useQuietHours ? notifyEndHour : nil
@@ -512,11 +573,11 @@ struct JoinTripContactSelectionView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: 56)
-                        .background(selectedContactIds.isEmpty ? Color.gray : Color.hbBrand)
+                        .background(totalSelectedCount == 0 ? Color.gray : Color.hbBrand)
                         .foregroundStyle(.white)
                         .cornerRadius(16)
                     }
-                    .disabled(selectedContactIds.isEmpty || isJoining)
+                    .disabled(totalSelectedCount == 0 || isJoining)
                 }
                 .padding()
             }
@@ -530,7 +591,17 @@ struct JoinTripContactSelectionView: View {
                 }
             }
             .task {
-                savedContacts = await session.loadContacts()
+                // Load email contacts and friends in parallel
+                async let contactsTask = session.loadContacts()
+                async let friendsTask = session.loadFriends()
+
+                savedContacts = await contactsTask
+                let allFriends = await friendsTask
+
+                // Filter out friends who are already participants in the trip
+                let participantIds = Set(invitation.participant_user_ids ?? [])
+                availableFriends = allFriends.filter { !participantIds.contains($0.user_id) }
+
                 isLoading = false
             }
         }
@@ -599,6 +670,77 @@ struct JoinTripContactRow: View {
                     Text(contact.email)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Selection indicator
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isSelected ? Color.hbBrand : .secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(canSelect || isSelected ? 1 : 0.5)
+    }
+}
+
+// MARK: - Join Trip Friend Row
+
+struct JoinTripFriendRow: View {
+    let friend: Friend
+    let isSelected: Bool
+    let canSelect: Bool
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        Button(action: {
+            if canSelect || isSelected {
+                onToggle(!isSelected)
+            }
+        }) {
+            HStack(spacing: 12) {
+                // Friend avatar
+                if let photoUrl = friend.profile_photo_url, let url = URL(string: photoUrl) {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Circle()
+                            .fill(isSelected ? Color.hbBrand : Color(.secondarySystemFill))
+                            .overlay(
+                                Text(friend.initial)
+                                    .font(.headline)
+                                    .foregroundStyle(isSelected ? .white : .secondary)
+                            )
+                    }
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(isSelected ? Color.hbBrand : Color(.secondarySystemFill))
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Text(friend.initial)
+                                .font(.headline)
+                                .foregroundStyle(isSelected ? .white : .secondary)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(friend.fullName)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "bell.fill")
+                            .font(.caption2)
+                        Text("Push notifications")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
                 }
 
                 Spacer()

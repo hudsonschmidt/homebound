@@ -1093,6 +1093,7 @@ struct TripInvitation: Codable, Identifiable {
     let trip_location: String?
     let activity_name: String
     let activity_icon: String
+    let participant_user_ids: [Int]?  // User IDs of all trip participants (to filter from friend contacts)
 
     var invitedAtDate: Date? {
         guard let invited_at else { return nil }
@@ -1117,7 +1118,8 @@ struct ParticipantInviteRequest: Codable {
 
 /// Request body for accepting a trip invitation with safety contacts and notification settings
 struct AcceptInvitationRequest: Codable {
-    let safety_contact_ids: [Int]
+    let safety_contact_ids: [Int]  // Email contact IDs (from contacts table)
+    let safety_friend_ids: [Int]   // Friend user IDs (from users table)
     // Personal notification settings
     let checkin_interval_min: Int
     let notify_start_hour: Int?  // nil = no quiet hours
