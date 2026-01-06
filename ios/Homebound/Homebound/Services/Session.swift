@@ -1280,6 +1280,11 @@ final class Session: ObservableObject {
 
             // Sync pending actions after data loads
             await syncPendingActions()
+
+            // Start Supabase Realtime subscriptions for instant updates
+            if let userId = self.userId {
+                await RealtimeManager.shared.start(userId: userId)
+            }
         }
     }
 
@@ -3379,9 +3384,10 @@ final class Session: ObservableObject {
         deviceRegistrationTask = nil
         deviceRegistrationRetryCount = 0
 
-        // End all Live Activities
+        // End all Live Activities and stop Realtime subscriptions
         Task {
             await LiveActivityManager.shared.endAllActivities()
+            await RealtimeManager.shared.stop()
         }
 
         // Clear keychain

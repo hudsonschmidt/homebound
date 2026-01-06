@@ -12,9 +12,12 @@ from pydantic import BaseModel
 
 from src import database as db
 from src.api import auth
+from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
+    send_checkin_update_emails,
     send_checkout_vote_push,
     send_data_refresh_push,
+    send_friend_checkin_push,
     send_participant_checkin_push,
     send_participant_left_push,
     send_trip_completed_by_vote_push,
@@ -1023,14 +1026,17 @@ def participant_checkin(
     updating their location and the trip's check-in status.
     """
     with db.engine.begin() as connection:
-        # Get trip details
+        # Get trip details with activity name for notifications
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, user_id, title, status, is_group_trip
-                FROM trips
-                WHERE id = :trip_id
-                AND status IN ('active', 'overdue', 'overdue_notified')
+                SELECT t.id, t.user_id, t.title, t.status, t.is_group_trip,
+                       t.timezone, t.location_text, t.eta,
+                       a.name as activity_name
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.id = :trip_id
+                AND t.status IN ('active', 'overdue', 'overdue_notified')
                 """
             ),
             {"trip_id": trip_id}
@@ -1154,6 +1160,118 @@ def participant_checkin(
 
                 background_tasks.add_task(send_checkin_notifications)
                 log.info(f"[Participants] Scheduled check-in notifications for {len(other_participant_ids)} participants")
+
+        # Get checking-in participant's email safety contacts for this trip
+        participant_email_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT c.id, c.name, c.email
+                FROM participant_trip_contacts ptc
+                JOIN contacts c ON ptc.contact_id = c.id
+                WHERE ptc.trip_id = :trip_id
+                AND ptc.participant_user_id = :user_id
+                AND c.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchall()
+
+        contacts_for_email = [dict(c._mapping) for c in participant_email_contacts]
+
+        # Get checking-in participant's friend safety contacts
+        participant_friend_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend_user_id FROM participant_trip_contacts
+                WHERE trip_id = :trip_id
+                AND participant_user_id = :user_id
+                AND friend_user_id IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchall()
+
+        friend_user_ids = [f.friend_user_id for f in participant_friend_contacts]
+
+        # Prepare location info for notifications
+        coordinates_str = None
+        location_name = None
+        if lat is not None and lon is not None:
+            coordinates_str = f"{lat:.6f}, {lon:.6f}"
+            location_name = reverse_geocode_sync(lat, lon)
+            if location_name:
+                log.info(f"[Participants] Reverse geocoded to: {location_name}")
+
+        # Send check-in emails to participant's contacts (in background)
+        if contacts_for_email:
+            trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
+            activity_name = trip.activity_name
+            user_timezone = trip.timezone
+            checker_name_for_email = checker_name
+
+            def send_contact_emails():
+                asyncio.run(send_checkin_update_emails(
+                    trip=trip_data,
+                    contacts=contacts_for_email,
+                    user_name=checker_name_for_email,
+                    activity_name=activity_name,
+                    user_timezone=user_timezone,
+                    coordinates=coordinates_str,
+                    location_name=location_name
+                ))
+
+            background_tasks.add_task(send_contact_emails)
+            log.info(f"[Participants] Scheduled check-in emails for {len(contacts_for_email)} contacts")
+
+        # Send friend check-in pushes (in background)
+        if friend_user_ids:
+            trip_title_for_friends = trip.title
+            checker_name_for_friends = checker_name
+            location_name_for_friends = location_name
+            coordinates_for_friends = (lat, lon) if lat is not None and lon is not None else None
+
+            def send_friend_pushes():
+                for friend_id in friend_user_ids:
+                    asyncio.run(send_friend_checkin_push(
+                        friend_user_id=friend_id,
+                        user_name=checker_name_for_friends,
+                        trip_title=trip_title_for_friends,
+                        location_name=location_name_for_friends,
+                        coordinates=coordinates_for_friends
+                    ))
+
+            background_tasks.add_task(send_friend_pushes)
+            log.info(f"[Participants] Scheduled check-in pushes for {len(friend_user_ids)} friend contacts")
+
+        # Send refresh pushes to owner and other participants so they see updated check-in count
+        if trip.is_group_trip:
+            refresh_user_ids = []
+
+            # Add owner if checker is not the owner
+            if not is_owner:
+                refresh_user_ids.append(trip.user_id)
+
+            # Add all other accepted participants
+            other_participants_for_refresh = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT user_id FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id != :checker_id AND status = 'accepted'
+                    """
+                ),
+                {"trip_id": trip_id, "checker_id": user_id}
+            ).fetchall()
+            refresh_user_ids.extend([p.user_id for p in other_participants_for_refresh])
+
+            if refresh_user_ids:
+                trip_id_for_refresh = trip_id
+
+                def send_refresh_pushes():
+                    for uid in refresh_user_ids:
+                        asyncio.run(send_data_refresh_push(uid, "trip", trip_id_for_refresh))
+
+                background_tasks.add_task(send_refresh_pushes)
+                log.info(f"[Participants] Scheduled refresh pushes for {len(refresh_user_ids)} users")
 
         log.info(f"[Participants] User {user_id} checked in to group trip {trip_id}")
 

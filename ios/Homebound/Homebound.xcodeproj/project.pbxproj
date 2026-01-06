@@ -10,6 +10,7 @@
 		F8288F0B2EF27FA300636D9F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F8288F0A2EF27FA300636D9F /* WidgetKit.framework */; };
 		F8288F0D2EF27FA300636D9F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F8288F0C2EF27FA300636D9F /* SwiftUI.framework */; };
 		F8288F1E2EF27FA400636D9F /* HomeboundWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F8288FE62F0CB38700636D9F /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = F8288FE52F0CB38700636D9F /* Supabase */; };
 		F85BFDFC2ECE8F9C009A47CD /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = F85BFDFB2ECE8F9C009A47CD /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -95,6 +96,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F8288FE62F0CB38700636D9F /* Supabase in Frameworks */,
 				F85BFDFC2ECE8F9C009A47CD /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -162,6 +164,7 @@
 			name = Homebound;
 			packageProductDependencies = (
 				F85BFDFB2ECE8F9C009A47CD /* GRDB */,
+				F8288FE52F0CB38700636D9F /* Supabase */,
 			);
 			productName = Homebound;
 			productReference = F82135962EAB01E300237850 /* Homebound.app */;
@@ -218,6 +221,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				F85BFDFA2ECE8F9C009A47CD /* XCRemoteSwiftPackageReference "GRDB" */,
+				F8288FE42F0CB38700636D9F /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F82135972EAB01E300237850 /* Products */;
@@ -563,6 +567,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		F8288FE42F0CB38700636D9F /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase-community/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
 		F85BFDFA2ECE8F9C009A47CD /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
@@ -574,6 +586,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		F8288FE52F0CB38700636D9F /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F8288FE42F0CB38700636D9F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
 		F85BFDFB2ECE8F9C009A47CD /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F85BFDFA2ECE8F9C009A47CD /* XCRemoteSwiftPackageReference "GRDB" */;

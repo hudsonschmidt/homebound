@@ -54,9 +54,18 @@ def register_live_activity_token(
         )
 
     with db.engine.begin() as conn:
-        # Verify trip belongs to user
+        # Verify trip ownership OR accepted participant status
         trip = conn.execute(
-            sqlalchemy.text("SELECT id FROM trips WHERE id = :trip_id AND user_id = :user_id"),
+            sqlalchemy.text("""
+                SELECT id FROM trips WHERE id = :trip_id
+                AND (
+                    user_id = :user_id
+                    OR EXISTS (
+                        SELECT 1 FROM trip_participants
+                        WHERE trip_id = :trip_id AND user_id = :user_id AND status = 'accepted'
+                    )
+                )
+            """),
             {"trip_id": body.trip_id, "user_id": user_id}
         ).fetchone()
 

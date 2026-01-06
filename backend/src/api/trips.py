@@ -1861,13 +1861,20 @@ def delete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
 def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
     """Get timeline events for a specific trip"""
     with db.engine.begin() as connection:
-        # Verify trip ownership
+        # Verify trip ownership OR accepted participant status
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id
-                FROM trips
-                WHERE id = :trip_id AND user_id = :user_id
+                SELECT t.id
+                FROM trips t
+                WHERE t.id = :trip_id
+                AND (
+                    t.user_id = :user_id
+                    OR EXISTS (
+                        SELECT 1 FROM trip_participants tp
+                        WHERE tp.trip_id = t.id AND tp.user_id = :user_id AND tp.status = 'accepted'
+                    )
+                )
                 """
             ),
             {"trip_id": trip_id, "user_id": user_id}

@@ -11,6 +11,7 @@ from src import database as db
 from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
     send_checkin_update_emails,
+    send_data_refresh_push,
     send_friend_checkin_push,
     send_friend_overdue_resolved_push,
     send_friend_trip_completed_push,
@@ -256,6 +257,28 @@ def checkin_with_token(
             background_tasks.add_task(send_friend_checkin_sync)
             log.info(f"[Checkin] Scheduled check-in push notifications for {len(friend_user_ids)} friend contacts")
 
+        # For group trips, send refresh push to all participants so they see updated check-in count
+        if is_group and is_group.is_group_trip:
+            all_participant_ids = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT user_id FROM trip_participants
+                    WHERE trip_id = :trip_id AND status = 'accepted'
+                    """
+                ),
+                {"trip_id": trip.id}
+            ).fetchall()
+
+            if all_participant_ids:
+                trip_id_for_refresh = trip.id
+
+                def send_refresh_pushes():
+                    for p in all_participant_ids:
+                        asyncio.run(send_data_refresh_push(p.user_id, "trip", trip_id_for_refresh))
+
+                background_tasks.add_task(send_refresh_pushes)
+                log.info(f"[Checkin] Scheduled refresh pushes for {len(all_participant_ids)} participants")
+
         return CheckinResponse(
             ok=True,
             message=f"Successfully checked in to '{trip.title}'"
@@ -455,9 +478,11 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                             trip_title=trip_title_for_participants,
                             trip_id=trip_id_for_participants
                         ))
+                        # Also send refresh push so their UI updates immediately
+                        asyncio.run(send_data_refresh_push(pid, "trip", trip_id_for_participants))
 
                 background_tasks.add_task(send_participant_completion_push)
-                log.info(f"[Checkout] Scheduled completion push to {len(participant_ids)} group trip participants")
+                log.info(f"[Checkout] Scheduled completion push and refresh to {len(participant_ids)} group trip participants")
 
         return CheckinResponse(
             ok=True,
