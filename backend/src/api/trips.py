@@ -2037,6 +2037,169 @@ def get_trip_timeline(trip_id: int, user_id: int = Depends(auth.get_current_user
         ]
 
 
+# ==================== My Trip Contacts ====================
+
+class TripContactResponse(BaseModel):
+    """A safety contact for a trip (either email contact or friend)."""
+    type: str  # "email" or "friend"
+    # For email contacts
+    contact_id: int | None = None
+    name: str | None = None
+    email: str | None = None
+    # For friend contacts
+    friend_user_id: int | None = None
+    friend_name: str | None = None
+    profile_photo_url: str | None = None
+
+
+class MyTripContactsResponse(BaseModel):
+    """Response containing the current user's safety contacts for a trip."""
+    contacts: list[TripContactResponse]
+
+
+@router.get("/{trip_id}/my-contacts", response_model=MyTripContactsResponse)
+def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
+    """Get the current user's safety contacts for a trip.
+
+    For group trips, each participant has their own safety contacts.
+    This endpoint returns the contacts for the authenticated user:
+    - If user is owner: returns owner's contacts (contact1/2/3, friend_contact1/2/3)
+    - If user is participant: returns participant's contacts from participant_trip_contacts
+    """
+    with db.engine.begin() as connection:
+        # Get trip and check if user has access
+        trip = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT t.id, t.user_id, t.contact1, t.contact2, t.contact3, t.is_group_trip
+                FROM trips t
+                WHERE t.id = :trip_id
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if not trip:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trip not found"
+            )
+
+        is_owner = trip.user_id == user_id
+        contacts: list[TripContactResponse] = []
+
+        if is_owner:
+            # Owner: get contacts from trip table and trip_safety_contacts
+
+            # Get email contacts (contact1, contact2, contact3)
+            contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+            contact_ids = [c for c in contact_ids if c is not None]
+
+            if contact_ids:
+                email_contacts = connection.execute(
+                    sqlalchemy.text(
+                        "SELECT id, name, email FROM contacts WHERE id = ANY(:ids)"
+                    ),
+                    {"ids": contact_ids}
+                ).fetchall()
+
+                for c in email_contacts:
+                    contacts.append(TripContactResponse(
+                        type="email",
+                        contact_id=c.id,
+                        name=c.name,
+                        email=c.email
+                    ))
+
+            # Get friend contacts from trip_safety_contacts
+            friend_rows = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT tsc.friend_user_id, u.first_name, u.last_name, u.profile_photo_url
+                    FROM trip_safety_contacts tsc
+                    JOIN users u ON tsc.friend_user_id = u.id
+                    WHERE tsc.trip_id = :trip_id AND tsc.friend_user_id IS NOT NULL
+                    ORDER BY tsc.position
+                    """
+                ),
+                {"trip_id": trip_id}
+            ).fetchall()
+
+            for f in friend_rows:
+                contacts.append(TripContactResponse(
+                    type="friend",
+                    friend_user_id=f.friend_user_id,
+                    friend_name=f"{f.first_name} {f.last_name}".strip() or None,
+                    profile_photo_url=f.profile_photo_url
+                ))
+
+        else:
+            # Participant: check they have accepted the trip
+            participant = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id, status FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id = :user_id
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchone()
+
+            if not participant:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Trip not found or access denied"
+                )
+
+            # Get participant's contacts from participant_trip_contacts
+            # Email contacts
+            email_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT c.id, c.name, c.email
+                    FROM participant_trip_contacts ptc
+                    JOIN contacts c ON ptc.contact_id = c.id
+                    WHERE ptc.trip_id = :trip_id AND ptc.participant_user_id = :user_id
+                    ORDER BY ptc.position
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchall()
+
+            for c in email_contacts:
+                contacts.append(TripContactResponse(
+                    type="email",
+                    contact_id=c.id,
+                    name=c.name,
+                    email=c.email
+                ))
+
+            # Friend contacts
+            friend_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT ptc.friend_user_id, u.first_name, u.last_name, u.profile_photo_url
+                    FROM participant_trip_contacts ptc
+                    JOIN users u ON ptc.friend_user_id = u.id
+                    WHERE ptc.trip_id = :trip_id AND ptc.participant_user_id = :user_id
+                        AND ptc.friend_user_id IS NOT NULL
+                    ORDER BY ptc.position
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchall()
+
+            for f in friend_contacts:
+                contacts.append(TripContactResponse(
+                    type="friend",
+                    friend_user_id=f.friend_user_id,
+                    friend_name=f"{f.first_name} {f.last_name}".strip() or None,
+                    profile_photo_url=f.profile_photo_url
+                ))
+
+        return MyTripContactsResponse(contacts=contacts)
+
+
 # ==================== Live Location Sharing ====================
 
 class LiveLocationUpdate(BaseModel):

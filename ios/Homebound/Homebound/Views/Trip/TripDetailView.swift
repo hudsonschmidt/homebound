@@ -13,6 +13,8 @@ struct TripDetailView: View {
     @State private var friendsLoaded = false
     @State private var participants: [TripParticipant] = []
     @State private var isLoadingParticipants = false
+    @State private var myTripContacts: [TripContact] = []
+    @State private var isLoadingMyContacts = false
 
     // Computed property to always get fresh trip from session
     private var trip: Trip? {
@@ -38,7 +40,12 @@ struct TripDetailView: View {
                         TripDetailTimelineSection(events: timelineEvents, isLoading: isLoadingTimeline)
 
                         // Safety Contacts Section
-                        TripDetailContactsSection(trip: trip, contactsReady: contactsLoaded && friendsLoaded)
+                        TripDetailContactsSection(
+                            trip: trip,
+                            myContacts: myTripContacts,
+                            isLoading: isLoadingMyContacts,
+                            contactsReady: contactsLoaded && friendsLoaded
+                        )
 
                         // Participants Section (for group trips)
                         if trip.is_group_trip {
@@ -88,12 +95,23 @@ struct TripDetailView: View {
     }
 
     private func loadAllData() async {
-        // Load timeline, contacts, friends, and participants in parallel
+        // Load timeline, contacts, friends, participants, and my-contacts in parallel
         async let timelineTask: Void = loadTimelineEvents()
         async let contactsTask: Void = ensureContactsLoaded()
         async let friendsTask: Void = ensureFriendsLoaded()
         async let participantsTask: Void = loadParticipantsIfGroupTrip()
-        _ = await (timelineTask, contactsTask, friendsTask, participantsTask)
+        async let myContactsTask: Void = loadMyContactsIfGroupTrip()
+        _ = await (timelineTask, contactsTask, friendsTask, participantsTask, myContactsTask)
+    }
+
+    private func loadMyContactsIfGroupTrip() async {
+        guard let trip = trip, trip.is_group_trip else { return }
+        await MainActor.run { isLoadingMyContacts = true }
+        let contacts = await session.getMyTripContacts(tripId: tripId)
+        await MainActor.run {
+            myTripContacts = contacts
+            isLoadingMyContacts = false
+        }
     }
 
     private func loadParticipantsIfGroupTrip() async {
@@ -519,15 +537,40 @@ private struct TimelineEventRow: View {
     }
 
     private var eventTitle: String {
+        // Get the actor's first name if available
+        let actorName: String? = {
+            guard let fullName = event.user_name, !fullName.isEmpty else { return nil }
+            // Extract first name only
+            return fullName.split(separator: " ").first.map(String.init)
+        }()
+
         switch event.kind {
-        case "checkin": return "Checked in"
-        case "checkout": return "Checked out"
-        case "extended":
-            if let minutes = event.extended_by {
-                return "Extended by \(minutes) min"
+        case "checkin":
+            if let name = actorName {
+                return "\(name) checked in"
             }
-            return "Extended"
-        default: return event.kind.capitalized
+            return "Checked in"
+        case "checkout":
+            if let name = actorName {
+                return "\(name) checked out"
+            }
+            return "Checked out"
+        case "extended":
+            let extendedText: String
+            if let minutes = event.extended_by {
+                extendedText = "Extended by \(minutes) min"
+            } else {
+                extendedText = "Extended"
+            }
+            if let name = actorName {
+                return "\(name): \(extendedText)"
+            }
+            return extendedText
+        default:
+            if let name = actorName {
+                return "\(name): \(event.kind.capitalized)"
+            }
+            return event.kind.capitalized
         }
     }
 
@@ -577,9 +620,12 @@ private struct TimelineEventRow: View {
 
 private struct TripDetailContactsSection: View {
     let trip: Trip
+    let myContacts: [TripContact]
+    let isLoading: Bool
     let contactsReady: Bool
     @EnvironmentObject var session: Session
 
+    // For non-group trips, use trip's contact IDs
     private var friendContactIds: [Int] {
         [trip.friend_contact1, trip.friend_contact2, trip.friend_contact3].compactMap { $0 }
     }
@@ -589,7 +635,10 @@ private struct TripDetailContactsSection: View {
     }
 
     private var hasContacts: Bool {
-        !friendContactIds.isEmpty || !emailContactIds.isEmpty
+        if trip.is_group_trip {
+            return !myContacts.isEmpty
+        }
+        return !friendContactIds.isEmpty || !emailContactIds.isEmpty
     }
 
     var body: some View {
@@ -597,7 +646,7 @@ private struct TripDetailContactsSection: View {
             Text("Safety Contacts")
                 .font(.headline)
 
-            if !contactsReady {
+            if isLoading || (!trip.is_group_trip && !contactsReady) {
                 HStack {
                     Spacer()
                     ProgressView()
@@ -609,7 +658,29 @@ private struct TripDetailContactsSection: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
+            } else if trip.is_group_trip {
+                // Group trip: use myContacts from /my-contacts endpoint
+                VStack(spacing: 8) {
+                    ForEach(myContacts) { contact in
+                        if contact.isFriendContact {
+                            TripContactRow(
+                                name: contact.displayName,
+                                icon: "bell.fill",
+                                iconColor: .blue,
+                                notificationType: "Push notification"
+                            )
+                        } else {
+                            TripContactRow(
+                                name: contact.displayName,
+                                icon: "envelope.fill",
+                                iconColor: .orange,
+                                notificationType: "Email"
+                            )
+                        }
+                    }
+                }
             } else {
+                // Non-group trip: use trip's contact IDs (existing behavior)
                 VStack(spacing: 8) {
                     // Friend contacts (push notifications)
                     ForEach(friendContactIds, id: \.self) { userId in
@@ -694,6 +765,10 @@ private struct TripDetailParticipantsSection: View {
         participants.filter { $0.status == "accepted" }
     }
 
+    var leftParticipants: [TripParticipant] {
+        participants.filter { $0.status == "left" }
+    }
+
     var pendingParticipants: [TripParticipant] {
         participants.filter { $0.status == "invited" }
     }
@@ -732,6 +807,20 @@ private struct TripDetailParticipantsSection: View {
                     // Accepted participants
                     ForEach(acceptedParticipants, id: \.id) { participant in
                         ParticipantRow(participant: participant)
+                    }
+
+                    // Left participants
+                    if !leftParticipants.isEmpty {
+                        Divider()
+                            .padding(.vertical, 4)
+
+                        Text("Left")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        ForEach(leftParticipants, id: \.id) { participant in
+                            ParticipantRow(participant: participant)
+                        }
                     }
 
                     // Pending participants
@@ -811,8 +900,12 @@ private struct ParticipantRow: View {
                     }
                 }
 
-                // Last check-in info
-                if let lastCheckin = participant.lastCheckinAtDate {
+                // Status-dependent info
+                if participant.status == "left", let leftAt = participant.leftAtDate {
+                    Text("Left on \(leftAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if let lastCheckin = participant.lastCheckinAtDate {
                     Text("Last check-in: \(lastCheckin.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)

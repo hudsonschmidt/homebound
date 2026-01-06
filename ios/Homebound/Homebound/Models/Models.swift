@@ -1023,6 +1023,11 @@ struct TripParticipant: Codable, Identifiable, Equatable {
         return DateUtils.parseISO8601(joined_at)
     }
 
+    var leftAtDate: Date? {
+        guard let left_at else { return nil }
+        return DateUtils.parseISO8601(left_at)
+    }
+
     var lastCheckinAtDate: Date? {
         guard let last_checkin_at else { return nil }
         return DateUtils.parseISO8601(last_checkin_at)
@@ -1046,6 +1051,46 @@ struct ParticipantListResponse: Codable {
     let checkout_votes_needed: Int
     let group_settings: GroupSettings
     let user_has_voted: Bool?
+}
+
+/// A safety contact for a trip (either email contact or friend)
+struct TripContact: Codable, Identifiable {
+    let type: String  // "email" or "friend"
+    // For email contacts
+    let contact_id: Int?
+    let name: String?
+    let email: String?
+    // For friend contacts
+    let friend_user_id: Int?
+    let friend_name: String?
+    let profile_photo_url: String?
+
+    var id: String {
+        if let contactId = contact_id {
+            return "email-\(contactId)"
+        }
+        if let friendId = friend_user_id {
+            return "friend-\(friendId)"
+        }
+        return UUID().uuidString
+    }
+
+    var displayName: String {
+        name ?? friend_name ?? "Unknown"
+    }
+
+    var isEmailContact: Bool {
+        type == "email"
+    }
+
+    var isFriendContact: Bool {
+        type == "friend"
+    }
+}
+
+/// Response containing the current user's safety contacts for a trip
+struct MyTripContactsResponse: Codable {
+    let contacts: [TripContact]
 }
 
 /// Response for checkout vote action

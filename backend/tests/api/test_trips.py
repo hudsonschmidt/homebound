@@ -4175,3 +4175,52 @@ def test_share_live_location_defaults_to_false():
     assert trip.share_live_location is False
 
     cleanup_test_data(user_id)
+
+
+# ==================== My Contacts Tests ====================
+
+def test_get_my_contacts_owner():
+    """Test that owner can retrieve their own safety contacts."""
+    from src.api.trips import get_my_trip_contacts
+
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="My Contacts Owner Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Trail",
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    # Get my contacts
+    result = get_my_trip_contacts(trip.id, user_id=user_id)
+
+    assert len(result.contacts) == 1
+    assert result.contacts[0].type == "email"
+    assert result.contacts[0].contact_id == contact_id
+    assert result.contacts[0].name == "Emergency Contact"
+
+    cleanup_test_data(user_id)
+
+
+def test_get_my_contacts_trip_not_found():
+    """Test that 404 is returned for non-existent trip."""
+    from src.api.trips import get_my_trip_contacts
+
+    user_id, contact_id = setup_test_user_and_contact()
+
+    with pytest.raises(HTTPException) as exc:
+        get_my_trip_contacts(trip_id=999999, user_id=user_id)
+
+    assert exc.value.status_code == 404
+
+    cleanup_test_data(user_id)

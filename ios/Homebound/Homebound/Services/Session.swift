@@ -3204,6 +3204,23 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Get the current user's safety contacts for a trip (their own contacts, not owner's)
+    func getMyTripContacts(tripId: Int) async -> [TripContact] {
+        do {
+            let response: MyTripContactsResponse = try await withAuth { bearer in
+                try await self.api.get(
+                    self.url("/api/v1/trips/\(tripId)/my-contacts"),
+                    bearer: bearer
+                )
+            }
+            debugLog("[Session] ✅ Loaded \(response.contacts.count) contacts for trip \(tripId)")
+            return response.contacts
+        } catch {
+            debugLog("[Session] ❌ Failed to get my contacts: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     /// Refresh the vote status for a group trip (called by RealtimeManager)
     func refreshVoteStatus(tripId: Int) async {
         guard let response = await getParticipants(tripId: tripId) else { return }
