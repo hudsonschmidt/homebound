@@ -127,6 +127,46 @@ def _get_friend_contacts_for_trip(connection, trip_id: int) -> dict[str, int | N
     return friend_contacts
 
 
+def _get_friend_contacts_for_trips_batch(connection, trip_ids: list[int]) -> dict[int, dict[str, int | None]]:
+    """Get friend contacts for multiple trips in a single query.
+
+    Returns a dict mapping trip_id -> {friend_contact1, friend_contact2, friend_contact3}
+    """
+    if not trip_ids:
+        return {}
+
+    result = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT trip_id, friend_user_id, position
+            FROM trip_safety_contacts
+            WHERE trip_id = ANY(:trip_ids) AND friend_user_id IS NOT NULL
+            ORDER BY trip_id, position
+            """
+        ),
+        {"trip_ids": trip_ids}
+    ).fetchall()
+
+    # Initialize all trips with empty contacts
+    contacts_map: dict[int, dict[str, int | None]] = {
+        tid: {"friend_contact1": None, "friend_contact2": None, "friend_contact3": None}
+        for tid in trip_ids
+    }
+
+    # Group by trip_id and assign contacts by position
+    for row in result:
+        tid = row.trip_id
+        pos = row.position
+        if pos == 0:
+            contacts_map[tid]["friend_contact1"] = row.friend_user_id
+        elif pos == 1:
+            contacts_map[tid]["friend_contact2"] = row.friend_user_id
+        elif pos == 2:
+            contacts_map[tid]["friend_contact3"] = row.friend_user_id
+
+    return contacts_map
+
+
 router = APIRouter(
     prefix="/api/v1/trips",
     tags=["trips"],
@@ -833,6 +873,10 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
             {"user_id": user_id}
         ).mappings().fetchall()
 
+        # Batch load friend contacts for all trips (reduces N+1 queries)
+        trip_ids = [trip["id"] for trip in trips]
+        friend_contacts_map = _get_friend_contacts_for_trips_batch(connection, trip_ids)
+
         result = []
         for trip in trips:
             # Construct Activity object for each trip
@@ -847,8 +891,10 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                 order=trip["activity_order"]
             )
 
-            # Get friend contacts from junction table
-            friend_contacts = _get_friend_contacts_for_trip(connection, trip["id"])
+            # Get friend contacts from pre-loaded batch
+            friend_contacts = friend_contacts_map.get(trip["id"], {
+                "friend_contact1": None, "friend_contact2": None, "friend_contact3": None
+            })
 
             result.append(
                 TripResponse(

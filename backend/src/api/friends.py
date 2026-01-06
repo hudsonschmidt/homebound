@@ -283,6 +283,192 @@ def _calculate_achievements_count(
     return count
 
 
+def _compute_friend_stats_batch(connection, friend_user_ids: list[int]) -> dict[int, dict]:
+    """Compute stats for multiple friends in batched queries.
+
+    Returns dict mapping user_id -> stats dict
+    This reduces N+1 queries to a fixed number of batch queries.
+    """
+    if not friend_user_ids:
+        return {}
+
+    # Initialize result with default values
+    result = {uid: {
+        "age": None,
+        "achievements_count": None,
+        "total_achievements": None,
+        "total_trips": None,
+        "total_adventure_hours": None,
+        "favorite_activity_name": None,
+        "favorite_activity_icon": None,
+    } for uid in friend_user_ids}
+
+    # 1. Batch get privacy settings and ages for all friends
+    privacy_rows = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT id, age,
+                   friend_share_age, friend_share_total_trips,
+                   friend_share_adventure_time, friend_share_favorite_activity,
+                   friend_share_achievements
+            FROM users WHERE id = ANY(:user_ids)
+            """
+        ),
+        {"user_ids": friend_user_ids}
+    ).fetchall()
+
+    privacy_map = {}
+    for row in privacy_rows:
+        privacy_map[row.id] = {
+            "share_age": getattr(row, 'friend_share_age', True) if row else True,
+            "share_total_trips": getattr(row, 'friend_share_total_trips', True) if row else True,
+            "share_adventure_time": getattr(row, 'friend_share_adventure_time', True) if row else True,
+            "share_favorite_activity": getattr(row, 'friend_share_favorite_activity', True) if row else True,
+            "share_achievements": getattr(row, 'friend_share_achievements', True) if row else True,
+            "age": row.age if row.age and row.age > 0 else None,
+        }
+
+    # 2. Batch get trip counts and adventure hours for all friends
+    trip_stats = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT user_id,
+                   COUNT(*) as total_trips,
+                   COALESCE(SUM(EXTRACT(EPOCH FROM (completed_at - start)) / 3600), 0) as total_hours
+            FROM trips
+            WHERE user_id = ANY(:user_ids) AND status = 'completed'
+            GROUP BY user_id
+            """
+        ),
+        {"user_ids": friend_user_ids}
+    ).fetchall()
+
+    trips_map = {row.user_id: {"trips": row.total_trips, "hours": int(row.total_hours)} for row in trip_stats}
+
+    # 3. Batch get unique activities count for achievement calculation
+    activities_stats = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT user_id, COUNT(DISTINCT activity) as count
+            FROM trips
+            WHERE user_id = ANY(:user_ids) AND status = 'completed'
+            GROUP BY user_id
+            """
+        ),
+        {"user_ids": friend_user_ids}
+    ).fetchall()
+
+    activities_map = {row.user_id: row.count for row in activities_stats}
+
+    # 4. Batch get unique locations count for achievement calculation
+    locations_stats = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT user_id, COUNT(DISTINCT location_text) as count
+            FROM trips
+            WHERE user_id = ANY(:user_ids)
+            AND status = 'completed'
+            AND location_text IS NOT NULL
+            AND location_text != ''
+            GROUP BY user_id
+            """
+        ),
+        {"user_ids": friend_user_ids}
+    ).fetchall()
+
+    locations_map = {row.user_id: row.count for row in locations_stats}
+
+    # 5. Batch get favorite activities (using window function for efficiency)
+    favorite_activities = connection.execute(
+        sqlalchemy.text(
+            """
+            WITH ranked_activities AS (
+                SELECT t.user_id, a.name, a.icon, COUNT(*) as trip_count,
+                       ROW_NUMBER() OVER (PARTITION BY t.user_id ORDER BY COUNT(*) DESC) as rn
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.user_id = ANY(:user_ids) AND t.status = 'completed'
+                GROUP BY t.user_id, a.id, a.name, a.icon
+            )
+            SELECT user_id, name, icon FROM ranked_activities WHERE rn = 1
+            """
+        ),
+        {"user_ids": friend_user_ids}
+    ).fetchall()
+
+    favorites_map = {row.user_id: {"name": row.name, "icon": row.icon} for row in favorite_activities}
+
+    # 6. Calculate final stats for each friend
+    for uid in friend_user_ids:
+        privacy = privacy_map.get(uid, {
+            "share_age": True, "share_total_trips": True,
+            "share_adventure_time": True, "share_favorite_activity": True,
+            "share_achievements": True, "age": None
+        })
+
+        trip_data = trips_map.get(uid, {"trips": 0, "hours": 0})
+        total_trips_raw = trip_data["trips"]
+        total_hours_raw = trip_data["hours"]
+
+        # Age (if privacy allows)
+        if privacy["share_age"]:
+            result[uid]["age"] = privacy.get("age")
+
+        # Trips and hours (if privacy allows)
+        if privacy["share_total_trips"]:
+            result[uid]["total_trips"] = total_trips_raw
+        if privacy["share_adventure_time"]:
+            result[uid]["total_adventure_hours"] = total_hours_raw
+
+        # Achievements calculation (if privacy allows)
+        if privacy["share_achievements"]:
+            unique_activities = activities_map.get(uid, 0)
+            unique_locations = locations_map.get(uid, 0)
+            achievements = _calculate_achievements_count_from_data(
+                total_trips_raw, total_hours_raw, unique_activities, unique_locations
+            )
+            result[uid]["achievements_count"] = achievements
+            result[uid]["total_achievements"] = 40
+
+        # Favorite activity (if privacy allows)
+        if privacy["share_favorite_activity"]:
+            fav = favorites_map.get(uid)
+            if fav:
+                result[uid]["favorite_activity_name"] = fav["name"]
+                result[uid]["favorite_activity_icon"] = fav["icon"]
+
+    return result
+
+
+def _calculate_achievements_count_from_data(
+    total_trips: int, total_hours: int, unique_activities: int, unique_locations: int
+) -> int:
+    """Calculate achievements from pre-fetched data (no DB queries)."""
+    count = 0
+
+    # Total Trips achievements
+    for threshold in [1, 5, 10, 25, 50, 100, 150, 200, 250, 500, 1000]:
+        if total_trips >= threshold:
+            count += 1
+
+    # Adventure Time achievements (hours)
+    for threshold in [1, 10, 50, 100, 250, 500, 1000, 2500]:
+        if total_hours >= threshold:
+            count += 1
+
+    # Activities tried achievements
+    for threshold in [1, 3, 5, 10, 15, 20]:
+        if unique_activities >= threshold:
+            count += 1
+
+    # Locations achievements
+    for threshold in [1, 5, 10, 25, 50, 100, 250]:
+        if unique_locations >= threshold:
+            count += 1
+
+    return count
+
+
 # ==================== Invite Endpoints ====================
 
 @router.post("/invite", response_model=FriendInviteResponse)
@@ -627,9 +813,13 @@ def get_friends(user_id: int = Depends(auth.get_current_user_id)):
             {"user_id": user_id}
         ).fetchall()
 
+        # Batch compute stats for all friends (reduces N+1 queries)
+        friend_ids = [f.user_id for f in friends]
+        stats_map = _compute_friend_stats_batch(connection, friend_ids)
+
         result = []
         for f in friends:
-            stats = _compute_friend_stats(connection, f.user_id)
+            stats = stats_map.get(f.user_id, {})
             result.append(FriendResponse(
                 user_id=f.user_id,
                 first_name=f.first_name or "",
@@ -637,13 +827,13 @@ def get_friends(user_id: int = Depends(auth.get_current_user_id)):
                 profile_photo_url=f.profile_photo_url,
                 member_since=f.member_since.isoformat() if f.member_since else "",
                 friendship_since=f.friendship_since.isoformat() if f.friendship_since else "",
-                age=stats["age"],
-                achievements_count=stats["achievements_count"],
-                total_achievements=stats["total_achievements"],
-                total_trips=stats["total_trips"],
-                total_adventure_hours=stats["total_adventure_hours"],
-                favorite_activity_name=stats["favorite_activity_name"],
-                favorite_activity_icon=stats["favorite_activity_icon"],
+                age=stats.get("age"),
+                achievements_count=stats.get("achievements_count"),
+                total_achievements=stats.get("total_achievements"),
+                total_trips=stats.get("total_trips"),
+                total_adventure_hours=stats.get("total_adventure_hours"),
+                favorite_activity_name=stats.get("favorite_activity_name"),
+                favorite_activity_icon=stats.get("favorite_activity_icon"),
             ))
         return result
 
@@ -742,6 +932,61 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             {"current_user_id": user_id}
         ).mappings().fetchall()
 
+        if not trips:
+            return []
+
+        # Extract trip IDs for batch queries
+        trip_ids = [trip["id"] for trip in trips]
+
+        # Batch load check-in events for all trips (reduces N+1 queries)
+        checkin_events_raw = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT trip_id, timestamp, lat, lon
+                FROM events
+                WHERE trip_id = ANY(:trip_ids) AND what = 'checkin' AND lat IS NOT NULL
+                ORDER BY trip_id, timestamp DESC
+                """
+            ),
+            {"trip_ids": trip_ids}
+        ).fetchall()
+
+        # Group check-in events by trip_id (limit 10 per trip)
+        checkin_map: dict[int, list] = {tid: [] for tid in trip_ids}
+        for event in checkin_events_raw:
+            if len(checkin_map[event.trip_id]) < 10:
+                checkin_map[event.trip_id].append(event)
+
+        # Batch load live locations for all trips
+        live_locations_raw = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT DISTINCT ON (trip_id) trip_id, latitude, longitude, speed, timestamp
+                FROM live_locations
+                WHERE trip_id = ANY(:trip_ids)
+                ORDER BY trip_id, timestamp DESC
+                """
+            ),
+            {"trip_ids": trip_ids}
+        ).fetchall()
+
+        live_loc_map = {row.trip_id: row for row in live_locations_raw}
+
+        # Batch load pending update requests for all trips
+        pending_requests_raw = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT trip_id FROM update_requests
+                WHERE trip_id = ANY(:trip_ids) AND requester_user_id = :user_id
+                AND resolved_at IS NULL
+                AND requested_at > NOW() - INTERVAL '10 minutes'
+                """
+            ),
+            {"trip_ids": trip_ids, "user_id": user_id}
+        ).fetchall()
+
+        pending_map = {row.trip_id for row in pending_requests_raw}
+
         result = []
         for trip in trips:
             # Parse activity colors (may be JSON string or dict)
@@ -766,25 +1011,13 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             share_notes = trip.get("friend_share_notes", True)
             allow_update_requests = trip.get("friend_allow_update_requests", True)
 
-            # Fetch check-in locations if owner allows it
+            # Build check-in locations from batch-loaded data
             checkin_locations = None
             if share_checkin_locations:
-                checkin_events = connection.execute(
-                    sqlalchemy.text(
-                        """
-                        SELECT timestamp, lat, lon
-                        FROM events
-                        WHERE trip_id = :trip_id AND what = 'checkin' AND lat IS NOT NULL
-                        ORDER BY timestamp DESC
-                        LIMIT 10
-                        """
-                    ),
-                    {"trip_id": trip["id"]}
-                ).fetchall()
-
-                if checkin_events:
+                events = checkin_map.get(trip["id"], [])
+                if events:
                     checkin_locations = []
-                    for event in checkin_events:
+                    for event in events:
                         ts = event.timestamp
                         if hasattr(ts, 'isoformat'):
                             ts = ts.isoformat()
@@ -802,23 +1035,11 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
                             location_name=location_name
                         ))
 
-            # Fetch live location if owner allows it AND trip has it enabled
+            # Build live location from batch-loaded data
             live_location = None
             trip_has_live_location = trip.get("share_live_location", False)
             if share_live_location and trip_has_live_location:
-                live_loc = connection.execute(
-                    sqlalchemy.text(
-                        """
-                        SELECT latitude, longitude, speed, timestamp
-                        FROM live_locations
-                        WHERE trip_id = :trip_id
-                        ORDER BY timestamp DESC
-                        LIMIT 1
-                        """
-                    ),
-                    {"trip_id": trip["id"]}
-                ).fetchone()
-
+                live_loc = live_loc_map.get(trip["id"])
                 if live_loc:
                     ts = live_loc.timestamp
                     if hasattr(ts, 'isoformat'):
@@ -830,22 +1051,10 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
                         timestamp=ts
                     )
 
-            # Check for pending update requests from this friend
+            # Check for pending update requests from batch-loaded data
             has_pending_update = False
             if allow_update_requests:
-                pending = connection.execute(
-                    sqlalchemy.text(
-                        """
-                        SELECT 1 FROM update_requests
-                        WHERE trip_id = :trip_id AND requester_user_id = :user_id
-                        AND resolved_at IS NULL
-                        AND requested_at > NOW() - INTERVAL '10 minutes'
-                        LIMIT 1
-                        """
-                    ),
-                    {"trip_id": trip["id"], "user_id": user_id}
-                ).fetchone()
-                has_pending_update = pending is not None
+                has_pending_update = trip["id"] in pending_map
 
             result.append(FriendActiveTrip(
                 id=trip["id"],

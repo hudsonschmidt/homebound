@@ -11,6 +11,7 @@ struct FriendInviteView: View {
     @State private var showingShareSheet = false
     @State private var showingRegenerateConfirmation = false
     @State private var isRegenerating = false
+    @State private var qrImage: UIImage? = nil
 
     var body: some View {
         NavigationStack {
@@ -38,6 +39,13 @@ struct FriendInviteView: View {
             }
             .task {
                 await createInvite()
+                // Generate QR code off main thread after invite loads
+                if let urlString = invite?.invite_url {
+                    let image = await generateQRCodeAsync(from: urlString)
+                    await MainActor.run {
+                        qrImage = image
+                    }
+                }
             }
             .sheet(isPresented: $showingShareSheet) {
                 if let invite = invite {
@@ -124,8 +132,8 @@ struct FriendInviteView: View {
 
     func qrCodeView(for urlString: String) -> some View {
         Group {
-            if let qrImage = generateQRCode(from: urlString) {
-                Image(uiImage: qrImage)
+            if let image = qrImage {
+                Image(uiImage: image)
                     .interpolation(.none)
                     .resizable()
                     .scaledToFit()
@@ -135,14 +143,13 @@ struct FriendInviteView: View {
                     .cornerRadius(16)
                     .shadow(color: Color.black.opacity(0.1), radius: 10, y: 5)
             } else {
+                // Show placeholder while QR code is being generated
                 Rectangle()
                     .fill(Color(.secondarySystemBackground))
                     .frame(width: 200, height: 200)
                     .cornerRadius(16)
                     .overlay(
-                        Image(systemName: "qrcode")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
+                        ProgressView()
                     )
             }
         }
@@ -272,36 +279,45 @@ struct FriendInviteView: View {
     func regenerateInvite() async {
         isLoading = true
         isRegenerating = true
+        qrImage = nil  // Clear old QR code
         invite = await session.createFriendInvite(regenerate: true)
         isRegenerating = false
         isLoading = false
-        if invite != nil {
+        if let urlString = invite?.invite_url {
             session.notice = "Link regenerated"
+            // Generate new QR code off main thread
+            let image = await generateQRCodeAsync(from: urlString)
+            await MainActor.run {
+                qrImage = image
+            }
         }
     }
 
     // MARK: - QR Code Generator
 
-    func generateQRCode(from string: String) -> UIImage? {
-        let context = CIContext()
-        let filter = CIFilter.qrCodeGenerator()
+    /// Generate QR code asynchronously off the main thread
+    func generateQRCodeAsync(from string: String) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            let context = CIContext()
+            let filter = CIFilter.qrCodeGenerator()
 
-        guard let data = string.data(using: .utf8) else { return nil }
-        filter.setValue(data, forKey: "inputMessage")
-        filter.setValue("H", forKey: "inputCorrectionLevel")  // High error correction
+            guard let data = string.data(using: .utf8) else { return nil }
+            filter.setValue(data, forKey: "inputMessage")
+            filter.setValue("H", forKey: "inputCorrectionLevel")  // High error correction
 
-        guard let outputImage = filter.outputImage else { return nil }
+            guard let outputImage = filter.outputImage else { return nil }
 
-        // Scale up for better quality
-        let scale = 10.0
-        let transform = CGAffineTransform(scaleX: scale, y: scale)
-        let scaledImage = outputImage.transformed(by: transform)
+            // Scale up for better quality
+            let scale = 10.0
+            let transform = CGAffineTransform(scaleX: scale, y: scale)
+            let scaledImage = outputImage.transformed(by: transform)
 
-        guard let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) else {
-            return nil
-        }
+            guard let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) else {
+                return nil
+            }
 
-        return UIImage(cgImage: cgImage)
+            return UIImage(cgImage: cgImage)
+        }.value
     }
 }
 

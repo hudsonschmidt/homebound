@@ -2439,7 +2439,27 @@ final class Session: ObservableObject {
     }
 
     // MARK: - Saved Contacts Management
-    func loadContacts() async -> [Contact] {
+    func loadContacts(forceRefresh: Bool = false) async -> [Contact] {
+        // Return cached immediately if available and not forcing refresh
+        if !forceRefresh && !contacts.isEmpty {
+            debugLog("[Session] 📦 Using \(contacts.count) cached contacts (in-memory)")
+            return contacts
+        }
+
+        // Try local storage cache for immediate display
+        let cachedContacts = LocalStorage.shared.getCachedContacts()
+        if !cachedContacts.isEmpty && !forceRefresh {
+            await MainActor.run {
+                self.contacts = cachedContacts
+            }
+        }
+
+        // If offline, return cached data
+        if !NetworkMonitor.shared.isConnected {
+            debugLog("[Session] 📦 Offline - returning \(cachedContacts.count) cached contacts")
+            return cachedContacts
+        }
+
         do {
             let loadedContacts: [Contact] = try await withAuth { bearer in
                 try await self.api.get(
@@ -2459,7 +2479,6 @@ final class Session: ObservableObject {
             debugLog("Failed to load saved contacts: \(error.localizedDescription)")
 
             // Fall back to cached contacts when offline
-            let cachedContacts = LocalStorage.shared.getCachedContacts()
             if !cachedContacts.isEmpty {
                 debugLog("[Session] 📦 Using \(cachedContacts.count) cached contacts")
                 await MainActor.run {
@@ -2604,10 +2623,16 @@ final class Session: ObservableObject {
     // MARK: - Friends Management
 
     /// Load all friends for the current user
-    func loadFriends() async -> [Friend] {
-        // Try cache first for immediate display
+    func loadFriends(forceRefresh: Bool = false) async -> [Friend] {
+        // Return cached immediately if available and not forcing refresh
+        if !forceRefresh && !friends.isEmpty {
+            debugLog("[Session] 📦 Using \(friends.count) cached friends (in-memory)")
+            return friends
+        }
+
+        // Try local storage cache for immediate display
         let cachedFriends = LocalStorage.shared.getCachedFriends()
-        if !cachedFriends.isEmpty {
+        if !cachedFriends.isEmpty && !forceRefresh {
             await MainActor.run {
                 self.friends = cachedFriends
             }

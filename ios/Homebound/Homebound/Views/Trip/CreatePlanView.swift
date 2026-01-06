@@ -225,11 +225,6 @@ struct CreatePlanView: View {
             }
             .navigationTitle(isEditMode ? "Edit Trip" : "New Adventure")
             .navigationBarTitleDisplayMode(.inline)
-            .task {
-                // Load saved contacts and friends early so they're ready by step 3
-                savedContacts = await session.loadContacts()
-                _ = await session.loadFriends()
-            }
             .onAppear {
                 // Apply default activity from preferences (only once)
                 if !hasAppliedDefaults {
