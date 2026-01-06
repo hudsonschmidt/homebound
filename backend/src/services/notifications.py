@@ -417,6 +417,30 @@ async def send_trip_completed_push(
     log.info(f"Sent trip completed push to participant {participant_user_id} for trip {trip_id}")
 
 
+async def send_trip_cancelled_push(
+    participant_user_id: int,
+    owner_name: str,
+    trip_title: str,
+    trip_id: int
+):
+    """Send push notification to participants when a group trip is cancelled by the owner.
+
+    This notifies group trip participants that the trip has been cancelled
+    and they no longer need to check in.
+    """
+    title = "Trip Cancelled"
+    body = f"'{trip_title}' has been cancelled by {owner_name}"
+
+    await send_push_to_user(
+        participant_user_id,
+        title,
+        body,
+        data={"trip_id": trip_id, "action": "trip_cancelled"},
+        notification_type="general"
+    )
+    log.info(f"Sent trip cancelled push to participant {participant_user_id} for trip {trip_id}")
+
+
 async def send_friend_trip_update_silent_push(
     friend_user_id: int,
     trip_id: int

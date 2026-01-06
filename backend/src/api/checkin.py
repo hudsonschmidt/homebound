@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from pydantic import BaseModel
 
 from src import database as db
+from src.api.trips import _get_all_trip_email_contacts
 from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
     send_checkin_update_emails,
@@ -47,7 +48,7 @@ def checkin_with_token(
                 """
                 SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
                        t.timezone, t.location_text, t.eta, t.notify_self, t.grace_min,
-                       a.name as activity_name
+                       t.is_group_trip, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.checkin_token = :token
@@ -130,19 +131,8 @@ def checkin_with_token(
             user_name = "A Homebound user"
         owner_email = user.email if user and trip.notify_self else None
 
-        # Fetch contacts with email for notification
-        all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
-        contact_ids = [cid for cid in all_contact_ids if cid is not None]
-        contacts_for_email = []
-        if contact_ids:
-            placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
-            params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
-            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
-            contacts_result = connection.execute(
-                sqlalchemy.text(query),
-                params
-            ).fetchall()
-            contacts_for_email = [dict(c._mapping) for c in contacts_result]
+        # Fetch all contact emails (owner + participants for group trips)
+        contacts_for_email = _get_all_trip_email_contacts(connection, trip)
 
         # Build trip dict for email notification
         trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
@@ -352,19 +342,8 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             user_name = "A Homebound user"
         owner_email = user.email if user and trip.notify_self else None
 
-        # Fetch contacts with email for notification
-        all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
-        contact_ids = [cid for cid in all_contact_ids if cid is not None]
-        contacts_for_email = []
-        if contact_ids:
-            placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
-            params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
-            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
-            contacts_result = connection.execute(
-                sqlalchemy.text(query),
-                params
-            ).fetchall()
-            contacts_for_email = [dict(c._mapping) for c in contacts_result]
+        # Fetch all contact emails (owner + participants for group trips)
+        contacts_for_email = _get_all_trip_email_contacts(connection, trip)
 
         # Build trip dict for email notification
         trip_data = {"title": trip.title, "location_text": trip.location_text}

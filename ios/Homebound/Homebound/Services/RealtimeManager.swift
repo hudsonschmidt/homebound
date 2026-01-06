@@ -323,12 +323,18 @@ final class RealtimeManager: ObservableObject {
             }
         }
 
-        // Handle vote deletions (trip completed)
+        // Handle vote deletions (vote removed or trip completed)
         Task {
-            for await _ in deletes {
-                debugLog("[Realtime] Vote deleted (trip may have completed)")
-                await Session.shared.loadActivePlan()
-                _ = await Session.shared.loadAllTrips()
+            for await delete in deletes {
+                let oldRecord = delete.oldRecord
+                let tripId = oldRecord["trip_id"]?.intValue
+                debugLog("[Realtime] Vote deleted: tripId=\(String(describing: tripId))")
+
+                // Refresh vote status for the active trip
+                if let activeTripId = Session.shared.activeTrip?.id,
+                   Session.shared.activeTrip?.is_group_trip == true {
+                    await Session.shared.refreshVoteStatus(tripId: activeTripId)
+                }
             }
         }
 

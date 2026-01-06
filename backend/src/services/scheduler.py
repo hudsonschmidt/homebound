@@ -247,6 +247,13 @@ async def _process_overdue_trip(trip, now: datetime):
                 # Get each participant's safety contacts for THIS trip
                 # These are the contacts they selected when joining (stored in participant_trip_contacts)
                 if participant_user_ids:
+                    # Debug: Check raw participant_trip_contacts count
+                    ptc_count = conn.execute(
+                        sqlalchemy.text("SELECT COUNT(*) FROM participant_trip_contacts WHERE trip_id = :trip_id"),
+                        {"trip_id": trip_id}
+                    ).scalar() or 0
+                    log.info(f"[Scheduler] Trip {trip_id}: Found {ptc_count} rows in participant_trip_contacts")
+
                     participant_contacts = conn.execute(
                         sqlalchemy.text("""
                             SELECT DISTINCT c.name, c.email
@@ -256,6 +263,7 @@ async def _process_overdue_trip(trip, now: datetime):
                         """),
                         {"trip_id": trip_id}
                     ).fetchall()
+                    log.info(f"[Scheduler] Trip {trip_id}: Query returned {len(participant_contacts)} participant email contacts")
 
                     # Deduplicate by email (keep unique emails)
                     existing_emails = {c.email.lower() for c in contacts}
@@ -293,7 +301,25 @@ async def _process_overdue_trip(trip, now: datetime):
                         friend_contacts.append(ParticipantAsFriend(participant_id))
                         existing_friend_ids.add(participant_id)
 
-                log.info(f"[Scheduler] Trip {trip_id}: Total friend contacts (including participants): {len(friend_contacts)}")
+                # Also get participant's friend contacts (app users selected as safety contacts)
+                # These are stored in participant_trip_contacts.friend_user_id
+                participant_friend_contacts = conn.execute(
+                    sqlalchemy.text("""
+                        SELECT DISTINCT ptc.friend_user_id
+                        FROM participant_trip_contacts ptc
+                        WHERE ptc.trip_id = :trip_id
+                        AND ptc.friend_user_id IS NOT NULL
+                    """),
+                    {"trip_id": trip_id}
+                ).fetchall()
+
+                # Add to friend_contacts list (with deduplication)
+                for pfc in participant_friend_contacts:
+                    if pfc.friend_user_id not in existing_friend_ids:
+                        friend_contacts.append(ParticipantAsFriend(pfc.friend_user_id))
+                        existing_friend_ids.add(pfc.friend_user_id)
+
+                log.info(f"[Scheduler] Trip {trip_id}: Total friend contacts (including participants and their friends): {len(friend_contacts)}")
 
         log.info(f"[Scheduler] Trip {trip_id}: Found {len(contacts)} contacts with email")
 

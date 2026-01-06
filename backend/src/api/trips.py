@@ -15,10 +15,12 @@ from src.api import auth
 from src.api.activities import Activity
 from src.services.geocoding import reverse_geocode_sync
 from src.services.notifications import (
+    send_data_refresh_push,
     send_friend_trip_completed_push,
     send_friend_trip_created_push,
     send_friend_trip_extended_push,
     send_friend_trip_starting_push,
+    send_trip_cancelled_push,
     send_trip_completed_emails,
     send_trip_created_emails,
     send_trip_extended_emails,
@@ -153,18 +155,67 @@ def _get_friend_contacts_for_trips_batch(connection, trip_ids: list[int]) -> dic
         for tid in trip_ids
     }
 
-    # Group by trip_id and assign contacts by position
-    for row in result:
-        tid = row.trip_id
-        pos = row.position
-        if pos == 0:
-            contacts_map[tid]["friend_contact1"] = row.friend_user_id
-        elif pos == 1:
-            contacts_map[tid]["friend_contact2"] = row.friend_user_id
-        elif pos == 2:
-            contacts_map[tid]["friend_contact3"] = row.friend_user_id
+    # Group results by trip_id first, then assign by order (not raw position)
+    # Position values are continuous across email and friend contacts, so we use
+    # enumeration within each trip's friend contacts to map to friend_contact1/2/3
+    from itertools import groupby
+    for tid, group in groupby(result, key=lambda r: r.trip_id):
+        for i, row in enumerate(group):
+            if i == 0:
+                contacts_map[tid]["friend_contact1"] = row.friend_user_id
+            elif i == 1:
+                contacts_map[tid]["friend_contact2"] = row.friend_user_id
+            elif i == 2:
+                contacts_map[tid]["friend_contact3"] = row.friend_user_id
 
     return contacts_map
+
+
+def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
+    """Get all email contacts for a trip (owner + participants for group trips).
+
+    For group trips, this includes both the owner's contacts AND participant contacts
+    from the participant_trip_contacts table, deduplicated by email.
+    """
+    # Owner's contacts
+    contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+    contact_ids = [c for c in contact_ids if c is not None]
+
+    contacts = []
+    if contact_ids:
+        result = connection.execute(
+            sqlalchemy.text("SELECT id, name, email FROM contacts WHERE id = ANY(:ids)"),
+            {"ids": contact_ids}
+        ).fetchall()
+        contacts = [{"id": c.id, "name": c.name, "email": c.email} for c in result]
+
+    # For group trips, also get participant contacts
+    is_group = getattr(trip, 'is_group_trip', False)
+    trip_id = getattr(trip, 'id', None)
+
+    if is_group and trip_id:
+        log.info(f"[Trips] _get_all_trip_email_contacts: Group trip {trip_id}, fetching participant contacts")
+        participant_contacts = connection.execute(
+            sqlalchemy.text("""
+                SELECT DISTINCT c.id, c.name, c.email
+                FROM participant_trip_contacts ptc
+                JOIN contacts c ON ptc.contact_id = c.id
+                WHERE ptc.trip_id = :trip_id AND c.email IS NOT NULL
+            """),
+            {"trip_id": trip_id}
+        ).fetchall()
+
+        log.info(f"[Trips] _get_all_trip_email_contacts: Found {len(participant_contacts)} participant email contacts")
+
+        # Deduplicate by email
+        existing_emails = {c["email"].lower() for c in contacts if c.get("email")}
+        for pc in participant_contacts:
+            if pc.email and pc.email.lower() not in existing_emails:
+                contacts.append({"id": pc.id, "name": pc.name, "email": pc.email})
+                existing_emails.add(pc.email.lower())
+
+    log.info(f"[Trips] _get_all_trip_email_contacts: Returning {len(contacts)} total contacts")
+    return contacts
 
 
 router = APIRouter(
@@ -1396,7 +1447,7 @@ def complete_trip(
                 """
                 SELECT t.id, t.status, t.title, t.location_text,
                        t.contact1, t.contact2, t.contact3, t.timezone, t.notify_self,
-                       a.name as activity_name
+                       t.is_group_trip, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.id = :trip_id AND t.user_id = :user_id
@@ -1426,18 +1477,8 @@ def complete_trip(
         user_name = f"{user.first_name} {user.last_name}".strip() if user else "User"
         owner_email = user.email if user and trip.notify_self else None
 
-        # Fetch contact emails
-        contact_ids = [trip.contact1, trip.contact2, trip.contact3]
-        contact_ids = [c for c in contact_ids if c is not None]
-        contacts_for_email = []
-        if contact_ids:
-            contacts = connection.execute(
-                sqlalchemy.text(
-                    "SELECT id, name, email FROM contacts WHERE id = ANY(:ids)"
-                ),
-                {"ids": contact_ids}
-            ).fetchall()
-            contacts_for_email = [{"email": c.email, "name": c.name} for c in contacts]
+        # Fetch all contact emails (owner + participants for group trips)
+        contacts_for_email = _get_all_trip_email_contacts(connection, trip)
 
         # Update trip status
         connection.execute(
@@ -1513,7 +1554,7 @@ def start_trip(
                 """
                 SELECT t.id, t.status, t.start, t.title, t.eta, t.location_text,
                        t.start_location_text, t.has_separate_locations,
-                       t.contact1, t.contact2, t.contact3, t.timezone,
+                       t.contact1, t.contact2, t.contact3, t.timezone, t.is_group_trip,
                        a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
@@ -1542,18 +1583,8 @@ def start_trip(
         ).fetchone()
         user_name = f"{user.first_name} {user.last_name}".strip() if user else "User"
 
-        # Fetch contact emails
-        contact_ids = [trip.contact1, trip.contact2, trip.contact3]
-        contact_ids = [c for c in contact_ids if c is not None]
-        contacts_for_email = []
-        if contact_ids:
-            contacts = connection.execute(
-                sqlalchemy.text(
-                    "SELECT id, name, email FROM contacts WHERE id = ANY(:ids)"
-                ),
-                {"ids": contact_ids}
-            ).fetchall()
-            contacts_for_email = [{"email": c.email, "name": c.name} for c in contacts]
+        # Fetch all contact emails (owner + participants for group trips)
+        contacts_for_email = _get_all_trip_email_contacts(connection, trip)
 
         # Update trip status to active and set start time to now (for early starts)
         connection.execute(
@@ -1637,18 +1668,18 @@ def extend_trip(
     This also acts as a check-in, confirming the user is okay and resetting overdue status.
     """
     with db.engine.begin() as connection:
-        # Verify trip ownership and status - also fetch title, activity, and timezone for emails
+        # Get trip details - check ownership or participant status
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.status, t.eta, t.title, t.contact1, t.contact2, t.contact3,
-                       t.timezone, t.notify_self, a.name as activity_name
+                       t.timezone, t.notify_self, t.user_id, t.is_group_trip, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
-                WHERE t.id = :trip_id AND t.user_id = :user_id
+                WHERE t.id = :trip_id
                 """
             ),
-            {"trip_id": trip_id, "user_id": user_id}
+            {"trip_id": trip_id}
         ).fetchone()
 
         if not trip:
@@ -1656,6 +1687,25 @@ def extend_trip(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Trip not found"
             )
+
+        # Check if user is owner or accepted participant
+        is_owner = trip.user_id == user_id
+        if not is_owner:
+            participant = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id = :user_id AND status = 'accepted'
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchone()
+
+            if not participant:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not authorized to extend this trip"
+                )
 
         # Allow extending active, overdue, or overdue_notified trips
         if trip.status not in ("active", "overdue", "overdue_notified"):
@@ -1742,19 +1792,8 @@ def extend_trip(
             user_name = "A Homebound user"
         owner_email = user.email if user and trip.notify_self else None
 
-        # Fetch contacts with email for notification
-        all_contact_ids = [trip.contact1, trip.contact2, trip.contact3]
-        contact_ids = [cid for cid in all_contact_ids if cid is not None]
-        contacts_for_email = []
-        if contact_ids:
-            placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
-            params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
-            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
-            contacts_result = connection.execute(
-                sqlalchemy.text(query),
-                params
-            ).fetchall()
-            contacts_for_email = [dict(c._mapping) for c in contacts_result]
+        # Fetch all contact emails (owner + participants for group trips)
+        contacts_for_email = _get_all_trip_email_contacts(connection, trip)
 
         # Build trip dict for email notification (with new ETA)
         trip_data = {
@@ -1817,14 +1856,22 @@ def extend_trip(
 
 
 @router.delete("/{trip_id}")
-def delete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
-    """Delete a trip"""
+def delete_trip(
+    trip_id: int,
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(auth.get_current_user_id)
+):
+    """Delete a trip.
+
+    For active group trips: Sets status to 'cancelled' (soft delete) and notifies participants.
+    For other trips (solo, planned, completed): Performs hard delete.
+    """
     with db.engine.begin() as connection:
-        # Verify trip ownership
+        # Verify trip ownership and fetch details for decision making
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id
+                SELECT id, status, is_group_trip, title
                 FROM trips
                 WHERE id = :trip_id AND user_id = :user_id
                 """
@@ -1838,25 +1885,97 @@ def delete_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                 detail="Trip not found"
             )
 
-        # Clear the last_checkin reference first (foreign key constraint)
-        connection.execute(
-            sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE id = :trip_id"),
-            {"trip_id": trip_id}
+        # Determine if this should be a soft delete (cancelled) or hard delete
+        is_active_group_trip = (
+            trip.is_group_trip and
+            trip.status in ('active', 'overdue', 'overdue_notified')
         )
 
-        # Delete events
-        connection.execute(
-            sqlalchemy.text("DELETE FROM events WHERE trip_id = :trip_id"),
-            {"trip_id": trip_id}
-        )
+        if is_active_group_trip:
+            # SOFT DELETE: Mark as cancelled, notify participants
 
-        # Now delete the trip
-        connection.execute(
-            sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
-            {"trip_id": trip_id}
-        )
+            # Get owner name for notifications
+            owner = connection.execute(
+                sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            ).fetchone()
+            owner_name = f"{owner.first_name} {owner.last_name}".strip() if owner else "The trip owner"
+            if not owner_name:
+                owner_name = "The trip owner"
 
-        return {"ok": True, "message": "Trip deleted successfully"}
+            # Get all accepted participants (excluding owner)
+            participants = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT user_id FROM trip_participants
+                    WHERE trip_id = :trip_id AND status = 'accepted' AND user_id != :owner_id
+                    """
+                ),
+                {"trip_id": trip_id, "owner_id": user_id}
+            ).fetchall()
+
+            # Update trip status to cancelled
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    UPDATE trips
+                    SET status = 'cancelled', completed_at = :cancelled_at
+                    WHERE id = :trip_id
+                    """
+                ),
+                {"trip_id": trip_id, "cancelled_at": datetime.now(UTC).isoformat()}
+            )
+
+            # Clear checkout votes (no longer relevant)
+            connection.execute(
+                sqlalchemy.text("DELETE FROM checkout_votes WHERE trip_id = :trip_id"),
+                {"trip_id": trip_id}
+            )
+
+            # Send notifications to participants
+            participant_ids = [p.user_id for p in participants]
+            if participant_ids:
+                trip_title = trip.title
+                trip_id_for_notif = trip_id
+
+                def send_cancelled_notifications():
+                    for pid in participant_ids:
+                        asyncio.run(send_trip_cancelled_push(
+                            participant_user_id=pid,
+                            owner_name=owner_name,
+                            trip_title=trip_title,
+                            trip_id=trip_id_for_notif
+                        ))
+                        # Also send data refresh push so their UI updates
+                        asyncio.run(send_data_refresh_push(pid, "trip", trip_id_for_notif))
+
+                background_tasks.add_task(send_cancelled_notifications)
+                log.info(f"[Trips] Scheduled cancelled notifications for {len(participant_ids)} participants")
+
+            return {"ok": True, "message": "Trip cancelled successfully"}
+
+        else:
+            # HARD DELETE: Remove trip completely
+
+            # Clear the last_checkin reference first (foreign key constraint)
+            connection.execute(
+                sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE id = :trip_id"),
+                {"trip_id": trip_id}
+            )
+
+            # Delete events
+            connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE trip_id = :trip_id"),
+                {"trip_id": trip_id}
+            )
+
+            # Now delete the trip (CASCADE handles other relations)
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trips WHERE id = :trip_id"),
+                {"trip_id": trip_id}
+            )
+
+            return {"ok": True, "message": "Trip deleted successfully"}
 
 
 @router.get("/{trip_id}/timeline", response_model=list[TimelineEvent])

@@ -437,7 +437,7 @@ def test_delete_trip():
     )
 
     # Delete the trip
-    result = delete_trip(trip.id, user_id=user_id)
+    result = delete_trip(trip.id, background_tasks, user_id=user_id)
     assert result["ok"] is True
 
     # Verify trip is deleted
@@ -451,8 +451,9 @@ def test_delete_trip():
 
 def test_delete_nonexistent_trip():
     """Test deleting a trip that doesn't exist"""
+    background_tasks = MagicMock(spec=BackgroundTasks)
     with pytest.raises(HTTPException) as exc_info:
-        delete_trip(999999, user_id=1)
+        delete_trip(999999, background_tasks, user_id=1)
 
     assert exc_info.value.status_code == 404
 
@@ -3886,7 +3887,7 @@ def test_trip_delete_cascades_to_safety_contacts():
         assert count.cnt == 2  # One email contact + one friend contact
 
     # Delete the trip
-    delete_trip(trip_id, user_id=user_id)
+    delete_trip(trip_id, background_tasks, user_id=user_id)
 
     # Verify junction table entries are gone
     with db.engine.begin() as connection:

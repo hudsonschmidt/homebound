@@ -2063,9 +2063,22 @@ final class Session: ObservableObject {
             await loadActivePlan()
 
             return true
-        } catch {
-            // Network failed - queue for later sync
+        } catch let error as URLError where error.code == .notConnectedToInternet ||
+                                            error.code == .networkConnectionLost {
+            // Only queue for actual network connectivity issues
+            debugLog("[Session] ⚠️ Complete plan network error - queueing offline: \(error.code)")
             return await queueOfflineCompletePlan(plan: plan)
+        } catch let error as URLError where error.code == .timedOut {
+            // Timeout is tricky - server may have processed. Queue but log warning.
+            debugLog("[Session] ⚠️ Complete plan timed out - server may have processed, queueing anyway")
+            return await queueOfflineCompletePlan(plan: plan)
+        } catch {
+            // Other errors (server errors, decode errors) - don't queue, show error
+            debugLog("[Session] ❌ Complete plan failed with non-network error: \(error)")
+            await MainActor.run {
+                self.lastError = "Failed to complete trip. Please try again."
+            }
+            return false
         }
     }
 
@@ -2175,9 +2188,22 @@ final class Session: ObservableObject {
                 self.updateWidgetData()
             }
             return true
-        } catch {
-            // Network failed - queue for later sync
+        } catch let error as URLError where error.code == .notConnectedToInternet ||
+                                            error.code == .networkConnectionLost {
+            // Only queue for actual network connectivity issues
+            debugLog("[Session] ⚠️ Extend plan network error - queueing offline: \(error.code)")
             return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
+        } catch let error as URLError where error.code == .timedOut {
+            // Timeout is tricky - server may have processed. Queue but log warning.
+            debugLog("[Session] ⚠️ Extend plan timed out - server may have processed, queueing anyway")
+            return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
+        } catch {
+            // Other errors (server errors, permission denied, etc.) - don't queue, show error
+            debugLog("[Session] ❌ Extend plan failed with non-network error: \(error)")
+            await MainActor.run {
+                self.lastError = "Failed to extend trip. Please try again."
+            }
+            return false
         }
     }
 
