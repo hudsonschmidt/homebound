@@ -253,6 +253,12 @@ final class Session: ObservableObject {
     // Update request cooldowns (trip_id -> cooldown_end_time)
     var updateRequestCooldowns: [Int: Date] = [:]
 
+    /// Timestamp of last local activeTrip update to prevent Realtime race conditions
+    /// When extending a trip, we update activeTrip locally. RealtimeManager then triggers
+    /// loadActivePlan() which could overwrite with stale server data. This timestamp allows
+    /// us to skip loadActivePlan() calls that happen immediately after local updates.
+    private var lastLocalTripUpdate: Date?
+
     // Saved trip templates (local-only)
     @Published var savedTemplates: [SavedTripTemplate] = []
 
@@ -390,6 +396,83 @@ final class Session: ObservableObject {
             age: userAge,
             profileCompleted: profileCompleted
         )
+    }
+
+    // MARK: - UI Testing Support
+
+    /// Configure session for UI testing with mock authentication
+    /// Call this when `--skip-auth` launch argument is present
+    func configureForUITesting() {
+        debugLog("[Session] 🧪 Configuring for UI testing mode")
+
+        // Set mock authentication state
+        accessToken = "ui-test-mock-token"
+        isAuthenticated = true
+
+        // Set mock user data
+        userId = 99999
+        userName = "Test User"
+        userEmail = "test@example.com"
+        userAge = 30
+        profileCompleted = true
+
+        // Mark initial data as loaded to skip loading screen
+        isInitialDataLoaded = true
+
+        // Create mock activities
+        activities = [
+            Activity(
+                id: 1,
+                name: "Hiking",
+                icon: "🥾",
+                default_grace_minutes: 30,
+                colors: Activity.ActivityColors(primary: "#4CAF50", secondary: "#81C784", accent: "#2E7D32"),
+                messages: Activity.ActivityMessages(start: "Have a great hike!", checkin: "Still hiking?", checkout: "Welcome back!", overdue: "Are you okay?", encouragement: ["Keep going!"]),
+                safety_tips: ["Tell someone your route", "Bring plenty of water"],
+                order: 1
+            ),
+            Activity(
+                id: 2,
+                name: "Running",
+                icon: "🏃",
+                default_grace_minutes: 15,
+                colors: Activity.ActivityColors(primary: "#2196F3", secondary: "#64B5F6", accent: "#1565C0"),
+                messages: Activity.ActivityMessages(start: "Enjoy your run!", checkin: "How's the run?", checkout: "Great job!", overdue: "Check in please", encouragement: ["You got this!"]),
+                safety_tips: ["Stay visible", "Watch for traffic"],
+                order: 2
+            ),
+            Activity(
+                id: 3,
+                name: "Other",
+                icon: "📍",
+                default_grace_minutes: 30,
+                colors: Activity.ActivityColors(primary: "#9E9E9E", secondary: "#BDBDBD", accent: "#616161"),
+                messages: Activity.ActivityMessages(start: "Stay safe!", checkin: "How's it going?", checkout: "Welcome back!", overdue: "Please check in", encouragement: ["Almost there!"]),
+                safety_tips: ["Stay aware of your surroundings"],
+                order: 99
+            )
+        ]
+
+        // Create empty trips list (no active trip for testing new trip creation flow)
+        allTrips = []
+        activeTrip = nil
+
+        // Create mock contacts
+        contacts = [
+            Contact(id: 1, user_id: 99999, name: "Emergency Contact", email: "emergency@example.com")
+        ]
+
+        // Create mock friends
+        friends = []
+        pendingInvites = []
+        tripInvitations = []
+
+        debugLog("[Session] 🧪 UI testing mode configured successfully")
+    }
+
+    /// Check if running in UI testing mode
+    static var isUITesting: Bool {
+        CommandLine.arguments.contains("--uitesting") || CommandLine.arguments.contains("--skip-auth")
     }
 
     // MARK: - Trip Sync Helpers
@@ -1295,6 +1378,15 @@ final class Session: ObservableObject {
     }
 
     func loadActivePlan() async {
+        // Prevent Realtime from overwriting recent local updates (race condition fix)
+        // This happens when extending a trip: we update locally, then Realtime triggers
+        // loadActivePlan() which might fetch stale data from the server
+        if let lastUpdate = lastLocalTripUpdate,
+           Date().timeIntervalSince(lastUpdate) < 3.0 {
+            debugLog("[Session] Skipping loadActivePlan - recent local update within 3s")
+            return
+        }
+
         await MainActor.run {
             self.isLoadingTrip = true
         }
@@ -1822,6 +1914,7 @@ final class Session: ObservableObject {
                 if var updatedTrip = self.activeTrip {
                     updatedTrip.last_checkin = checkinTimestamp
                     self.activeTrip = updatedTrip
+                    self.lastLocalTripUpdate = Date()  // Prevent Realtime from overwriting this update
                     // Sync to allTrips as well
                     self.syncTripInAllTrips(updatedTrip)
                 }
@@ -1943,6 +2036,7 @@ final class Session: ObservableObject {
                 if var updatedTrip = self.activeTrip {
                     updatedTrip.last_checkin = checkinTimestamp
                     self.activeTrip = updatedTrip
+                    self.lastLocalTripUpdate = Date()  // Prevent Realtime from overwriting this update
                     // Sync to allTrips as well
                     self.syncTripInAllTrips(updatedTrip)
                 }
@@ -2183,6 +2277,7 @@ final class Session: ObservableObject {
                         // Update activeTrip with the server's authoritative new ETA
                         let updatedTrip = currentTrip.with(eta_at: newETADate)
                         self.activeTrip = updatedTrip
+                        self.lastLocalTripUpdate = Date()  // Prevent Realtime from overwriting this update
                         self.syncTripInAllTrips(updatedTrip)
                         debugLog("[Session] ✅ Applied new ETA from extend response: \(response.new_eta)")
                     }
@@ -2253,6 +2348,7 @@ final class Session: ObservableObject {
             if let currentTrip = self.activeTrip {
                 let updatedTrip = currentTrip.with(eta_at: newETA)
                 self.activeTrip = updatedTrip
+                self.lastLocalTripUpdate = Date()  // Prevent Realtime from overwriting this update
                 // Sync to allTrips as well
                 self.syncTripInAllTrips(updatedTrip)
             }

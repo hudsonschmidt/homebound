@@ -207,8 +207,10 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
         contacts = [{"id": c.id, "name": c.name, "email": c.email, "watched_user_name": owner_name} for c in result]
 
     # For group trips, also get participant contacts
-    is_group = getattr(trip, 'is_group_trip', False)
-    trip_id = getattr(trip, 'id', None)
+    # Note: Use direct attribute access instead of getattr() to avoid silent failures with SQLAlchemy Row objects
+    is_group = trip.is_group_trip if hasattr(trip, 'is_group_trip') else False
+    trip_id = trip.id if hasattr(trip, 'id') else None
+    log.info(f"[Trips] _get_all_trip_email_contacts: is_group={is_group}, trip_id={trip_id}")
 
     if is_group and trip_id:
         log.info(f"[Trips] _get_all_trip_email_contacts: Group trip {trip_id}, fetching participant contacts")
@@ -807,18 +809,16 @@ def create_trip(
         owner_email = user_email if body.notify_self else None
 
         # Fetch contacts with email for notification
-        all_contact_ids = [body.contact1, body.contact2, body.contact3]
-        contact_ids = [cid for cid in all_contact_ids if cid is not None]
-        contacts_for_email = []
-        if contact_ids:
-            placeholders = ", ".join([f":id{i}" for i in range(len(contact_ids))])
-            params = {f"id{i}": cid for i, cid in enumerate(contact_ids)}
-            query = f"SELECT id, name, email FROM contacts WHERE id IN ({placeholders})"
-            contacts_result = connection.execute(
-                sqlalchemy.text(query),
-                params
-            ).fetchall()
-            contacts_for_email = [dict(c._mapping) for c in contacts_result]
+        # Use _get_all_trip_email_contacts() for consistency with start_trip and checkin
+        # This includes participant contacts for group trips (though unlikely to exist at creation time)
+        trip_for_contacts = connection.execute(
+            sqlalchemy.text("""
+                SELECT id, user_id, is_group_trip, contact1, contact2, contact3
+                FROM trips WHERE id = :id
+            """),
+            {"id": trip_id}
+        ).fetchone()
+        contacts_for_email = _get_all_trip_email_contacts(connection, trip_for_contacts)
 
         # Build trip dict for email notification
         trip_data = {

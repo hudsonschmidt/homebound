@@ -1142,6 +1142,15 @@ def participant_checkin(
         if not checker_name:
             checker_name = "A participant"
 
+        # Fetch owner's name for watched_user_name on owner's contacts
+        owner = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            {"user_id": trip.user_id}
+        ).fetchone()
+        owner_name = f"{owner.first_name} {owner.last_name}".strip() if owner else "Trip owner"
+        if not owner_name:
+            owner_name = "Trip owner"
+
         # Get all other accepted participants for notifications (if group trip)
         if trip.is_group_trip:
             other_participants = connection.execute(
@@ -1188,7 +1197,11 @@ def participant_checkin(
             {"trip_id": trip_id, "user_id": user_id}
         ).fetchall()
 
-        contacts_for_email = [dict(c._mapping) for c in participant_email_contacts]
+        # Participant's contacts watch the participant (checker)
+        contacts_for_email = [
+            {**dict(c._mapping), "watched_user_name": checker_name}
+            for c in participant_email_contacts
+        ]
 
         # Also get trip owner's email contacts so they're notified of participant check-ins
         owner_email_contacts = connection.execute(
@@ -1203,11 +1216,14 @@ def participant_checkin(
             {"trip_id": trip_id}
         ).fetchall()
 
-        # Deduplicate by email
+        # Deduplicate by email - owner's contacts watch the owner, not the participant
         existing_emails = {c['email'].lower() for c in contacts_for_email if c.get('email')}
         for oc in owner_email_contacts:
             if oc.email and oc.email.lower() not in existing_emails:
-                contacts_for_email.append(dict(oc._mapping))
+                contacts_for_email.append({
+                    **dict(oc._mapping),
+                    "watched_user_name": owner_name  # Owner's contacts watch the owner
+                })
                 existing_emails.add(oc.email.lower())
 
         # Get checking-in participant's friend safety contacts

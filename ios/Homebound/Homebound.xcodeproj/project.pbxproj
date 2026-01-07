@@ -22,6 +22,20 @@
 			remoteGlobalIDString = F8288F082EF27FA300636D9F;
 			remoteInfo = HomeboundWidgetsExtension;
 		};
+		F86756BF2F0E230C00AF2524 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F821358E2EAB01E300237850 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F82135952EAB01E300237850;
+			remoteInfo = Homebound;
+		};
+		F86756E92F0E2DE500AF2524 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F821358E2EAB01E300237850 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F82135952EAB01E300237850;
+			remoteInfo = Homebound;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -43,6 +57,8 @@
 		F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HomeboundWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F8288F0A2EF27FA300636D9F /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F8288F0C2EF27FA300636D9F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		F86756BB2F0E230C00AF2524 /* HomeboundTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HomeboundTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F86756E32F0E2DE500AF2524 /* HomeboundUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HomeboundUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -89,6 +105,16 @@
 			path = HomeboundWidgets;
 			sourceTree = "<group>";
 		};
+		F86756BC2F0E230C00AF2524 /* HomeboundTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = HomeboundTests;
+			sourceTree = "<group>";
+		};
+		F86756E42F0E2DE500AF2524 /* HomeboundUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = HomeboundUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -110,6 +136,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F86756B82F0E230C00AF2524 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F86756E02F0E2DE500AF2524 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -118,6 +158,8 @@
 			children = (
 				F82135982EAB01E300237850 /* Homebound */,
 				F8288F0E2EF27FA300636D9F /* HomeboundWidgets */,
+				F86756BC2F0E230C00AF2524 /* HomeboundTests */,
+				F86756E42F0E2DE500AF2524 /* HomeboundUITests */,
 				F8C54C8F2ECE9CC500959A21 /* Frameworks */,
 				F82135972EAB01E300237850 /* Products */,
 			);
@@ -128,6 +170,8 @@
 			children = (
 				F82135962EAB01E300237850 /* Homebound.app */,
 				F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */,
+				F86756BB2F0E230C00AF2524 /* HomeboundTests.xctest */,
+				F86756E32F0E2DE500AF2524 /* HomeboundUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -192,6 +236,52 @@
 			productReference = F8288F092EF27FA300636D9F /* HomeboundWidgetsExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		F86756BA2F0E230C00AF2524 /* HomeboundTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F86756C32F0E230C00AF2524 /* Build configuration list for PBXNativeTarget "HomeboundTests" */;
+			buildPhases = (
+				F86756B72F0E230C00AF2524 /* Sources */,
+				F86756B82F0E230C00AF2524 /* Frameworks */,
+				F86756B92F0E230C00AF2524 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F86756C02F0E230C00AF2524 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F86756BC2F0E230C00AF2524 /* HomeboundTests */,
+			);
+			name = HomeboundTests;
+			packageProductDependencies = (
+			);
+			productName = HomeboundTests;
+			productReference = F86756BB2F0E230C00AF2524 /* HomeboundTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		F86756E22F0E2DE500AF2524 /* HomeboundUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F86756EB2F0E2DE500AF2524 /* Build configuration list for PBXNativeTarget "HomeboundUITests" */;
+			buildPhases = (
+				F86756DF2F0E2DE500AF2524 /* Sources */,
+				F86756E02F0E2DE500AF2524 /* Frameworks */,
+				F86756E12F0E2DE500AF2524 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F86756EA2F0E2DE500AF2524 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F86756E42F0E2DE500AF2524 /* HomeboundUITests */,
+			);
+			name = HomeboundUITests;
+			packageProductDependencies = (
+			);
+			productName = HomeboundUITests;
+			productReference = F86756E32F0E2DE500AF2524 /* HomeboundUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -207,6 +297,14 @@
 					};
 					F8288F082EF27FA300636D9F = {
 						CreatedOnToolsVersion = 26.2;
+					};
+					F86756BA2F0E230C00AF2524 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = F82135952EAB01E300237850;
+					};
+					F86756E22F0E2DE500AF2524 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = F82135952EAB01E300237850;
 					};
 				};
 			};
@@ -230,6 +328,8 @@
 			targets = (
 				F82135952EAB01E300237850 /* Homebound */,
 				F8288F082EF27FA300636D9F /* HomeboundWidgetsExtension */,
+				F86756BA2F0E230C00AF2524 /* HomeboundTests */,
+				F86756E22F0E2DE500AF2524 /* HomeboundUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -243,6 +343,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		F8288F072EF27FA300636D9F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F86756B92F0E230C00AF2524 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F86756E12F0E2DE500AF2524 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -266,6 +380,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F86756B72F0E230C00AF2524 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F86756DF2F0E2DE500AF2524 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -273,6 +401,16 @@
 			isa = PBXTargetDependency;
 			target = F8288F082EF27FA300636D9F /* HomeboundWidgetsExtension */;
 			targetProxy = F8288F1C2EF27FA400636D9F /* PBXContainerItemProxy */;
+		};
+		F86756C02F0E230C00AF2524 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F82135952EAB01E300237850 /* Homebound */;
+			targetProxy = F86756BF2F0E230C00AF2524 /* PBXContainerItemProxy */;
+		};
+		F86756EA2F0E2DE500AF2524 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F82135952EAB01E300237850 /* Homebound */;
+			targetProxy = F86756E92F0E2DE500AF2524 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -534,6 +672,92 @@
 			};
 			name = Release;
 		};
+		F86756C12F0E230C00AF2524 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HF826KS9K5;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hudsonschmidt.HomeboundTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Homebound.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Homebound";
+			};
+			name = Debug;
+		};
+		F86756C22F0E230C00AF2524 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HF826KS9K5;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hudsonschmidt.HomeboundTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Homebound.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Homebound";
+			};
+			name = Release;
+		};
+		F86756EC2F0E2DE500AF2524 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HF826KS9K5;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hudsonschmidt.HomeboundUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Homebound;
+			};
+			name = Debug;
+		};
+		F86756ED2F0E2DE500AF2524 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HF826KS9K5;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hudsonschmidt.HomeboundUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Homebound;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -560,6 +784,24 @@
 			buildConfigurations = (
 				F8288F202EF27FA400636D9F /* Debug */,
 				F8288F212EF27FA400636D9F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F86756C32F0E230C00AF2524 /* Build configuration list for PBXNativeTarget "HomeboundTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F86756C12F0E230C00AF2524 /* Debug */,
+				F86756C22F0E230C00AF2524 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F86756EB2F0E2DE500AF2524 /* Build configuration list for PBXNativeTarget "HomeboundUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F86756EC2F0E2DE500AF2524 /* Debug */,
+				F86756ED2F0E2DE500AF2524 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

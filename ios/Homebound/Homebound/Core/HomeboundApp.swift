@@ -19,6 +19,13 @@ struct HomeboundApp: App {
     @State private var pendingFriendInviteToken: String?
     @State private var showFriendInvite = false
 
+    init() {
+        // Check for UI testing mode and configure session accordingly
+        if Session.isUITesting {
+            Session.shared.configureForUITesting()
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
