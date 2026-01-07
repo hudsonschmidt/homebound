@@ -269,16 +269,24 @@ def create_checkin_update_email_html(
     expected_time: str,
     coordinates: str | None = None,
     location: str | None = None,
-    location_name: str | None = None
+    location_name: str | None = None,
+    watched_user_name: str | None = None
 ) -> str:
-    """Create HTML email template for check-in update notifications."""
+    """Create HTML email template for check-in update notifications.
+
+    user_name: Who performed the check-in (actor)
+    watched_user_name: Who the contact is watching (for subject context)
+    """
     location_html = location if location else "Not specified"
     coordinates_text = coordinates if coordinates else "Not available"
     location_name_text = location_name if location_name else "Not available"
+    # Use watched_user_name for context, fallback to user_name
+    watched = watched_user_name or user_name
 
     return render_template(
         "checkin",
         user_name=user_name,
+        watched_user_name=watched,
         checkin_time=checkin_time,
         coordinates=coordinates_text,
         location_name=location_name_text,
@@ -295,14 +303,21 @@ def create_trip_extended_email_html(
     activity: str,
     extended_by: int,
     new_eta: str,
-    location: str | None = None
+    location: str | None = None,
+    watched_user_name: str | None = None
 ) -> str:
-    """Create HTML email template for trip extended notifications."""
+    """Create HTML email template for trip extended notifications.
+
+    user_name: Who extended the trip (actor)
+    watched_user_name: Who the contact is watching
+    """
     location_html = location if location else "Not specified"
+    watched = watched_user_name or user_name
 
     return render_template(
         "extended",
         user_name=user_name,
+        watched_user_name=watched,
         extended_by=extended_by,
         plan_title=plan_title,
         activity=activity,
@@ -315,14 +330,21 @@ def create_trip_completed_email_html(
     user_name: str,
     plan_title: str,
     activity: str,
-    location: str | None = None
+    location: str | None = None,
+    watched_user_name: str | None = None
 ) -> str:
-    """Create HTML email template for trip completed notifications to contacts."""
+    """Create HTML email template for trip completed notifications to contacts.
+
+    user_name: Who completed the trip (actor)
+    watched_user_name: Who the contact is watching
+    """
     location_html = location if location else "Not specified"
+    watched = watched_user_name or user_name
 
     return render_template(
         "completed",
         user_name=user_name,
+        watched_user_name=watched,
         plan_title=plan_title,
         activity=activity,
         location_html=location_html

@@ -111,6 +111,8 @@ def _get_friend_contacts_for_trip(connection, trip_id: int) -> dict[str, int | N
         {"trip_id": trip_id}
     ).fetchall()
 
+    log.info(f"[Trips] _get_friend_contacts_for_trip: trip_id={trip_id}, found {len(result)} friend contacts: {[(r.friend_user_id, r.position) for r in result]}")
+
     # Map positions to friend_contact fields
     friend_contacts: dict[str, int | None] = {
         "friend_contact1": None,
@@ -126,6 +128,7 @@ def _get_friend_contacts_for_trip(connection, trip_id: int) -> dict[str, int | N
         elif i == 2:
             friend_contacts["friend_contact3"] = row.friend_user_id
 
+    log.info(f"[Trips] _get_friend_contacts_for_trip: returning {friend_contacts}")
     return friend_contacts
 
 
@@ -176,8 +179,22 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
 
     For group trips, this includes both the owner's contacts AND participant contacts
     from the participant_trip_contacts table, deduplicated by email.
+
+    Each contact includes a 'watched_user_name' field indicating whose trip they are watching.
+    This allows personalized notifications (e.g., "Update on John's trip").
     """
-    # Owner's contacts
+    # Get owner's name for watched_user_name
+    owner_id = getattr(trip, 'user_id', None)
+    owner_name = "Trip owner"
+    if owner_id:
+        owner = connection.execute(
+            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :id"),
+            {"id": owner_id}
+        ).fetchone()
+        if owner:
+            owner_name = f"{owner.first_name} {owner.last_name}".strip() or "Trip owner"
+
+    # Owner's contacts - they are watching the owner
     contact_ids = [trip.contact1, trip.contact2, trip.contact3]
     contact_ids = [c for c in contact_ids if c is not None]
 
@@ -187,7 +204,7 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
             sqlalchemy.text("SELECT id, name, email FROM contacts WHERE id = ANY(:ids)"),
             {"ids": contact_ids}
         ).fetchall()
-        contacts = [{"id": c.id, "name": c.name, "email": c.email} for c in result]
+        contacts = [{"id": c.id, "name": c.name, "email": c.email, "watched_user_name": owner_name} for c in result]
 
     # For group trips, also get participant contacts
     is_group = getattr(trip, 'is_group_trip', False)
@@ -195,11 +212,14 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
 
     if is_group and trip_id:
         log.info(f"[Trips] _get_all_trip_email_contacts: Group trip {trip_id}, fetching participant contacts")
+        # Join with users table to get participant's name
         participant_contacts = connection.execute(
             sqlalchemy.text("""
-                SELECT DISTINCT c.id, c.name, c.email
+                SELECT DISTINCT c.id, c.name, c.email,
+                       COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
                 FROM participant_trip_contacts ptc
                 JOIN contacts c ON ptc.contact_id = c.id
+                JOIN users u ON ptc.participant_user_id = u.id
                 WHERE ptc.trip_id = :trip_id AND c.email IS NOT NULL
             """),
             {"trip_id": trip_id}
@@ -207,11 +227,17 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
 
         log.info(f"[Trips] _get_all_trip_email_contacts: Found {len(participant_contacts)} participant email contacts")
 
-        # Deduplicate by email
+        # Deduplicate by email - participant contacts watch their specific participant
         existing_emails = {c["email"].lower() for c in contacts if c.get("email")}
         for pc in participant_contacts:
             if pc.email and pc.email.lower() not in existing_emails:
-                contacts.append({"id": pc.id, "name": pc.name, "email": pc.email})
+                watched_name = pc.participant_name.strip() if pc.participant_name else "Participant"
+                contacts.append({
+                    "id": pc.id,
+                    "name": pc.name,
+                    "email": pc.email,
+                    "watched_user_name": watched_name
+                })
                 existing_emails.add(pc.email.lower())
 
     log.info(f"[Trips] _get_all_trip_email_contacts: Returning {len(contacts)} total contacts")
@@ -1441,19 +1467,19 @@ def complete_trip(
 ):
     """Mark a trip as completed"""
     with db.engine.begin() as connection:
-        # Verify trip ownership and status, fetch details needed for email
+        # Fetch trip details (without user filter to allow participant access)
         trip = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.status, t.title, t.location_text,
                        t.contact1, t.contact2, t.contact3, t.timezone, t.notify_self,
-                       t.is_group_trip, a.name as activity_name
+                       t.is_group_trip, t.user_id, a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
-                WHERE t.id = :trip_id AND t.user_id = :user_id
+                WHERE t.id = :trip_id
                 """
             ),
-            {"trip_id": trip_id, "user_id": user_id}
+            {"trip_id": trip_id}
         ).fetchone()
 
         if not trip:
@@ -1461,6 +1487,24 @@ def complete_trip(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Trip not found"
             )
+
+        # Check authorization: user must be owner or accepted participant
+        is_owner = trip.user_id == user_id
+        if not is_owner:
+            participant = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id = :user_id AND status = 'accepted'
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchone()
+            if not participant:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not authorized to complete this trip"
+                )
 
         # Allow completing active, overdue, or overdue_notified trips
         if trip.status not in ("active", "overdue", "overdue_notified"):
@@ -1522,6 +1566,24 @@ def complete_trip(
             friend_contacts["friend_contact3"]
         ]
         friend_user_ids = [f for f in friend_user_ids if f is not None]
+
+        # For group trips, also include participant friend contacts
+        if trip.is_group_trip:
+            participant_friend_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT DISTINCT friend_user_id FROM participant_trip_contacts
+                    WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                    """
+                ),
+                {"trip_id": trip_id}
+            ).fetchall()
+            existing_friend_ids = set(friend_user_ids)
+            for pfc in participant_friend_contacts:
+                if pfc.friend_user_id not in existing_friend_ids:
+                    friend_user_ids.append(pfc.friend_user_id)
+                    existing_friend_ids.add(pfc.friend_user_id)
+            log.info(f"[Trips] complete_trip: Added {len(participant_friend_contacts)} participant friend contacts")
 
         if friend_user_ids:
             trip_title_for_push = trip.title
@@ -1632,6 +1694,25 @@ def start_trip(
             friend_contacts["friend_contact3"]
         ]
         friend_user_ids = [f for f in friend_user_ids if f is not None]
+
+        # For group trips, also include participant friend contacts
+        if trip.is_group_trip:
+            participant_friend_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT DISTINCT friend_user_id FROM participant_trip_contacts
+                    WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                    """
+                ),
+                {"trip_id": trip_id}
+            ).fetchall()
+            existing_friend_ids = set(friend_user_ids)
+            for pfc in participant_friend_contacts:
+                if pfc.friend_user_id not in existing_friend_ids:
+                    friend_user_ids.append(pfc.friend_user_id)
+                    existing_friend_ids.add(pfc.friend_user_id)
+            log.info(f"[Trips] start_trip: Added {len(participant_friend_contacts)} participant friend contacts")
+
         log.info(f"[Trips] start_trip: Friend user IDs to notify: {friend_user_ids}")
 
         if friend_user_ids:
@@ -1782,6 +1863,30 @@ def extend_trip(
             }
         )
 
+        # For group trips, update trip_participants with the extender's check-in info
+        # Use upsert to handle case where owner's record doesn't exist yet
+        if trip.is_group_trip:
+            is_owner = trip.user_id == user_id
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO trip_participants (trip_id, user_id, role, status, last_checkin_at, last_lat, last_lon, joined_at, invited_by)
+                    VALUES (:trip_id, :user_id, CASE WHEN :is_owner THEN 'owner' ELSE 'participant' END, 'accepted', :now, :lat, :lon, :now, :user_id)
+                    ON CONFLICT (trip_id, user_id)
+                    DO UPDATE SET last_checkin_at = :now, last_lat = :lat, last_lon = :lon
+                    """
+                ),
+                {
+                    "trip_id": trip_id,
+                    "user_id": user_id,
+                    "is_owner": is_owner,
+                    "now": now.isoformat(),
+                    "lat": lat,
+                    "lon": lon
+                }
+            )
+            log.info(f"[Trips] Updated trip_participants for user {user_id} on extend for trip {trip_id}")
+
         # Fetch user name and email for notification
         user = connection.execute(
             sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
@@ -1830,6 +1935,24 @@ def extend_trip(
         ]
         friend_user_ids = [f for f in friend_user_ids if f is not None]
 
+        # For group trips, also include participant friend contacts
+        if trip.is_group_trip:
+            participant_friend_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT DISTINCT friend_user_id FROM participant_trip_contacts
+                    WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                    """
+                ),
+                {"trip_id": trip_id}
+            ).fetchall()
+            existing_friend_ids = set(friend_user_ids)
+            for pfc in participant_friend_contacts:
+                if pfc.friend_user_id not in existing_friend_ids:
+                    friend_user_ids.append(pfc.friend_user_id)
+                    existing_friend_ids.add(pfc.friend_user_id)
+            log.info(f"[Trips] extend_trip: Added {len(participant_friend_contacts)} participant friend contacts")
+
         if friend_user_ids:
             trip_title_for_push = trip.title
             user_name_for_push = user_name
@@ -1846,6 +1969,36 @@ def extend_trip(
 
             background_tasks.add_task(send_friend_extended_push_sync)
             log.info(f"[Trips] Scheduled extended push notifications for {len(friend_user_ids)} friend contacts")
+
+        # For group trips, send refresh pushes to owner (if not the extender) and all other participants
+        if trip.is_group_trip:
+            refresh_user_ids = []
+
+            # Add owner if extender is not the owner
+            if trip.user_id != user_id:
+                refresh_user_ids.append(trip.user_id)
+
+            # Add all other accepted participants
+            other_participants = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT user_id FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id != :extender_id AND status = 'accepted'
+                    """
+                ),
+                {"trip_id": trip_id, "extender_id": user_id}
+            ).fetchall()
+            refresh_user_ids.extend([p.user_id for p in other_participants])
+
+            if refresh_user_ids:
+                trip_id_for_refresh = trip_id
+
+                def send_refresh_pushes():
+                    for uid in refresh_user_ids:
+                        asyncio.run(send_data_refresh_push(uid, "trip", trip_id_for_refresh))
+
+                background_tasks.add_task(send_refresh_pushes)
+                log.info(f"[Trips] Scheduled extend refresh pushes for {len(refresh_user_ids)} users")
 
         new_eta_iso = new_eta.isoformat()
         return {
@@ -2087,13 +2240,16 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
 
         is_owner = trip.user_id == user_id
         contacts: list[TripContactResponse] = []
+        log.info(f"[MyContacts] trip_id={trip_id}, user_id={user_id}, is_owner={is_owner}")
 
         if is_owner:
             # Owner: get contacts from trip table and trip_safety_contacts
 
             # Get email contacts (contact1, contact2, contact3)
             contact_ids = [trip.contact1, trip.contact2, trip.contact3]
+            log.info(f"[MyContacts] Owner email contact_ids from trips table: {contact_ids}")
             contact_ids = [c for c in contact_ids if c is not None]
+            log.info(f"[MyContacts] Owner email contact_ids (filtered): {contact_ids}")
 
             if contact_ids:
                 email_contacts = connection.execute(
@@ -2102,6 +2258,7 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
                     ),
                     {"ids": contact_ids}
                 ).fetchall()
+                log.info(f"[MyContacts] Owner email_contacts query returned {len(email_contacts)} rows")
 
                 for c in email_contacts:
                     contacts.append(TripContactResponse(
@@ -2124,6 +2281,7 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
                 ),
                 {"trip_id": trip_id}
             ).fetchall()
+            log.info(f"[MyContacts] Owner friend_rows query returned {len(friend_rows)} rows")
 
             for f in friend_rows:
                 contacts.append(TripContactResponse(
@@ -2132,6 +2290,8 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
                     friend_name=f"{f.first_name} {f.last_name}".strip() or None,
                     profile_photo_url=f.profile_photo_url
                 ))
+
+            log.info(f"[MyContacts] Owner total contacts: {len(contacts)}")
 
         else:
             # Participant: check they have accepted the trip
@@ -2151,6 +2311,15 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
                     detail="Trip not found or access denied"
                 )
 
+            # Debug: Get raw count from participant_trip_contacts
+            ptc_count = connection.execute(
+                sqlalchemy.text(
+                    "SELECT COUNT(*) FROM participant_trip_contacts WHERE trip_id = :trip_id AND participant_user_id = :user_id"
+                ),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).scalar() or 0
+            log.info(f"[MyContacts] Participant has {ptc_count} rows in participant_trip_contacts")
+
             # Get participant's contacts from participant_trip_contacts
             # Email contacts
             email_contacts = connection.execute(
@@ -2165,6 +2334,7 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
                 ),
                 {"trip_id": trip_id, "user_id": user_id}
             ).fetchall()
+            log.info(f"[MyContacts] Participant email_contacts query returned {len(email_contacts)} rows")
 
             for c in email_contacts:
                 contacts.append(TripContactResponse(
@@ -2188,6 +2358,7 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
                 ),
                 {"trip_id": trip_id, "user_id": user_id}
             ).fetchall()
+            log.info(f"[MyContacts] Participant friend_contacts query returned {len(friend_contacts)} rows")
 
             for f in friend_contacts:
                 contacts.append(TripContactResponse(
@@ -2196,6 +2367,8 @@ def get_my_trip_contacts(trip_id: int, user_id: int = Depends(auth.get_current_u
                     friend_name=f"{f.first_name} {f.last_name}".strip() or None,
                     profile_photo_url=f.profile_photo_url
                 ))
+
+            log.info(f"[MyContacts] Participant total contacts: {len(contacts)}")
 
         return MyTripContactsResponse(contacts=contacts)
 

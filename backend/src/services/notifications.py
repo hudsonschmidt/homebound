@@ -1223,13 +1223,22 @@ async def send_checkin_update_emails(
     user_timezone: str | None = None,
     coordinates: str | None = None,
     location_name: str | None = None,
-    owner_email: str | None = None
+    owner_email: str | None = None,
+    actor_name: str | None = None
 ):
     """Send check-in update emails to contacts when user checks in.
 
     If owner_email is provided, also sends a copy to the trip owner.
+
+    For group trips, each contact has a 'watched_user_name' indicating who they're watching.
+    The subject line uses the watched user's name, while the body mentions the actor.
+    If actor_name is not provided, user_name is used for both.
     """
     from ..messaging.resend_backend import create_checkin_update_email_html
+
+    # Use user_name as actor_name if not specified (backward compatibility)
+    if actor_name is None:
+        actor_name = user_name
 
     # Extract trip data
     trip_title = get_attr(trip, 'title')
@@ -1241,45 +1250,69 @@ async def send_checkin_update_emails(
 
     display_location = trip_location_text if should_display_location(trip_location_text) else None
 
-    # Build list of all recipients (contacts + owner if enabled)
-    recipients = []
+    # Process each contact individually for personalized notifications
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-        if contact_email:
-            recipients.append(contact_email)
+        if not contact_email:
+            continue
 
-    # Add owner email if notify_self is enabled
-    if owner_email and owner_email not in recipients:
-        recipients.append(owner_email)
+        # Get the watched user's name for this contact (defaults to actor_name for solo trips)
+        watched_user_name = get_attr(contact, 'watched_user_name') or actor_name
 
-    for recipient_email in recipients:
-        subject = f"{user_name} checked in"
-        # Use different subject for owner
-        if recipient_email == owner_email:
-            subject = f"Your check-in was recorded for '{trip_title}'"
+        # Subject uses watched user's name so the contact knows whose trip this is about
+        subject = f"Update on {watched_user_name}'s trip: Check-in received"
 
         html_body = create_checkin_update_email_html(
-            user_name=user_name,
+            user_name=actor_name,  # Who checked in
             plan_title=trip_title,
             activity=activity_name,
             checkin_time=checkin_time,
             expected_time=expected_time,
             coordinates=coordinates,
             location=display_location,
-            location_name=location_name
+            location_name=location_name,
+            watched_user_name=watched_user_name
         )
         plain_body = html_to_text(html_body)
 
         await send_email(
-            recipient_email,
+            contact_email,
             subject,
             plain_body,
             html_body,
             from_email=settings.RESEND_UPDATE_EMAIL
         )
 
-        log.info(f"Sent checkin update to {recipient_email} for trip '{trip_title}'")
+        log.info(f"Sent checkin update to {contact_email} for trip '{trip_title}' (watched: {watched_user_name})")
         await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
+
+    # Also send to owner if enabled
+    if owner_email:
+        subject = f"Your check-in was recorded for '{trip_title}'"
+
+        html_body = create_checkin_update_email_html(
+            user_name=actor_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            checkin_time=checkin_time,
+            expected_time=expected_time,
+            coordinates=coordinates,
+            location=display_location,
+            location_name=location_name,
+            watched_user_name=actor_name  # Owner is watching themselves
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            owner_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_UPDATE_EMAIL
+        )
+
+        log.info(f"Sent checkin update to owner {owner_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)
 
 # Trip extended --------------------------------------------------------------------------------
 async def send_trip_extended_emails(
@@ -1289,13 +1322,21 @@ async def send_trip_extended_emails(
     activity_name: str,
     extended_by_minutes: int,
     user_timezone: str | None = None,
-    owner_email: str | None = None
+    owner_email: str | None = None,
+    actor_name: str | None = None
 ):
     """Send notification emails to contacts when user extends their trip.
 
     If owner_email is provided, also sends a copy to the trip owner.
+
+    For group trips, each contact has a 'watched_user_name' indicating who they're watching.
+    The subject line uses the watched user's name, while the body mentions the actor.
     """
     from ..messaging.resend_backend import create_trip_extended_email_html
+
+    # Use user_name as actor_name if not specified (backward compatibility)
+    if actor_name is None:
+        actor_name = user_name
 
     # Extract trip data
     trip_title = get_attr(trip, 'title')
@@ -1306,43 +1347,65 @@ async def send_trip_extended_emails(
 
     display_location = trip_location_text if should_display_location(trip_location_text) else None
 
-    # Build list of all recipients (contacts + owner if enabled)
-    recipients = []
+    # Process each contact individually for personalized notifications
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-        if contact_email:
-            recipients.append(contact_email)
+        if not contact_email:
+            continue
 
-    # Add owner email if notify_self is enabled
-    if owner_email and owner_email not in recipients:
-        recipients.append(owner_email)
+        # Get the watched user's name for this contact
+        watched_user_name = get_attr(contact, 'watched_user_name') or actor_name
 
-    for recipient_email in recipients:
-        subject = f"{user_name} extended their trip"
-        # Use different subject for owner
-        if recipient_email == owner_email:
-            subject = f"Your trip '{trip_title}' has been extended"
+        # Subject uses watched user's name
+        subject = f"Update on {watched_user_name}'s trip: Extended by {extended_by_minutes} min"
 
         html_body = create_trip_extended_email_html(
-            user_name=user_name,
+            user_name=actor_name,  # Who extended
             plan_title=trip_title,
             activity=activity_name,
             extended_by=extended_by_minutes,
             new_eta=new_eta_formatted,
-            location=display_location
+            location=display_location,
+            watched_user_name=watched_user_name
         )
         plain_body = html_to_text(html_body)
 
         await send_email(
-            recipient_email,
+            contact_email,
             subject,
             plain_body,
             html_body,
             from_email=settings.RESEND_UPDATE_EMAIL
         )
 
-        log.info(f"Sent trip extended notification to {recipient_email} for trip '{trip_title}'")
+        log.info(f"Sent trip extended notification to {contact_email} for trip '{trip_title}' (watched: {watched_user_name})")
         await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
+
+    # Also send to owner if enabled
+    if owner_email:
+        subject = f"Your trip '{trip_title}' has been extended"
+
+        html_body = create_trip_extended_email_html(
+            user_name=actor_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            extended_by=extended_by_minutes,
+            new_eta=new_eta_formatted,
+            location=display_location,
+            watched_user_name=actor_name
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            owner_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_UPDATE_EMAIL
+        )
+
+        log.info(f"Sent trip extended notification to owner {owner_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)
 
 # Trip completed --------------------------------------------------------------------------------
 async def send_trip_completed_emails(
@@ -1351,13 +1414,20 @@ async def send_trip_completed_emails(
     user_name: str,
     activity_name: str,
     user_timezone: str | None = None,
-    owner_email: str | None = None
+    owner_email: str | None = None,
+    actor_name: str | None = None
 ):
     """Send notification emails to contacts when a trip is completed safely.
 
     If owner_email is provided, also sends a copy to the trip owner.
+
+    For group trips, each contact has a 'watched_user_name' indicating who they're watching.
     """
     from ..messaging.resend_backend import create_trip_completed_email_html
+
+    # Use user_name as actor_name if not specified (backward compatibility)
+    if actor_name is None:
+        actor_name = user_name
 
     # Extract trip data
     trip_title = get_attr(trip, 'title')
@@ -1365,41 +1435,61 @@ async def send_trip_completed_emails(
 
     display_location = trip_location_text if should_display_location(trip_location_text) else None
 
-    # Build list of all recipients (contacts + owner if enabled)
-    recipients = []
+    # Process each contact individually for personalized notifications
     for contact in contacts:
         contact_email = get_attr(contact, 'email')
-        if contact_email:
-            recipients.append(contact_email)
+        if not contact_email:
+            continue
 
-    # Add owner email if notify_self is enabled
-    if owner_email and owner_email not in recipients:
-        recipients.append(owner_email)
+        # Get the watched user's name for this contact
+        watched_user_name = get_attr(contact, 'watched_user_name') or actor_name
 
-    for recipient_email in recipients:
-        subject = f"{user_name} is Homebound!"
-        # Use different subject for owner
-        if recipient_email == owner_email:
-            subject = f"Your trip '{trip_title}' is complete!"
+        # Subject uses watched user's name
+        subject = f"{watched_user_name} is Homebound!"
 
         html_body = create_trip_completed_email_html(
-            user_name=user_name,
+            user_name=actor_name,  # Who completed
             plan_title=trip_title,
             activity=activity_name,
-            location=display_location
+            location=display_location,
+            watched_user_name=watched_user_name
         )
         plain_body = html_to_text(html_body)
 
         await send_email(
-            recipient_email,
+            contact_email,
             subject,
             plain_body,
             html_body,
             from_email=settings.RESEND_UPDATE_EMAIL
         )
 
-        log.info(f"Sent trip completed notification to {recipient_email} for trip '{trip_title}'")
+        log.info(f"Sent trip completed notification to {contact_email} for trip '{trip_title}' (watched: {watched_user_name})")
         await asyncio.sleep(0.5)  # Rate limit: max 2 requests/second
+
+    # Also send to owner if enabled
+    if owner_email:
+        subject = f"Your trip '{trip_title}' is complete!"
+
+        html_body = create_trip_completed_email_html(
+            user_name=actor_name,
+            plan_title=trip_title,
+            activity=activity_name,
+            location=display_location,
+            watched_user_name=actor_name
+        )
+        plain_body = html_to_text(html_body)
+
+        await send_email(
+            owner_email,
+            subject,
+            plain_body,
+            html_body,
+            from_email=settings.RESEND_UPDATE_EMAIL
+        )
+
+        log.info(f"Sent trip completed notification to owner {owner_email} for trip '{trip_title}'")
+        await asyncio.sleep(0.5)
 
 # Overdue resolved --------------------------------------------------------------------------------
 async def send_overdue_resolved_emails(

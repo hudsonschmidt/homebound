@@ -2167,7 +2167,7 @@ final class Session: ObservableObject {
                 return false
             }
 
-            let _: ExtendResponse = try await withAuth { bearer in
+            let response: ExtendResponse = try await withAuth { bearer in
                 try await self.api.post(
                     requestURL,
                     body: API.Empty(),
@@ -2175,14 +2175,37 @@ final class Session: ObservableObject {
                 )
             }
 
-            // Reload the active plan to get updated data
+            // Parse the server's new_eta and apply it immediately
+            // This prevents race conditions with Realtime updates that might have stale data
+            if let newETADate = DateUtils.parseISO8601(response.new_eta) {
+                await MainActor.run {
+                    if let currentTrip = self.activeTrip {
+                        // Update activeTrip with the server's authoritative new ETA
+                        let updatedTrip = currentTrip.with(eta_at: newETADate)
+                        self.activeTrip = updatedTrip
+                        self.syncTripInAllTrips(updatedTrip)
+                        debugLog("[Session] ✅ Applied new ETA from extend response: \(response.new_eta)")
+                    }
+                }
+
+                // Update Live Activity immediately with the new ETA
+                if let updatedTrip = self.activeTrip {
+                    let checkinCount = getCheckinCount(tripId: updatedTrip.id)
+                    await LiveActivityManager.shared.updateActivity(with: updatedTrip, checkinCount: checkinCount)
+                }
+
+                // Update the local cache with the new ETA
+                LocalStorage.shared.updateCachedTripFields(
+                    tripId: plan.id,
+                    updates: ["eta": response.new_eta]
+                )
+            }
+
+            // Also reload active plan for any other updated fields (last_checkin, etc.)
+            // This may be debounced by Live Activity but the ETA is already updated above
             await loadActivePlan()
 
             await MainActor.run {
-                // Sync updated activeTrip to allTrips
-                if let updatedTrip = self.activeTrip {
-                    self.syncTripInAllTrips(updatedTrip)
-                }
                 self.notice = "Trip extended by \(minutes) minutes"
                 // Update widget data with new ETA
                 self.updateWidgetData()
@@ -2461,6 +2484,31 @@ final class Session: ObservableObject {
 
     // MARK: - Delete Plan
     func deletePlan(_ planId: Int) async -> Bool {
+        // Check if user is a participant (not owner) of a group trip
+        // If so, call leaveTrip instead of delete
+        if let trip = allTrips.first(where: { $0.id == planId }),
+           let currentUserId = self.userId,
+           trip.user_id != currentUserId,
+           trip.is_group_trip {
+            // User is a participant, not the owner - leave instead of delete
+            debugLog("[Session] User is a participant, calling leaveTrip instead of delete")
+            let success = await leaveTrip(tripId: planId)
+            if success {
+                // Clear cached data
+                LocalStorage.shared.clearCachedTimeline(tripId: planId)
+                LocalStorage.shared.removeCachedTrip(tripId: planId)
+
+                await MainActor.run {
+                    self.allTrips.removeAll { $0.id == planId }
+                    if self.activeTrip?.id == planId {
+                        self.activeTrip = nil
+                    }
+                }
+            }
+            return success
+        }
+
+        // User is the owner - proceed with delete
         do {
             let _: GenericResponse = try await withAuth { bearer in
                 try await self.api.delete(

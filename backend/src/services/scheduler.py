@@ -19,6 +19,9 @@ from .notifications import (
     send_background_push_to_user,
     send_friend_overdue_push,
     send_live_activity_update,
+    send_trip_starting_now_emails,
+    send_friend_trip_starting_push,
+    send_data_refresh_push,
 )
 
 
@@ -421,17 +424,21 @@ async def check_push_notifications():
         with db.engine.begin() as conn:
             just_started = conn.execute(
                 sqlalchemy.text("""
-                    SELECT id, user_id, title
-                    FROM trips
-                    WHERE status = 'active'
-                    AND notified_trip_started = false
+                    SELECT t.id, t.user_id, t.title, t.is_group_trip, t.location_text, t.eta,
+                           t.timezone, t.has_separate_locations, t.start_location_text, t.notify_self,
+                           t.contact1, t.contact2, t.contact3,
+                           a.name as activity_name
+                    FROM trips t
+                    JOIN activities a ON t.activity = a.id
+                    WHERE t.status = 'active'
+                    AND t.notified_trip_started = false
                     FOR UPDATE SKIP LOCKED
                 """)
             ).fetchall()
 
             for trip in just_started:
                 try:
-                    # Send visible notification
+                    # Send visible notification to trip owner
                     await send_push_to_user(
                         trip.user_id,
                         "Trip Started",
@@ -445,6 +452,122 @@ async def check_push_notifications():
                         trip.user_id,
                         data={"sync": "start_live_activity", "trip_id": trip.id}
                     )
+
+                    # Get user name for notifications
+                    user = conn.execute(
+                        sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
+                        {"user_id": trip.user_id}
+                    ).fetchone()
+                    user_name = f"{user.first_name} {user.last_name}".strip() if user else "Someone"
+                    if not user_name:
+                        user_name = "A Homebound user"
+                    owner_email = user.email if user and trip.notify_self else None
+
+                    # Get owner's email contacts
+                    owner_contacts = conn.execute(
+                        sqlalchemy.text("""
+                            SELECT c.id, c.name, c.email
+                            FROM contacts c
+                            WHERE c.id IN (:c1, :c2, :c3) AND c.email IS NOT NULL
+                        """),
+                        {"c1": trip.contact1 or -1, "c2": trip.contact2 or -1, "c3": trip.contact3 or -1}
+                    ).fetchall()
+                    contacts_for_email = [dict(c._mapping) for c in owner_contacts]
+
+                    # Get owner's friend contacts
+                    owner_friend_contacts = conn.execute(
+                        sqlalchemy.text("""
+                            SELECT friend_user_id FROM trip_safety_contacts
+                            WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                        """),
+                        {"trip_id": trip.id}
+                    ).fetchall()
+                    friend_user_ids = [f.friend_user_id for f in owner_friend_contacts]
+
+                    # For group trips, also get participant contacts and send notifications
+                    if trip.is_group_trip:
+                        # Get participant email contacts
+                        participant_contacts = conn.execute(
+                            sqlalchemy.text("""
+                                SELECT DISTINCT c.id, c.name, c.email
+                                FROM participant_trip_contacts ptc
+                                JOIN contacts c ON ptc.contact_id = c.id
+                                WHERE ptc.trip_id = :trip_id AND c.email IS NOT NULL
+                            """),
+                            {"trip_id": trip.id}
+                        ).fetchall()
+
+                        # Deduplicate by email
+                        existing_emails = {c['email'].lower() for c in contacts_for_email if c.get('email')}
+                        for pc in participant_contacts:
+                            if pc.email and pc.email.lower() not in existing_emails:
+                                contacts_for_email.append(dict(pc._mapping))
+                                existing_emails.add(pc.email.lower())
+
+                        # Get participant friend contacts
+                        participant_friend_contacts = conn.execute(
+                            sqlalchemy.text("""
+                                SELECT DISTINCT friend_user_id FROM participant_trip_contacts
+                                WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                            """),
+                            {"trip_id": trip.id}
+                        ).fetchall()
+
+                        existing_friend_ids = set(friend_user_ids)
+                        for pfc in participant_friend_contacts:
+                            if pfc.friend_user_id not in existing_friend_ids:
+                                friend_user_ids.append(pfc.friend_user_id)
+                                existing_friend_ids.add(pfc.friend_user_id)
+
+                        # Get all accepted participants to send them push notifications
+                        participants = conn.execute(
+                            sqlalchemy.text("""
+                                SELECT user_id FROM trip_participants
+                                WHERE trip_id = :trip_id AND status = 'accepted' AND user_id != :owner_id
+                            """),
+                            {"trip_id": trip.id, "owner_id": trip.user_id}
+                        ).fetchall()
+
+                        # Send push notifications to all participants
+                        for participant in participants:
+                            await send_push_to_user(
+                                participant.user_id,
+                                "Trip Started",
+                                f"The group trip '{trip.title}' has started. Stay safe!",
+                                data={"sync": "start_live_activity", "trip_id": trip.id},
+                                notification_type="trip_reminder"
+                            )
+                            await send_background_push_to_user(
+                                participant.user_id,
+                                data={"sync": "start_live_activity", "trip_id": trip.id}
+                            )
+                        log.info(f"[Push] Sent 'trip started' push to {len(participants)} participants for trip {trip.id}")
+
+                    # Send trip starting emails to all contacts (owner + participants)
+                    if contacts_for_email or owner_email:
+                        trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
+                        start_location = trip.start_location_text if trip.has_separate_locations else None
+                        await send_trip_starting_now_emails(
+                            trip=trip_data,
+                            contacts=contacts_for_email,
+                            user_name=user_name,
+                            activity_name=trip.activity_name,
+                            user_timezone=trip.timezone,
+                            start_location=start_location,
+                            owner_email=owner_email
+                        )
+                        log.info(f"[Push] Sent trip starting emails to {len(contacts_for_email)} contacts for trip {trip.id}")
+
+                    # Send friend trip starting pushes
+                    for friend_id in friend_user_ids:
+                        await send_friend_trip_starting_push(
+                            friend_user_id=friend_id,
+                            user_name=user_name,
+                            trip_title=trip.title
+                        )
+                    if friend_user_ids:
+                        log.info(f"[Push] Sent friend trip starting push to {len(friend_user_ids)} friends for trip {trip.id}")
+
                     conn.execute(
                         sqlalchemy.text("UPDATE trips SET notified_trip_started = true WHERE id = :id"),
                         {"id": trip.id}

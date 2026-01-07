@@ -1190,6 +1190,26 @@ def participant_checkin(
 
         contacts_for_email = [dict(c._mapping) for c in participant_email_contacts]
 
+        # Also get trip owner's email contacts so they're notified of participant check-ins
+        owner_email_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT c.id, c.name, c.email
+                FROM contacts c
+                JOIN trips t ON (c.id = t.contact1 OR c.id = t.contact2 OR c.id = t.contact3)
+                WHERE t.id = :trip_id AND c.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id}
+        ).fetchall()
+
+        # Deduplicate by email
+        existing_emails = {c['email'].lower() for c in contacts_for_email if c.get('email')}
+        for oc in owner_email_contacts:
+            if oc.email and oc.email.lower() not in existing_emails:
+                contacts_for_email.append(dict(oc._mapping))
+                existing_emails.add(oc.email.lower())
+
         # Get checking-in participant's friend safety contacts
         participant_friend_contacts = connection.execute(
             sqlalchemy.text(
@@ -1204,6 +1224,23 @@ def participant_checkin(
         ).fetchall()
 
         friend_user_ids = [f.friend_user_id for f in participant_friend_contacts]
+
+        # Also get trip owner's friend contacts
+        owner_friend_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend_user_id FROM trip_safety_contacts
+                WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id}
+        ).fetchall()
+
+        existing_friend_ids = set(friend_user_ids)
+        for ofc in owner_friend_contacts:
+            if ofc.friend_user_id not in existing_friend_ids:
+                friend_user_ids.append(ofc.friend_user_id)
+                existing_friend_ids.add(ofc.friend_user_id)
 
         # Prepare location info for notifications (geocoding moved to background)
         coordinates_str = f"{lat:.6f}, {lon:.6f}" if lat is not None and lon is not None else None

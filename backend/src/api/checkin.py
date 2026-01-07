@@ -108,18 +108,21 @@ def checkin_with_token(
         ).fetchone()
 
         if is_group and is_group.is_group_trip:
-            # Update participant's last check-in location
+            # Update or insert owner's check-in location using upsert
+            # This handles the case where the owner's trip_participants record doesn't exist yet
+            # (it's only created when the first participant is invited)
             connection.execute(
                 sqlalchemy.text(
                     """
-                    UPDATE trip_participants
-                    SET last_checkin_at = :now, last_lat = :lat, last_lon = :lon
-                    WHERE trip_id = :trip_id AND user_id = :user_id
+                    INSERT INTO trip_participants (trip_id, user_id, role, status, last_checkin_at, last_lat, last_lon, joined_at, invited_by)
+                    VALUES (:trip_id, :user_id, 'owner', 'accepted', :now, :lat, :lon, :now, :user_id)
+                    ON CONFLICT (trip_id, user_id)
+                    DO UPDATE SET last_checkin_at = :now, last_lat = :lat, last_lon = :lon
                     """
                 ),
                 {"trip_id": trip.id, "user_id": trip.user_id, "now": now.isoformat(), "lat": lat, "lon": lon}
             )
-            log.info(f"[Checkin] Updated participant location for user {trip.user_id} in group trip {trip.id}")
+            log.info(f"[Checkin] Updated/inserted participant location for owner {trip.user_id} in group trip {trip.id}")
 
         # Fetch user name and email for notification
         user = connection.execute(
@@ -234,6 +237,24 @@ def checkin_with_token(
             {"trip_id": trip.id}
         ).fetchall()
         friend_user_ids = [f.friend_user_id for f in friend_contacts]
+
+        # For group trips, also include participant friend contacts
+        if trip.is_group_trip:
+            participant_friend_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT DISTINCT friend_user_id FROM participant_trip_contacts
+                    WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                    """
+                ),
+                {"trip_id": trip.id}
+            ).fetchall()
+            existing_friend_ids = set(friend_user_ids)
+            for pfc in participant_friend_contacts:
+                if pfc.friend_user_id not in existing_friend_ids:
+                    friend_user_ids.append(pfc.friend_user_id)
+                    existing_friend_ids.add(pfc.friend_user_id)
+            log.info(f"[Checkin] Added {len(participant_friend_contacts)} participant friend contacts")
 
         if friend_user_ids:
             trip_title_for_push = trip.title
@@ -409,6 +430,24 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             {"trip_id": trip.id}
         ).fetchall()
         friend_user_ids = [f.friend_user_id for f in friend_contacts]
+
+        # For group trips, also include participant friend contacts
+        if trip.is_group_trip:
+            participant_friend_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT DISTINCT friend_user_id FROM participant_trip_contacts
+                    WHERE trip_id = :trip_id AND friend_user_id IS NOT NULL
+                    """
+                ),
+                {"trip_id": trip.id}
+            ).fetchall()
+            existing_friend_ids = set(friend_user_ids)
+            for pfc in participant_friend_contacts:
+                if pfc.friend_user_id not in existing_friend_ids:
+                    friend_user_ids.append(pfc.friend_user_id)
+                    existing_friend_ids.add(pfc.friend_user_id)
+            log.info(f"[Checkout] Added {len(participant_friend_contacts)} participant friend contacts")
 
         if friend_user_ids:
             trip_title_for_push = trip.title

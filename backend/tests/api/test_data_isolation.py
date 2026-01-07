@@ -263,8 +263,9 @@ def test_user_cannot_delete_other_user_trip():
     trip_a_id = create_test_trip(user_a_id, contact_a_id, "User A Trip")
 
     # User B tries to delete User A's trip
+    background_tasks = BackgroundTasks()
     with pytest.raises(HTTPException) as exc_info:
-        delete_trip(trip_id=trip_a_id, user_id=user_b_id)
+        delete_trip(trip_id=trip_a_id, background_tasks=background_tasks, user_id=user_b_id)
 
     assert exc_info.value.status_code == 404
 
