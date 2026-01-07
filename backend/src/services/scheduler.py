@@ -257,25 +257,49 @@ async def _process_overdue_trip(trip, now: datetime):
                     ).scalar() or 0
                     log.info(f"[Scheduler] Trip {trip_id}: Found {ptc_count} rows in participant_trip_contacts")
 
-                    participant_contacts = conn.execute(
+                    # Get participant email contacts (from contacts table via contact_id)
+                    participant_email_contacts = conn.execute(
                         sqlalchemy.text("""
                             SELECT DISTINCT c.name, c.email
                             FROM participant_trip_contacts ptc
                             JOIN contacts c ON ptc.contact_id = c.id
-                            WHERE ptc.trip_id = :trip_id AND c.email IS NOT NULL
+                            WHERE ptc.trip_id = :trip_id
+                              AND ptc.contact_id IS NOT NULL
+                              AND c.email IS NOT NULL
                         """),
                         {"trip_id": trip_id}
                     ).fetchall()
-                    log.info(f"[Scheduler] Trip {trip_id}: Query returned {len(participant_contacts)} participant email contacts")
+                    log.info(f"[Scheduler] Trip {trip_id}: Query returned {len(participant_email_contacts)} participant email contacts")
+
+                    # Get participant friend contacts' emails (from users table via friend_user_id)
+                    participant_friend_email_contacts = conn.execute(
+                        sqlalchemy.text("""
+                            SELECT DISTINCT
+                                   TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                                   friend.email as email
+                            FROM participant_trip_contacts ptc
+                            JOIN users friend ON ptc.friend_user_id = friend.id
+                            WHERE ptc.trip_id = :trip_id
+                              AND ptc.friend_user_id IS NOT NULL
+                              AND friend.email IS NOT NULL
+                        """),
+                        {"trip_id": trip_id}
+                    ).fetchall()
+                    log.info(f"[Scheduler] Trip {trip_id}: Query returned {len(participant_friend_email_contacts)} participant friend email contacts")
 
                     # Deduplicate by email (keep unique emails)
                     existing_emails = {c.email.lower() for c in contacts}
-                    for pc in participant_contacts:
+                    for pc in participant_email_contacts:
                         if pc.email.lower() not in existing_emails:
                             contacts.append(pc)
                             existing_emails.add(pc.email.lower())
 
-                    log.info(f"[Scheduler] Trip {trip_id}: Added {len(participant_contacts)} contacts from participants (total unique: {len(contacts)})")
+                    for pfc in participant_friend_email_contacts:
+                        if pfc.email and pfc.email.lower() not in existing_emails:
+                            contacts.append(pfc)
+                            existing_emails.add(pfc.email.lower())
+
+                    log.info(f"[Scheduler] Trip {trip_id}: Added participant contacts (total unique: {len(contacts)})")
 
             user = conn.execute(
                 sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
@@ -486,25 +510,52 @@ async def check_push_notifications():
 
                     # For group trips, also get participant contacts and send notifications
                     if trip.is_group_trip:
-                        # Get participant email contacts
-                        participant_contacts = conn.execute(
+                        # Get participant email contacts (from contacts table via contact_id)
+                        participant_email_contacts = conn.execute(
                             sqlalchemy.text("""
                                 SELECT DISTINCT c.id, c.name, c.email
                                 FROM participant_trip_contacts ptc
                                 JOIN contacts c ON ptc.contact_id = c.id
-                                WHERE ptc.trip_id = :trip_id AND c.email IS NOT NULL
+                                WHERE ptc.trip_id = :trip_id
+                                  AND ptc.contact_id IS NOT NULL
+                                  AND c.email IS NOT NULL
                             """),
                             {"trip_id": trip.id}
                         ).fetchall()
 
                         # Deduplicate by email
                         existing_emails = {c['email'].lower() for c in contacts_for_email if c.get('email')}
-                        for pc in participant_contacts:
+                        for pc in participant_email_contacts:
                             if pc.email and pc.email.lower() not in existing_emails:
                                 contacts_for_email.append(dict(pc._mapping))
                                 existing_emails.add(pc.email.lower())
 
-                        # Get participant friend contacts
+                        # Get participant friend contacts' emails (from users table via friend_user_id)
+                        participant_friend_email_contacts = conn.execute(
+                            sqlalchemy.text("""
+                                SELECT DISTINCT
+                                       friend.id as id,
+                                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                                       friend.email as email
+                                FROM participant_trip_contacts ptc
+                                JOIN users friend ON ptc.friend_user_id = friend.id
+                                WHERE ptc.trip_id = :trip_id
+                                  AND ptc.friend_user_id IS NOT NULL
+                                  AND friend.email IS NOT NULL
+                            """),
+                            {"trip_id": trip.id}
+                        ).fetchall()
+
+                        for pfc in participant_friend_email_contacts:
+                            if pfc.email and pfc.email.lower() not in existing_emails:
+                                contacts_for_email.append({
+                                    "id": -pfc.id,  # Negative to indicate it's a user
+                                    "name": pfc.name or "Friend",
+                                    "email": pfc.email
+                                })
+                                existing_emails.add(pfc.email.lower())
+
+                        # Get participant friend contacts for push notifications
                         participant_friend_contacts = conn.execute(
                             sqlalchemy.text("""
                                 SELECT DISTINCT friend_user_id FROM participant_trip_contacts

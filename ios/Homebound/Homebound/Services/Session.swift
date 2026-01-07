@@ -2201,9 +2201,9 @@ final class Session: ObservableObject {
                 )
             }
 
-            // Also reload active plan for any other updated fields (last_checkin, etc.)
-            // This may be debounced by Live Activity but the ETA is already updated above
-            await loadActivePlan()
+            // Skip loadActivePlan() - we already have the authoritative new ETA from the response
+            // The activeTrip, allTrips, LiveActivity, and cache are all updated above
+            // Calling loadActivePlan() here would overwrite the just-updated activeTrip and cause UI issues
 
             await MainActor.run {
                 self.notice = "Trip extended by \(minutes) minutes"

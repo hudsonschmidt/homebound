@@ -212,24 +212,47 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
 
     if is_group and trip_id:
         log.info(f"[Trips] _get_all_trip_email_contacts: Group trip {trip_id}, fetching participant contacts")
-        # Join with users table to get participant's name
-        participant_contacts = connection.execute(
+
+        # Deduplicate by email - start with owner's contacts
+        existing_emails = {c["email"].lower() for c in contacts if c.get("email")}
+
+        # Query 1: Email contacts (contact_id is set) - from contacts table
+        email_contacts = connection.execute(
             sqlalchemy.text("""
                 SELECT DISTINCT c.id, c.name, c.email,
                        COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
                 FROM participant_trip_contacts ptc
                 JOIN contacts c ON ptc.contact_id = c.id
                 JOIN users u ON ptc.participant_user_id = u.id
-                WHERE ptc.trip_id = :trip_id AND c.email IS NOT NULL
+                WHERE ptc.trip_id = :trip_id
+                  AND ptc.contact_id IS NOT NULL
+                  AND c.email IS NOT NULL
             """),
             {"trip_id": trip_id}
         ).fetchall()
 
-        log.info(f"[Trips] _get_all_trip_email_contacts: Found {len(participant_contacts)} participant email contacts")
+        # Query 2: Friend contacts (friend_user_id is set) - get email from users table
+        friend_contacts = connection.execute(
+            sqlalchemy.text("""
+                SELECT DISTINCT
+                       friend.id as id,
+                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                       friend.email as email,
+                       COALESCE(TRIM(participant.first_name || ' ' || participant.last_name), 'Participant') as participant_name
+                FROM participant_trip_contacts ptc
+                JOIN users friend ON ptc.friend_user_id = friend.id
+                JOIN users participant ON ptc.participant_user_id = participant.id
+                WHERE ptc.trip_id = :trip_id
+                  AND ptc.friend_user_id IS NOT NULL
+                  AND friend.email IS NOT NULL
+            """),
+            {"trip_id": trip_id}
+        ).fetchall()
 
-        # Deduplicate by email - participant contacts watch their specific participant
-        existing_emails = {c["email"].lower() for c in contacts if c.get("email")}
-        for pc in participant_contacts:
+        log.info(f"[Trips] _get_all_trip_email_contacts: Found {len(email_contacts)} participant email contacts, {len(friend_contacts)} participant friend contacts")
+
+        # Add email contacts (from contacts table)
+        for pc in email_contacts:
             if pc.email and pc.email.lower() not in existing_emails:
                 watched_name = pc.participant_name.strip() if pc.participant_name else "Participant"
                 contacts.append({
@@ -239,6 +262,18 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
                     "watched_user_name": watched_name
                 })
                 existing_emails.add(pc.email.lower())
+
+        # Add friend contacts (from users table via friend_user_id)
+        for fc in friend_contacts:
+            if fc.email and fc.email.lower() not in existing_emails:
+                watched_name = fc.participant_name.strip() if fc.participant_name else "Participant"
+                contacts.append({
+                    "id": -fc.id,  # Negative to indicate it's a user, not a contact
+                    "name": fc.name or "Friend",
+                    "email": fc.email,
+                    "watched_user_name": watched_name
+                })
+                existing_emails.add(fc.email.lower())
 
     log.info(f"[Trips] _get_all_trip_email_contacts: Returning {len(contacts)} total contacts")
     return contacts
