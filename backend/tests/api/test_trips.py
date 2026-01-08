@@ -4224,3 +4224,332 @@ def test_get_my_contacts_trip_not_found():
     assert exc.value.status_code == 404
 
     cleanup_test_data(user_id)
+
+
+# =============================================================================
+# GROUP TRIP EXTEND NOTIFICATION TESTS
+# =============================================================================
+
+def _setup_group_trip_with_contacts():
+    """Helper to create a group trip with owner and participant, each with email contacts."""
+    test_owner_email = "owner_extend_group@test.com"
+    test_participant_email = "participant_extend_group@test.com"
+
+    with db.engine.begin() as connection:
+        # Clean up any existing test data
+        for email in [test_owner_email, test_participant_email]:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM participant_trip_contacts WHERE participant_user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trip_participants WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM friendships WHERE user_id_1 IN (SELECT id FROM users WHERE email = :email) OR user_id_2 IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE trip_id IN (SELECT id FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email))"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trips WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM contacts WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
+                {"email": email}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+                {"email": email}
+            )
+
+        # Create owner
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age, created_at)
+                VALUES (:email, 'Owner', 'ExtendGroup', 30, :created_at)
+                RETURNING id
+                """
+            ),
+            {"email": test_owner_email, "created_at": datetime.now(UTC)}
+        )
+        owner_id = result.fetchone()[0]
+
+        # Create owner's contact
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, 'Owner Contact', 'owner_extend_contact@test.com')
+                RETURNING id
+                """
+            ),
+            {"user_id": owner_id}
+        )
+        owner_contact_id = result.fetchone()[0]
+
+        # Create participant
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age, created_at)
+                VALUES (:email, 'Participant', 'ExtendGroup', 25, :created_at)
+                RETURNING id
+                """
+            ),
+            {"email": test_participant_email, "created_at": datetime.now(UTC)}
+        )
+        participant_id = result.fetchone()[0]
+
+        # Create participant's contact
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO contacts (user_id, name, email)
+                VALUES (:user_id, 'Participant Contact', 'participant_extend_contact@test.com')
+                RETURNING id
+                """
+            ),
+            {"user_id": participant_id}
+        )
+        participant_contact_id = result.fetchone()[0]
+
+        # Create friendship between owner and participant
+        user_id_1, user_id_2 = min(owner_id, participant_id), max(owner_id, participant_id)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO friendships (user_id_1, user_id_2, created_at)
+                VALUES (:user_id_1, :user_id_2, :created_at)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {"user_id_1": user_id_1, "user_id_2": user_id_2, "created_at": datetime.now(UTC)}
+        )
+
+        # Create active group trip
+        now = datetime.now(UTC)
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, status, is_group_trip,
+                                  checkin_token, checkout_token, location_text, gen_lat, gen_lon,
+                                  has_separate_locations, notify_self, notified_eta_transition,
+                                  notified_grace_transition, share_live_location, contact1,
+                                  group_settings)
+                VALUES (:user_id, 'Group Extend Test', :activity, :start, :eta, 15, 'active', true,
+                        :checkin_token, :checkout_token, 'Test Location', 37.7749, -122.4194,
+                        false, false, false, false, false, :contact1,
+                        '{"checkout_mode": "anyone"}')
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": owner_id,
+                "activity": activity_id,
+                "start": now.isoformat(),
+                "eta": (now + timedelta(hours=2)).isoformat(),
+                "checkin_token": f"extend_group_checkin_{now.timestamp()}",
+                "checkout_token": f"extend_group_checkout_{now.timestamp()}",
+                "contact1": owner_contact_id
+            }
+        )
+        trip_id = result.fetchone()[0]
+
+        # Add owner as participant (owner role)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                VALUES (:trip_id, :user_id, 'owner', 'accepted', :now, :user_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": owner_id, "now": now.isoformat()}
+        )
+
+        # Add participant
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'accepted', :now, :inviter_id)
+                ON CONFLICT (trip_id, user_id) DO NOTHING
+                """
+            ),
+            {"trip_id": trip_id, "user_id": participant_id, "now": now.isoformat(), "inviter_id": owner_id}
+        )
+
+        # Add participant's contact for this trip
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO participant_trip_contacts (trip_id, participant_user_id, contact_id, position)
+                VALUES (:trip_id, :participant_user_id, :contact_id, 1)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {"trip_id": trip_id, "participant_user_id": participant_id, "contact_id": participant_contact_id}
+        )
+
+    return owner_id, participant_id, trip_id, owner_contact_id, participant_contact_id
+
+
+def _cleanup_group_trip_data(owner_id, participant_id):
+    """Clean up group trip test data."""
+    with db.engine.begin() as connection:
+        for user_id in [owner_id, participant_id]:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM participant_trip_contacts WHERE participant_user_id = :user_id"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trip_participants WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM friendships WHERE user_id_1 = :user_id OR user_id_2 = :user_id"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("UPDATE trips SET last_checkin = NULL WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM events WHERE trip_id IN (SELECT id FROM trips WHERE user_id = :user_id)"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trips WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
+
+
+def test_extend_group_trip_notifies_all_contacts():
+    """Verify extend_trip() notifies both owner and participant contacts for group trips.
+
+    Bug regression test: Participant email contacts should be notified when group trip is extended.
+    """
+    owner_id, participant_id, trip_id, _, _ = _setup_group_trip_with_contacts()
+
+    try:
+        background_tasks = MagicMock(spec=BackgroundTasks)
+
+        # Owner extends the trip
+        result = extend_trip(
+            trip_id=trip_id,
+            minutes=30,
+            background_tasks=background_tasks,
+            user_id=owner_id,
+            lat=37.7749,
+            lon=-122.4194
+        )
+
+        assert result["ok"] is True, "Trip should extend successfully"
+        assert "new_eta" in result, "Response should include new ETA"
+
+        # Verify background tasks were scheduled (includes email notifications)
+        assert background_tasks.add_task.called, "Background tasks should be scheduled for notifications"
+
+    finally:
+        _cleanup_group_trip_data(owner_id, participant_id)
+
+
+def test_extend_trip_by_participant_notifies_all():
+    """Verify participant can extend and all contacts (owner's + participant's) are notified.
+
+    Bug regression test: When participant extends, owner's contacts should also be notified.
+    """
+    owner_id, participant_id, trip_id, _, _ = _setup_group_trip_with_contacts()
+
+    try:
+        background_tasks = MagicMock(spec=BackgroundTasks)
+
+        # Participant extends the trip
+        result = extend_trip(
+            trip_id=trip_id,
+            minutes=60,
+            background_tasks=background_tasks,
+            user_id=participant_id,  # Participant, not owner
+            lat=37.7749,
+            lon=-122.4194
+        )
+
+        assert result["ok"] is True, "Participant should be able to extend trip"
+        assert "new_eta" in result, "Response should include new ETA"
+
+        # Verify notifications were scheduled
+        assert background_tasks.add_task.called, "Background tasks should be scheduled for notifications"
+
+    finally:
+        _cleanup_group_trip_data(owner_id, participant_id)
+
+
+def test_extend_group_trip_updates_participant_checkin():
+    """Verify extending a group trip updates the participant's check-in info."""
+    owner_id, participant_id, trip_id, _, _ = _setup_group_trip_with_contacts()
+
+    try:
+        background_tasks = MagicMock(spec=BackgroundTasks)
+
+        # Participant extends the trip
+        result = extend_trip(
+            trip_id=trip_id,
+            minutes=45,
+            background_tasks=background_tasks,
+            user_id=participant_id,
+            lat=37.7749,
+            lon=-122.4194
+        )
+
+        assert result["ok"] is True, "Extend should succeed"
+
+        # Verify participant's check-in info was recorded
+        with db.engine.begin() as connection:
+            participant_row = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT last_checkin_at, last_lat, last_lon
+                    FROM trip_participants
+                    WHERE trip_id = :trip_id AND user_id = :user_id
+                    """
+                ),
+                {"trip_id": trip_id, "user_id": participant_id}
+            ).fetchone()
+
+            assert participant_row is not None, "Participant row should exist"
+            assert participant_row.last_checkin_at is not None, "Check-in time should be recorded"
+            assert participant_row.last_lat is not None, "Latitude should be recorded"
+            assert participant_row.last_lon is not None, "Longitude should be recorded"
+
+    finally:
+        _cleanup_group_trip_data(owner_id, participant_id)

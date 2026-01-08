@@ -1878,6 +1878,12 @@ final class Session: ObservableObject {
             return await queueOfflineCheckIn(plan: plan, token: token, location: location)
         }
 
+        // Block Realtime from overwriting activeTrip during the API call
+        // This prevents race conditions where Realtime updates arrive before the API response
+        await MainActor.run {
+            self.lastLocalTripUpdate = Date()
+        }
+
         do {
             // Build URL with coordinates if available
             guard var urlComponents = URLComponents(url: url("/t/\(token)/checkin"), resolvingAgainstBaseURL: false) else {
@@ -1994,6 +2000,12 @@ final class Session: ObservableObject {
         if !NetworkMonitor.shared.isConnected {
             // For group trips offline, queue with authenticated flag
             return await queueOfflineAuthenticatedCheckIn(plan: plan, location: location)
+        }
+
+        // Block Realtime from overwriting activeTrip during the API call
+        // This prevents race conditions where Realtime updates arrive before the API response
+        await MainActor.run {
+            self.lastLocalTripUpdate = Date()
         }
 
         do {
@@ -2235,6 +2247,13 @@ final class Session: ObservableObject {
         // Check if offline FIRST - queue immediately without waiting for network timeout
         if !NetworkMonitor.shared.isConnected {
             return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
+        }
+
+        // Block Realtime from overwriting activeTrip during the API call
+        // This prevents race conditions where Realtime updates arrive before the API response
+        // and might fetch stale data from read replicas
+        await MainActor.run {
+            self.lastLocalTripUpdate = Date()
         }
 
         do {

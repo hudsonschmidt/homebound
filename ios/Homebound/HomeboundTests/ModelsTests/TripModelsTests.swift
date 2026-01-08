@@ -254,6 +254,38 @@ final class TripModelsTests: XCTestCase {
         XCTAssertNil(updated2.completed_at)
     }
 
+    func testTrip_With_EtaAtCreatesDistinctStruct() {
+        // This test verifies that Trip.with(eta_at:) creates a new struct
+        // that is not equal to the original - critical for UI update detection
+        let originalEta = Date()
+        let trip = TestFixtures.makeTrip(etaAt: originalEta)
+        let newEta = originalEta.addingTimeInterval(1800) // 30 minutes later
+
+        let updated = trip.with(eta_at: newEta)
+
+        // The updated trip should be a new struct, not the same reference
+        XCTAssertNotEqual(trip.eta_at, updated.eta_at)
+        XCTAssertEqual(updated.eta_at, newEta)
+
+        // The original should be unchanged (value type semantics)
+        XCTAssertEqual(trip.eta_at, originalEta)
+    }
+
+    func testTrip_With_EtaAtChangeMakesTripsNotEqual() {
+        // This test ensures Equatable detects eta_at changes
+        // Important for SwiftUI change detection
+        let fixedStart = Date(timeIntervalSince1970: 1000000)
+        let originalEta = Date(timeIntervalSince1970: 1000000 + 3600)
+        let newEta = Date(timeIntervalSince1970: 1000000 + 7200)
+
+        let trip1 = TestFixtures.makeTrip(id: 1, startAt: fixedStart, etaAt: originalEta)
+        let trip2 = trip1.with(eta_at: newEta)
+
+        // Same ID but different eta_at should NOT be equal
+        XCTAssertEqual(trip1.id, trip2.id)
+        XCTAssertNotEqual(trip1, trip2)
+    }
+
     // MARK: - Trip Computed Properties Tests
 
     func testTrip_ActivityType_ReturnsActivityName() throws {

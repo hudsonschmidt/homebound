@@ -2056,7 +2056,7 @@ async def test_send_trip_extended_emails():
 
         mock_send_email.assert_called_once()
         call_args = mock_send_email.call_args
-        assert "extended" in call_args[0][1]  # Subject contains 'extended'
+        assert "Extended" in call_args[0][1]  # Subject contains 'Extended'
 
 
 @pytest.mark.asyncio
