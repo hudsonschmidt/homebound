@@ -298,12 +298,17 @@ struct NewHomeView: View {
         lastSyncTime = now
 
         // Load all necessary data in parallel
-        async let loadActive: Void = session.loadActivePlan()
+        // Bug 3 fix: Check protection window before loading active plan to prevent overwriting local trip updates
         async let loadProfile: Void = session.loadUserProfile()
         async let loadTrips: [Trip] = session.loadAllTrips()  // Also load all trips for upcoming section
 
-        // Wait for all to complete
-        _ = await (loadActive, loadProfile, loadTrips)
+        // Conditionally load active plan based on protection window
+        if session.shouldLoadActivePlan() {
+            async let loadActive: Void = session.loadActivePlan()
+            _ = await (loadActive, loadProfile, loadTrips)
+        } else {
+            _ = await (loadProfile, loadTrips)
+        }
 
         // Load timeline for active trip
         if let tripId = session.activeTrip?.id {

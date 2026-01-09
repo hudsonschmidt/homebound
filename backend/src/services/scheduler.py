@@ -512,66 +512,12 @@ async def check_push_notifications():
                     ).fetchall()
                     friend_user_ids = [f.friend_user_id for f in owner_friend_contacts]
 
-                    # For group trips, also get participant contacts and send notifications
+                    # For group trips, send push notifications to participants and their friend contacts
+                    # NOTE: Participant EMAIL contacts are NOT fetched here. The participant join flow
+                    # (participants.py accept_invitation) handles notifying participant contacts when
+                    # they join the trip. This prevents duplicate emails when a participant joins
+                    # after the trip has already started.
                     if trip.is_group_trip:
-                        # Get participant email contacts (from contacts table via contact_id)
-                        # Bug 1 fix: Also fetch participant name for watched_user_name
-                        participant_email_contacts = conn.execute(
-                            sqlalchemy.text("""
-                                SELECT DISTINCT c.id, c.name, c.email,
-                                       COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
-                                FROM participant_trip_contacts ptc
-                                JOIN contacts c ON ptc.contact_id = c.id
-                                JOIN users u ON ptc.participant_user_id = u.id
-                                WHERE ptc.trip_id = :trip_id
-                                  AND ptc.contact_id IS NOT NULL
-                                  AND c.email IS NOT NULL
-                            """),
-                            {"trip_id": trip.id}
-                        ).fetchall()
-
-                        # No cross-user dedup - each notification is personalized with watched_user_name
-                        # so the same contact should receive separate emails for each person they watch
-                        for pc in participant_email_contacts:
-                            if pc.email:
-                                watched_name = pc.participant_name.strip() if pc.participant_name else "Participant"
-                                contacts_for_email.append({
-                                    "id": pc.id,
-                                    "name": pc.name,
-                                    "email": pc.email,
-                                    "watched_user_name": watched_name
-                                })
-
-                        # Get participant friend contacts' emails (from users table via friend_user_id)
-                        # Bug 1 fix: Also fetch participant name for watched_user_name
-                        participant_friend_email_contacts = conn.execute(
-                            sqlalchemy.text("""
-                                SELECT DISTINCT
-                                       friend.id as id,
-                                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
-                                       friend.email as email,
-                                       COALESCE(TRIM(participant.first_name || ' ' || participant.last_name), 'Participant') as participant_name
-                                FROM participant_trip_contacts ptc
-                                JOIN users friend ON ptc.friend_user_id = friend.id
-                                JOIN users participant ON ptc.participant_user_id = participant.id
-                                WHERE ptc.trip_id = :trip_id
-                                  AND ptc.friend_user_id IS NOT NULL
-                                  AND friend.email IS NOT NULL
-                            """),
-                            {"trip_id": trip.id}
-                        ).fetchall()
-
-                        # No cross-user dedup for friend contacts either
-                        for pfc in participant_friend_email_contacts:
-                            if pfc.email:
-                                watched_name = pfc.participant_name.strip() if pfc.participant_name else "Participant"
-                                contacts_for_email.append({
-                                    "id": -pfc.id,  # Negative to indicate it's a user
-                                    "name": pfc.name or "Friend",
-                                    "email": pfc.email,
-                                    "watched_user_name": watched_name
-                                })
-
                         # Get participant friend contacts for push notifications
                         participant_friend_contacts = conn.execute(
                             sqlalchemy.text("""

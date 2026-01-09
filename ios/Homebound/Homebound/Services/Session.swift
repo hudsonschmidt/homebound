@@ -1380,10 +1380,11 @@ final class Session: ObservableObject {
     /// Bug 3 fix: Public method to check if it's safe to call loadActivePlan()
     /// without overwriting a recent local update (e.g., from trip extension).
     /// RealtimeManager should call this before triggering loadActivePlan().
+    /// Protection window is 10 seconds to account for network latency and server replication lag.
     func shouldLoadActivePlan() -> Bool {
         if let lastUpdate = lastLocalTripUpdate,
-           Date().timeIntervalSince(lastUpdate) < 3.0 {
-            debugLog("[Session] Realtime skipping loadActivePlan - recent local update within 3s")
+           Date().timeIntervalSince(lastUpdate) < 10.0 {
+            debugLog("[Session] Realtime skipping loadActivePlan - recent local update within 10s")
             return false
         }
         return true
@@ -1393,9 +1394,10 @@ final class Session: ObservableObject {
         // Prevent Realtime from overwriting recent local updates (race condition fix)
         // This happens when extending a trip: we update locally, then Realtime triggers
         // loadActivePlan() which might fetch stale data from the server
+        // Protection window is 10 seconds to account for network latency and server replication lag
         if let lastUpdate = lastLocalTripUpdate,
-           Date().timeIntervalSince(lastUpdate) < 3.0 {
-            debugLog("[Session] Skipping loadActivePlan - recent local update within 3s")
+           Date().timeIntervalSince(lastUpdate) < 10.0 {
+            debugLog("[Session] Skipping loadActivePlan - recent local update within 10s")
             return
         }
 
@@ -1840,7 +1842,10 @@ final class Session: ObservableObject {
             _ = await loadAllTrips()
             _ = await loadContacts()
         }
-        await loadActivePlan()
+        // Bug 3 fix: Check protection window to prevent overwriting local trip updates
+        if shouldLoadActivePlan() {
+            await loadActivePlan()
+        }
     }
 
     /// Clear all pending actions (for stuck/stale actions)
@@ -2178,7 +2183,10 @@ final class Session: ObservableObject {
             }
 
             // Reload to check for any other active plans
-            await loadActivePlan()
+            // Bug 3 fix: Check protection window to prevent overwriting local trip updates
+            if shouldLoadActivePlan() {
+                await loadActivePlan()
+            }
 
             return true
         } catch let error as URLError where error.code == .notConnectedToInternet ||
@@ -2415,7 +2423,10 @@ final class Session: ObservableObject {
             }
 
             // Reload active plan to update UI
-            await loadActivePlan()
+            // Bug 3 fix: Check protection window to prevent overwriting local trip updates
+            if shouldLoadActivePlan() {
+                await loadActivePlan()
+            }
 
             await MainActor.run {
                 self.notice = "Trip started!"
