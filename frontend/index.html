@@ -42,23 +42,23 @@
             <div class="steps">
                 <div class="step">
                     <div class="step-number">1</div>
-                    <h3>Create a Trip</h3>
-                    <p>Set your activity, location, start time, and expected return time.</p>
+                    <h3>Create Your Trip</h3>
+                    <p>Choose your activity, set your destination with our enhanced location search, and pick your expected return time. Going with friends? Create a group trip and invite them along.</p>
                 </div>
                 <div class="step">
                     <div class="step-number">2</div>
-                    <h3>Add Contacts</h3>
-                    <p>Choose emergency contacts who will be notified if something goes wrong.</p>
+                    <h3>Add Safety Contacts</h3>
+                    <p>Select emergency contacts from your saved list or add friends who use Homebound. Friends get push notifications while others receive detailed emails with your trip info.</p>
                 </div>
                 <div class="step">
                     <div class="step-number">3</div>
-                    <h3>Check In</h3>
-                    <p>Tap to start your adventure when you head out.</p>
+                    <h3>Head Out</h3>
+                    <p>Start your trip and watch the countdown timer on your home screen, lock screen, or Dynamic Island. Check in during your adventure to let contacts know you're okay.</p>
                 </div>
                 <div class="step">
                     <div class="step-number">4</div>
-                    <h3>Check Out</h3>
-                    <p>Mark yourself safe when you return. If you don't, your contacts are alerted.</p>
+                    <h3>Return Safely</h3>
+                    <p>Tap "I'm Safe" when you're back. Running late? Extend your time with one tap. If you don't check out, your contacts are automatically notified with your location details.</p>
                 </div>
             </div>
         </section>
@@ -67,83 +67,8 @@
         <section class="section section-alt">
             <h2>Built for Adventurers</h2>
             <p class="section-subtitle">Whether you're hitting the trail or heading out on the water, Homebound has you covered.</p>
-            <div class="activities">
-                <div class="activity" style="--glow-color: #2D5016;">
-                    <span class="activity-icon">🥾</span>
-                    <span>Hiking</span>
-                </div>
-                <div class="activity" style="--glow-color: #FF6B35;">
-                    <span class="activity-icon">🚴</span>
-                    <span>Biking</span>
-                </div>
-                <div class="activity" style="--glow-color: #E74C3C;">
-                    <span class="activity-icon">🏃</span>
-                    <span>Running</span>
-                </div>
-                <div class="activity" style="--glow-color: #7F8C8D;">
-                    <span class="activity-icon">🧗</span>
-                    <span>Climbing</span>
-                </div>
-                <div class="activity" style="--glow-color: #1A237E;">
-                    <span class="activity-icon">🏕️</span>
-                    <span>Camping</span>
-                </div>
-                <div class="activity" style="--glow-color: #795548;">
-                    <span class="activity-icon">🎒</span>
-                    <span>Backpacking</span>
-                </div>
-                <div class="activity" style="--glow-color: #00BCD4;">
-                    <span class="activity-icon">⛷️</span>
-                    <span>Skiing</span>
-                </div>
-                <div class="activity" style="--glow-color: #039BE5;">
-                    <span class="activity-icon">🏂</span>
-                    <span>Snowboarding</span>
-                </div>
-                <div class="activity" style="--glow-color: #006064;">
-                    <span class="activity-icon">🛶</span>
-                    <span>Kayaking</span>
-                </div>
-                <div class="activity" style="--glow-color: #1976D2;">
-                    <span class="activity-icon">⛵</span>
-                    <span>Sailing</span>
-                </div>
-                <div class="activity" style="--glow-color: #004D40;">
-                    <span class="activity-icon">🎣</span>
-                    <span>Fishing</span>
-                </div>
-                <div class="activity" style="--glow-color: #00ACC1;">
-                    <span class="activity-icon">🏄</span>
-                    <span>Surfing</span>
-                </div>
-                <div class="activity" style="--glow-color: #01579B;">
-                    <span class="activity-icon">🤿</span>
-                    <span>Scuba Diving</span>
-                </div>
-                <div class="activity" style="--glow-color: #0277BD;">
-                    <span class="activity-icon">🏊</span>
-                    <span>Free Diving</span>
-                </div>
-                <div class="activity" style="--glow-color: #0097A7;">
-                    <span class="activity-icon">🥽</span>
-                    <span>Snorkeling</span>
-                </div>
-                <div class="activity" style="--glow-color: #5D4037;">
-                    <span class="activity-icon">🐎</span>
-                    <span>Horseback Riding</span>
-                </div>
-                <div class="activity" style="--glow-color: #2C3E50;">
-                    <span class="activity-icon">🚗</span>
-                    <span>Driving</span>
-                </div>
-                <div class="activity" style="--glow-color: #3498DB;">
-                    <span class="activity-icon">✈️</span>
-                    <span>Flying</span>
-                </div>
-                <div class="activity" style="--glow-color: #6C63FF;">
-                    <span class="activity-icon">📍</span>
-                    <span>Other Activity</span>
-                </div>
+            <div class="activities" id="activities-container">
+                <!-- Activities loaded dynamically from API -->
             </div>
         </section>
 
@@ -172,8 +97,36 @@
                     <p>View your past adventures and statistics. See how many miles you've covered and trips completed.</p>
                 </div>
                 <div class="feature">
-                    <h3>Location Support</h3>
-                    <p>Add locations via search. Your contacts will know exactly where to find you.</p>
+                    <h3>Enhanced Location Search</h3>
+                    <p>Find trails, parks, and points of interest with distance info. Select exact locations on the map for precise trip planning.</p>
+                </div>
+                <div class="feature">
+                    <h3>Group Trips</h3>
+                    <p>Plan adventures with friends. Coordinate group outings and keep everyone's safety contacts in the loop.</p>
+                </div>
+                <div class="feature">
+                    <h3>Friends</h3>
+                    <p>Connect with fellow adventurers. Share trips, see when friends are out exploring, and build your adventure community.</p>
+                </div>
+                <div class="feature">
+                    <h3>Live Location</h3>
+                    <p>Share your real-time location with emergency contacts during active trips for added peace of mind.</p>
+                </div>
+                <div class="feature">
+                    <h3>Achievements</h3>
+                    <p>Earn badges and milestones as you complete trips. Track your progress and celebrate your adventures.</p>
+                </div>
+                <div class="feature">
+                    <h3>Widgets</h3>
+                    <p>Quick access to your trips right from your home screen. Start trips and check in without opening the app.</p>
+                </div>
+                <div class="feature">
+                    <h3>Live Activity</h3>
+                    <p>See your active trip status on your lock screen and Dynamic Island. Stay informed at a glance.</p>
+                </div>
+                <div class="feature">
+                    <h3>Trip Saving</h3>
+                    <p>Save your favorite routes and locations. Quickly recreate past trips without re-entering all the details.</p>
                 </div>
             </div>
         </section>
@@ -196,8 +149,37 @@
                 <a href="/termsofservice">Terms of Service</a>
                 <a href="mailto:support@homeboundapp.com">Contact</a>
             </div>
-            <p class="copyright">&copy; 2025 Hudson Schmidt. All rights reserved.</p>
+            <p class="copyright">&copy; 2026 Hudson Schmidt. All rights reserved.</p>
         </div>
     </footer>
+
+    <script>
+        async function loadActivities() {
+            const container = document.getElementById('activities-container');
+            try {
+                const response = await fetch('https://api.homeboundapp.com/api/v1/activities/');
+                if (!response.ok) throw new Error('Failed to fetch activities');
+                const activities = await response.json();
+
+                // Sort by order field
+                activities.sort((a, b) => a.order - b.order);
+
+                container.innerHTML = activities.map(activity => {
+                    const glowColor = activity.colors?.glow || '#6C63FF';
+                    return `
+                        <div class="activity" style="--glow-color: ${glowColor};">
+                            <span class="activity-icon">${activity.icon}</span>
+                            <span>${activity.name}</span>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Error loading activities:', error);
+                container.innerHTML = '<p>Unable to load activities</p>';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadActivities);
+    </script>
 </body>
 </html>
