@@ -70,13 +70,12 @@ nav {
     z-index: 1000;
     padding: 12px 24px;
     background: var(--glass-bg);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
     border-radius: 100px;
     border: 1px solid var(--glass-border);
-    box-shadow:
-        0 4px 24px var(--glass-shadow),
-        0 1px 2px var(--glass-shadow);
+    box-shadow: 0 2px 12px var(--glass-shadow);
+    will-change: transform;
 }
 
 nav .container {
@@ -124,60 +123,34 @@ nav .nav-links a:hover {
     position: relative;
 }
 
-/* Animated ambient glow orbs */
+/* Static ambient glow orbs - no animation for performance */
 .hero::before {
     content: '';
     position: absolute;
-    top: 5%;
-    left: 5%;
-    width: 500px;
-    height: 500px;
-    background: radial-gradient(circle, rgba(53, 107, 61, 0.25) 0%, transparent 70%); /* Forest green */
-    filter: blur(80px);
+    top: 10%;
+    left: 10%;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(53, 107, 61, 0.15) 0%, transparent 70%); /* Forest green */
     pointer-events: none;
-    animation: floatOrb1 8s ease-in-out infinite;
 }
 
 .hero::after {
     content: '';
     position: absolute;
-    bottom: 10%;
-    right: 5%;
-    width: 450px;
-    height: 450px;
-    background: radial-gradient(circle, rgba(184, 115, 51, 0.2) 0%, transparent 70%); /* Terracotta warm */
-    filter: blur(80px);
+    bottom: 15%;
+    right: 10%;
+    width: 350px;
+    height: 350px;
+    background: radial-gradient(circle, rgba(184, 115, 51, 0.12) 0%, transparent 70%); /* Terracotta warm */
     pointer-events: none;
-    animation: floatOrb2 10s ease-in-out infinite;
 }
 
-@keyframes floatOrb1 {
-    0%, 100% {
-        transform: translate(0, 0) scale(1);
-        opacity: 0.8;
-    }
-    50% {
-        transform: translate(30px, 20px) scale(1.1);
-        opacity: 1;
-    }
-}
-
-@keyframes floatOrb2 {
-    0%, 100% {
-        transform: translate(0, 0) scale(1);
-        opacity: 0.7;
-    }
-    50% {
-        transform: translate(-25px, -15px) scale(1.05);
-        opacity: 0.9;
-    }
-}
-
-/* Hero Card - Glowing glass card like app onboarding */
+/* Hero Card - Glass card */
 .hero-card {
     background: var(--glass-bg);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
     border-radius: var(--radius-xl);
     border: 1px solid var(--glass-border);
     padding: 48px 40px;
@@ -185,22 +158,8 @@ nav .nav-links a:hover {
     position: relative;
     z-index: 1;
     box-shadow:
-        0 32px 80px color-mix(in srgb, var(--brand-color) 25%, transparent),
-        0 16px 40px color-mix(in srgb, var(--brand-color) 15%, transparent);
-    animation: cardGlow 4s ease-in-out infinite alternate;
-}
-
-@keyframes cardGlow {
-    0% {
-        box-shadow:
-            0 32px 80px color-mix(in srgb, var(--brand-color) 25%, transparent),
-            0 16px 40px color-mix(in srgb, var(--brand-color) 15%, transparent);
-    }
-    100% {
-        box-shadow:
-            0 40px 100px color-mix(in srgb, var(--brand-color) 35%, transparent),
-            0 20px 50px color-mix(in srgb, var(--brand-color) 20%, transparent);
-    }
+        0 24px 48px color-mix(in srgb, var(--brand-color) 20%, transparent),
+        0 12px 24px color-mix(in srgb, var(--brand-color) 10%, transparent);
 }
 
 .hero-icon {
@@ -297,12 +256,10 @@ main {
 .step {
     text-align: center;
     padding: 32px 20px;
-    background: var(--glass-bg);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: var(--bg-card);
     border-radius: var(--radius-lg);
     border: 1px solid var(--glass-border);
-    transition: transform 0.3s, box-shadow 0.3s;
+    transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .step:hover {
@@ -360,25 +317,22 @@ main {
     display: flex;
     align-items: center;
     gap: 8px;
-    background: var(--glass-bg);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    background: var(--bg-card);
     padding: 12px 20px;
     border-radius: 100px;
     border: 1px solid var(--glass-border);
     font-weight: 500;
     font-size: 0.95rem;
     color: var(--text-primary);
-    transition: transform 0.25s, box-shadow 0.25s, background 0.25s;
+    transition: transform 0.2s, box-shadow 0.2s;
     cursor: default;
 }
 
 .activity:hover {
-    transform: scale(1.08) translateY(-2px);
-    background: var(--bg-card);
+    transform: scale(1.05) translateY(-2px);
     box-shadow:
-        0 12px 32px color-mix(in srgb, var(--glow-color) 40%, transparent),
-        0 4px 12px color-mix(in srgb, var(--glow-color) 25%, transparent);
+        0 8px 24px color-mix(in srgb, var(--glow-color) 30%, transparent),
+        0 4px 8px color-mix(in srgb, var(--glow-color) 15%, transparent);
 }
 
 .activity-icon {
@@ -394,13 +348,11 @@ main {
 }
 
 .feature {
-    background: var(--glass-bg);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: var(--bg-card);
     padding: 32px;
     border-radius: var(--radius-lg);
     border: 1px solid var(--glass-border);
-    transition: transform 0.3s, box-shadow 0.3s;
+    transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .feature:hover {
@@ -563,7 +515,7 @@ footer .copyright {
 }
 
 .legal-document th {
-    background: var(--glass-bg);
+    background: var(--bg-card);
     font-weight: 600;
     color: var(--text-primary);
 }
@@ -574,8 +526,7 @@ footer .copyright {
 }
 
 .legal-document .disclaimer {
-    background: var(--glass-bg);
-    backdrop-filter: blur(16px);
+    background: var(--bg-card);
     border: 1px solid rgba(255, 193, 7, 0.3);
     border-radius: var(--radius-md);
     padding: 24px;
@@ -594,8 +545,7 @@ footer .copyright {
 }
 
 .legal-document .important {
-    background: var(--glass-bg);
-    backdrop-filter: blur(16px);
+    background: var(--bg-card);
     border: 1px solid rgba(220, 53, 69, 0.3);
     border-radius: var(--radius-md);
     padding: 24px;
