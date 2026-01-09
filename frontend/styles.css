@@ -1,9 +1,9 @@
 :root {
-    /* Brand colors */
-    --brand-color: #6C63FF;
-    --brand-light: #8B85FF;
-    --accent-teal: #4ECDC4;
-    --accent-indigo: #6366F1;
+    /* Brand colors - derived from app logo */
+    --brand-color: #356B3D;      /* Forest green (hbBrand) */
+    --brand-light: #4A7C52;      /* Lighter green accent (hbTeal) */
+    --accent-warm: #B87333;      /* Terracotta/cabin brown (hbWarm) */
+    --accent-gold: #C9A227;      /* Gold stars (hbGold) */
 
     /* Text colors */
     --text-primary: #1d1d1f;
@@ -132,7 +132,7 @@ nav .nav-links a:hover {
     left: 5%;
     width: 500px;
     height: 500px;
-    background: radial-gradient(circle, rgba(108, 99, 255, 0.2) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(53, 107, 61, 0.25) 0%, transparent 70%); /* Forest green */
     filter: blur(80px);
     pointer-events: none;
     animation: floatOrb1 8s ease-in-out infinite;
@@ -145,7 +145,7 @@ nav .nav-links a:hover {
     right: 5%;
     width: 450px;
     height: 450px;
-    background: radial-gradient(circle, rgba(78, 205, 196, 0.18) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(184, 115, 51, 0.2) 0%, transparent 70%); /* Terracotta warm */
     filter: blur(80px);
     pointer-events: none;
     animation: floatOrb2 10s ease-in-out infinite;
@@ -324,7 +324,7 @@ main {
     font-size: 1.25rem;
     font-weight: 700;
     margin: 0 auto 20px;
-    box-shadow: 0 4px 12px rgba(108, 99, 255, 0.25);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--brand-color) 25%, transparent);
 }
 
 .step h3 {
@@ -356,7 +356,7 @@ main {
 }
 
 .activity {
-    --glow-color: #6C63FF;
+    --glow-color: #356B3D;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -444,7 +444,7 @@ main {
 }
 
 .cta-section .cta-button {
-    background: linear-gradient(145deg, var(--brand-color), var(--accent-indigo));
+    background: linear-gradient(145deg, var(--brand-color), var(--brand-light));
     color: white;
     box-shadow: 0 8px 32px color-mix(in srgb, var(--brand-color) 30%, transparent);
 }
