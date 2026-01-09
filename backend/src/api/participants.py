@@ -1333,7 +1333,64 @@ def participant_checkin(
                 })
                 existing_emails.add(oc.email.lower())
 
-        # Get checking-in participant's friend safety contacts
+        # Get checking-in participant's friend contacts WITH email for email notifications
+        participant_friend_email_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend.id as id,
+                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                       friend.email as email
+                FROM participant_trip_contacts ptc
+                JOIN users friend ON ptc.friend_user_id = friend.id
+                WHERE ptc.trip_id = :trip_id
+                AND ptc.participant_user_id = :user_id
+                AND ptc.friend_user_id IS NOT NULL
+                AND friend.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchall()
+
+        # Add participant's friends to email list (they watch the participant)
+        for pfc in participant_friend_email_contacts:
+            if pfc.email and pfc.email.lower() not in existing_emails:
+                contacts_for_email.append({
+                    "id": -pfc.id,
+                    "name": pfc.name or "Friend",
+                    "email": pfc.email,
+                    "watched_user_name": checker_name
+                })
+                existing_emails.add(pfc.email.lower())
+
+        # Get owner's friend contacts WITH email for email notifications
+        owner_friend_email_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend.id as id,
+                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                       friend.email as email
+                FROM trip_safety_contacts tsc
+                JOIN users friend ON tsc.friend_user_id = friend.id
+                WHERE tsc.trip_id = :trip_id
+                AND tsc.friend_user_id IS NOT NULL
+                AND friend.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id}
+        ).fetchall()
+
+        # Add owner's friends to email list (they watch the owner)
+        for ofc in owner_friend_email_contacts:
+            if ofc.email and ofc.email.lower() not in existing_emails:
+                contacts_for_email.append({
+                    "id": -ofc.id,
+                    "name": ofc.name or "Friend",
+                    "email": ofc.email,
+                    "watched_user_name": owner_name
+                })
+                existing_emails.add(ofc.email.lower())
+
+        # Get checking-in participant's friend safety contacts (for push notifications)
         participant_friend_contacts = connection.execute(
             sqlalchemy.text(
                 """
@@ -1348,7 +1405,7 @@ def participant_checkin(
 
         friend_user_ids = [f.friend_user_id for f in participant_friend_contacts]
 
-        # Also get trip owner's friend contacts
+        # Also get trip owner's friend contacts (for push notifications)
         owner_friend_contacts = connection.execute(
             sqlalchemy.text(
                 """

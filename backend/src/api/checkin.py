@@ -239,6 +239,36 @@ def checkin_with_token(
                         })
                 log.info(f"[Checkin] Found {len(participant_friend_contacts)} friend contacts for participant {participant_name}")
 
+        # Step 3: Get owner's friend safety contacts (friends who have email)
+        # Owner's friends also watch the owner
+        owner_friend_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend.id as id,
+                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                       friend.email as email
+                FROM trip_safety_contacts tsc
+                JOIN users friend ON tsc.friend_user_id = friend.id
+                WHERE tsc.trip_id = :trip_id
+                  AND tsc.friend_user_id IS NOT NULL
+                  AND friend.email IS NOT NULL
+                ORDER BY tsc.position
+                """
+            ),
+            {"trip_id": trip.id}
+        ).fetchall()
+
+        # Add owner's friends to contacts list (they watch the owner)
+        for ofc in owner_friend_contacts:
+            if ofc.email:
+                contacts_for_email.append({
+                    "id": -ofc.id,  # Negative to indicate it's a user, not a contact
+                    "name": ofc.name or "Friend",
+                    "email": ofc.email,
+                    "watched_user_name": user_name  # Owner's friends watch the owner
+                })
+        log.info(f"[Checkin] Found {len(owner_friend_contacts)} owner friend contacts")
+
         log.info(f"[Checkin] Total {len(contacts_for_email)} contacts for email notifications")
         for c in contacts_for_email:
             log.info(f"[Checkin] Contact: {c.get('email')} watching {c.get('watched_user_name')}")

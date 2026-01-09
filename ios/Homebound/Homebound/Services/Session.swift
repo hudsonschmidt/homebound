@@ -487,6 +487,34 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Safely update activeTrip from server response, rejecting stale ETA data.
+    /// This prevents race conditions where Realtime-triggered fetches return stale data
+    /// from database read replicas that haven't seen a recent trip extension.
+    /// Returns true if the update was applied, false if rejected as stale.
+    /// Must be called from MainActor.
+    @MainActor
+    private func safelyUpdateActiveTrip(with response: Trip?) -> Bool {
+        // ETA-based staleness check:
+        // Trip extensions always move the ETA forward in time.
+        // If we have an active trip with a later ETA than the server response (same trip ID),
+        // the server data is stale from a read replica that hasn't seen the extension yet.
+        if let currentTrip = self.activeTrip,
+           let serverTrip = response,
+           currentTrip.id == serverTrip.id,
+           currentTrip.eta_at > serverTrip.eta_at {
+            debugLog("[Session] Rejecting stale activeTrip update: current ETA \(currentTrip.eta_at) > server ETA \(serverTrip.eta_at)")
+            return false
+        }
+
+        self.activeTrip = response
+
+        if let plan = response {
+            LocalStorage.shared.cacheTrip(plan)
+        }
+
+        return true
+    }
+
     /// Marks a trip as completed in allTrips array.
     /// Must be called from MainActor.
     @MainActor
@@ -1449,17 +1477,21 @@ final class Session: ObservableObject {
                 )
             }
 
+            var didUpdate = false
             await MainActor.run {
-                self.activeTrip = response
+                didUpdate = self.safelyUpdateActiveTrip(with: response)
                 self.isLoadingTrip = false
 
-                // Cache the active plan for offline access
-                if let plan = response {
-                    LocalStorage.shared.cacheTrip(plan)
+                // Update widget data only if we actually updated
+                if didUpdate {
+                    self.updateWidgetData()
                 }
+            }
 
-                // Update widget data
-                self.updateWidgetData()
+            // Skip Live Activity and location updates if stale data was rejected
+            guard didUpdate else {
+                debugLog("[Session] Skipping Live Activity/location updates - stale data rejected")
+                return
             }
 
             // Update Live Activity
@@ -1474,22 +1506,29 @@ final class Session: ObservableObject {
             }
         } catch {
             // Network failed - already showing cached data, just stop loading
+            var didUpdate = false
             await MainActor.run {
-                // If we don't have anything yet, try cache one more time
+                // If we don't have anything yet, use cache
+                // Otherwise, use safe update to avoid overwriting newer local data with stale cache
                 if self.activeTrip == nil {
                     self.activeTrip = cachedActive
+                    didUpdate = cachedActive != nil
+                } else if cachedActive != nil {
+                    didUpdate = self.safelyUpdateActiveTrip(with: cachedActive)
                 }
                 self.isLoadingTrip = false
             }
 
-            // Update Live Activity with cached data
-            let checkinCount = cachedActive != nil ? getCheckinCount(tripId: cachedActive!.id) : 0
-            await LiveActivityManager.shared.restoreActivityIfNeeded(for: cachedActive, checkinCount: checkinCount)
+            // Only update Live Activity if we actually applied the cache update
+            guard didUpdate, let cached = cachedActive else { return }
+
+            let checkinCount = getCheckinCount(tripId: cached.id)
+            await LiveActivityManager.shared.restoreActivityIfNeeded(for: cached, checkinCount: checkinCount)
 
             // Auto-start live location sharing if enabled for this trip
-            if let trip = cachedActive, trip.share_live_location {
+            if cached.share_live_location {
                 await MainActor.run {
-                    LiveLocationManager.shared.startSharing(forTripId: trip.id)
+                    LiveLocationManager.shared.startSharing(forTripId: cached.id)
                 }
             }
         }
