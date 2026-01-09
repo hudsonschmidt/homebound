@@ -259,6 +259,12 @@ final class Session: ObservableObject {
     /// us to skip loadActivePlan() calls that happen immediately after local updates.
     private var lastLocalTripUpdate: Date?
 
+    /// Flag to COMPLETELY block activeTrip updates during trip extension
+    /// This is an aggressive protection that rejects ALL updates while extension is in progress
+    private var isExtensionInProgress: Bool = false
+    /// The expected new ETA during extension (for validation/logging)
+    private var extensionNewETA: Date? = nil
+
     // Saved trip templates (local-only)
     @Published var savedTemplates: [SavedTripTemplate] = []
 
@@ -494,6 +500,13 @@ final class Session: ObservableObject {
     /// Must be called from MainActor.
     @MainActor
     private func safelyUpdateActiveTrip(with response: Trip?) -> Bool {
+        // AGGRESSIVE: Block ALL updates during extension operation
+        // This is the primary defense against stale data during trip extension
+        if isExtensionInProgress {
+            debugLog("[Session] ⛔ Rejecting activeTrip update - extension in progress")
+            return false
+        }
+
         // ETA-based staleness check:
         // Trip extensions always move the ETA forward in time.
         // If we have an active trip with a later ETA than the server response (same trip ID),
@@ -502,11 +515,14 @@ final class Session: ObservableObject {
            let serverTrip = response,
            currentTrip.id == serverTrip.id,
            currentTrip.eta_at > serverTrip.eta_at {
-            debugLog("[Session] Rejecting stale activeTrip update: current ETA \(currentTrip.eta_at) > server ETA \(serverTrip.eta_at)")
+            debugLog("[Session] ⚠️ Rejecting stale activeTrip update: current ETA \(currentTrip.eta_at) > server ETA \(serverTrip.eta_at)")
             return false
         }
 
+        // Log the update for debugging
+        let oldETA = self.activeTrip?.eta_at
         self.activeTrip = response
+        debugLog("[Session] ✅ activeTrip updated: ETA \(oldETA?.description ?? "nil") → \(response?.eta_at.description ?? "nil")")
 
         if let plan = response {
             LocalStorage.shared.cacheTrip(plan)
@@ -1408,11 +1424,11 @@ final class Session: ObservableObject {
     /// Bug 3 fix: Public method to check if it's safe to call loadActivePlan()
     /// without overwriting a recent local update (e.g., from trip extension).
     /// RealtimeManager should call this before triggering loadActivePlan().
-    /// Protection window is 10 seconds to account for network latency and server replication lag.
+    /// Protection window is 30 seconds to account for network latency and database replication lag.
     func shouldLoadActivePlan() -> Bool {
         if let lastUpdate = lastLocalTripUpdate,
-           Date().timeIntervalSince(lastUpdate) < 10.0 {
-            debugLog("[Session] Realtime skipping loadActivePlan - recent local update within 10s")
+           Date().timeIntervalSince(lastUpdate) < 30.0 {
+            debugLog("[Session] Realtime skipping loadActivePlan - recent local update within 30s")
             return false
         }
         return true
@@ -1422,10 +1438,10 @@ final class Session: ObservableObject {
         // Prevent Realtime from overwriting recent local updates (race condition fix)
         // This happens when extending a trip: we update locally, then Realtime triggers
         // loadActivePlan() which might fetch stale data from the server
-        // Protection window is 10 seconds to account for network latency and server replication lag
+        // Protection window is 30 seconds to account for network latency and database replication lag
         if let lastUpdate = lastLocalTripUpdate,
-           Date().timeIntervalSince(lastUpdate) < 10.0 {
-            debugLog("[Session] Skipping loadActivePlan - recent local update within 10s")
+           Date().timeIntervalSince(lastUpdate) < 30.0 {
+            debugLog("[Session] Skipping loadActivePlan - recent local update within 30s")
             return
         }
 
@@ -1461,6 +1477,15 @@ final class Session: ObservableObject {
         // If offline, use cache and return immediately - don't wait for network timeout
         if !NetworkMonitor.shared.isConnected {
             await MainActor.run {
+                // Check for stale cache - don't regress ETA if we have a newer local value
+                if let current = self.activeTrip,
+                   let cached = cachedActive,
+                   current.id == cached.id,
+                   current.eta_at > cached.eta_at {
+                    debugLog("[Session] ⚠️ Skipping stale cache in offline path - keeping current ETA \(current.eta_at)")
+                    self.isLoadingTrip = false
+                    return
+                }
                 self.activeTrip = cachedActive
                 self.isLoadingTrip = false
                 debugLog("[Session] 📦 Loaded active trip from cache (offline)")
@@ -2308,11 +2333,26 @@ final class Session: ObservableObject {
             return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
         }
 
-        // Block Realtime from overwriting activeTrip during the API call
-        // This prevents race conditions where Realtime updates arrive before the API response
-        // and might fetch stale data from read replicas
+        // AGGRESSIVE PROTECTION: Set extension lock FIRST
+        // This blocks ALL activeTrip updates from Realtime while extension is in progress
         await MainActor.run {
+            self.isExtensionInProgress = true
+            self.extensionNewETA = newETA
             self.lastLocalTripUpdate = Date()
+            debugLog("[Session] 🔒 Extension lock acquired - blocking all activeTrip updates")
+        }
+
+        // Helper to release the lock after a delay
+        func releaseExtensionLock() {
+            Task {
+                // Wait 2 seconds to let UI settle and any pending Realtime events clear
+                try? await Task.sleep(for: .seconds(2))
+                await MainActor.run {
+                    self.isExtensionInProgress = false
+                    self.extensionNewETA = nil
+                    debugLog("[Session] 🔓 Extension lock released")
+                }
+            }
         }
 
         do {
@@ -2325,6 +2365,7 @@ final class Session: ObservableObject {
             // Construct URL with query parameters properly
             guard var urlComponents = URLComponents(url: url("/api/v1/trips/\(plan.id)/extend"), resolvingAgainstBaseURL: false) else {
                 debugLog("[Session] ❌ Failed to construct extend URL")
+                releaseExtensionLock()
                 return false
             }
             var queryItems = [URLQueryItem(name: "minutes", value: String(minutes))]
@@ -2336,6 +2377,7 @@ final class Session: ObservableObject {
 
             guard let requestURL = urlComponents.url else {
                 debugLog("[Session] ❌ Failed to build extend request URL")
+                releaseExtensionLock()
                 return false
             }
 
@@ -2350,6 +2392,13 @@ final class Session: ObservableObject {
             // Parse the server's new_eta and apply it immediately
             // This prevents race conditions with Realtime updates that might have stale data
             if let newETADate = DateUtils.parseISO8601(response.new_eta) {
+                // 1. Update cache FIRST to prevent any race with cache reads
+                LocalStorage.shared.updateCachedTripFields(
+                    tripId: plan.id,
+                    updates: ["eta": response.new_eta]
+                )
+
+                // 2. Then update in-memory state
                 await MainActor.run {
                     if let currentTrip = self.activeTrip {
                         // Update activeTrip with the server's authoritative new ETA
@@ -2361,17 +2410,11 @@ final class Session: ObservableObject {
                     }
                 }
 
-                // Update Live Activity immediately with the new ETA
+                // 3. Update Live Activity immediately with the new ETA
                 if let updatedTrip = self.activeTrip {
                     let checkinCount = getCheckinCount(tripId: updatedTrip.id)
                     await LiveActivityManager.shared.updateActivity(with: updatedTrip, checkinCount: checkinCount)
                 }
-
-                // Update the local cache with the new ETA
-                LocalStorage.shared.updateCachedTripFields(
-                    tripId: plan.id,
-                    updates: ["eta": response.new_eta]
-                )
             }
 
             // Skip loadActivePlan() - we already have the authoritative new ETA from the response
@@ -2383,15 +2426,20 @@ final class Session: ObservableObject {
                 // Update widget data with new ETA
                 self.updateWidgetData()
             }
+
+            // Release extension lock after a delay to let UI settle
+            releaseExtensionLock()
             return true
         } catch let error as URLError where error.code == .notConnectedToInternet ||
                                             error.code == .networkConnectionLost {
             // Only queue for actual network connectivity issues
             debugLog("[Session] ⚠️ Extend plan network error - queueing offline: \(error.code)")
+            releaseExtensionLock()
             return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
         } catch let error as URLError where error.code == .timedOut {
             // Timeout is tricky - server may have processed. Queue but log warning.
             debugLog("[Session] ⚠️ Extend plan timed out - server may have processed, queueing anyway")
+            releaseExtensionLock()
             return await queueOfflineExtendPlan(plan: plan, minutes: minutes, newETA: newETA, newETAString: newETAString, location: location)
         } catch {
             // Other errors (server errors, permission denied, etc.) - don't queue, show error
@@ -2399,6 +2447,7 @@ final class Session: ObservableObject {
             await MainActor.run {
                 self.lastError = "Failed to extend trip. Please try again."
             }
+            releaseExtensionLock()
             return false
         }
     }

@@ -452,6 +452,12 @@ struct ActivePlanCardCompact: View {
         (180, "3 hrs")
     ]
 
+    /// Returns the current trip from session (live updates) or falls back to the initial plan parameter.
+    /// This ensures the timer always uses the latest ETA even after extensions.
+    private var liveTrip: Trip {
+        session.activeTrip ?? plan
+    }
+
     var statusColor: Color {
         switch timeState {
         case .onTime: return .green
@@ -646,6 +652,11 @@ struct ActivePlanCardCompact: View {
             }
         }
         .onChange(of: plan.eta_at) { _, _ in
+            updateTimeRemaining()
+        }
+        .onChange(of: session.activeTrip?.eta_at) { _, _ in
+            // Session.activeTrip was updated (e.g., from extendPlan)
+            // Force immediate timer update with new ETA from liveTrip
             updateTimeRemaining()
         }
         .onChange(of: session.timelineLastUpdated) { _, _ in
@@ -1145,8 +1156,9 @@ struct ActivePlanCardCompact: View {
 
     func updateTimeRemaining() {
         let now = Date()
-        let eta = plan.eta_at  // Expected return time
-        let graceEnd = plan.eta_at.addingTimeInterval(Double(plan.grace_minutes) * 60)  // When contacts are notified
+        let trip = liveTrip  // Use live session data, not captured plan parameter
+        let eta = trip.eta_at  // Expected return time - LIVE from session
+        let graceEnd = trip.eta_at.addingTimeInterval(Double(trip.grace_minutes) * 60)  // When contacts are notified
 
         if now > graceEnd {
             // After grace period - fully overdue, contacts have been notified
