@@ -134,10 +134,12 @@ def checkin_with_token(
             user_name = "A Homebound user"
         owner_email = user.email if user and trip.notify_self else None
 
-        # Fetch all contact emails manually (copied from participant check-in approach)
-        # Owner's email contacts watch the owner
+        # Fetch all contact emails - following the same pattern as participant check-in
+        # which is known to work correctly
         log.info(f"[Checkin] Fetching contacts for trip {trip.id}, is_group_trip={trip.is_group_trip}")
 
+        # Step 1: Get owner's email contacts from trips.contact1/2/3
+        # Owner's contacts watch the owner
         owner_email_contacts = connection.execute(
             sqlalchemy.text(
                 """
@@ -156,68 +158,86 @@ def checkin_with_token(
         ]
         log.info(f"[Checkin] Found {len(contacts_for_email)} owner email contacts")
 
-        # For group trips, also get ALL participant email contacts
+        # Step 2: For group trips, get ALL accepted participants and their contacts
         if trip.is_group_trip:
-            # Get participant email contacts from participant_trip_contacts
-            participant_email_contacts = connection.execute(
+            # Get all accepted participants (excluding owner)
+            accepted_participants = connection.execute(
                 sqlalchemy.text(
                     """
-                    SELECT DISTINCT c.id, c.name, c.email,
+                    SELECT tp.user_id,
                            COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
-                    FROM participant_trip_contacts ptc
-                    JOIN contacts c ON ptc.contact_id = c.id
-                    JOIN users u ON ptc.participant_user_id = u.id
-                    WHERE ptc.trip_id = :trip_id
-                      AND ptc.contact_id IS NOT NULL
-                      AND c.email IS NOT NULL
+                    FROM trip_participants tp
+                    JOIN users u ON tp.user_id = u.id
+                    WHERE tp.trip_id = :trip_id
+                      AND tp.status = 'accepted'
+                      AND tp.role = 'participant'
                     """
                 ),
                 {"trip_id": trip.id}
             ).fetchall()
+            log.info(f"[Checkin] Found {len(accepted_participants)} accepted participants")
 
-            # Add participant email contacts with their respective watched_user_name
-            for pc in participant_email_contacts:
-                if pc.email:
-                    watched_name = pc.participant_name.strip() if pc.participant_name else "Participant"
-                    contacts_for_email.append({
-                        "id": pc.id,
-                        "name": pc.name,
-                        "email": pc.email,
-                        "watched_user_name": watched_name
-                    })
+            # For each participant, get their email contacts
+            for participant in accepted_participants:
+                participant_name = participant.participant_name.strip() if participant.participant_name else "Participant"
+                participant_user_id = participant.user_id
+                log.info(f"[Checkin] Fetching contacts for participant {participant_user_id} ({participant_name})")
 
-            # Get participant friend contacts' emails (friends who have email)
-            participant_friend_email_contacts = connection.execute(
-                sqlalchemy.text(
-                    """
-                    SELECT DISTINCT
-                           friend.id as id,
-                           TRIM(friend.first_name || ' ' || friend.last_name) as name,
-                           friend.email as email,
-                           COALESCE(TRIM(participant.first_name || ' ' || participant.last_name), 'Participant') as participant_name
-                    FROM participant_trip_contacts ptc
-                    JOIN users friend ON ptc.friend_user_id = friend.id
-                    JOIN users participant ON ptc.participant_user_id = participant.id
-                    WHERE ptc.trip_id = :trip_id
-                      AND ptc.friend_user_id IS NOT NULL
-                      AND friend.email IS NOT NULL
-                    """
-                ),
-                {"trip_id": trip.id}
-            ).fetchall()
+                # Get this participant's email contacts from participant_trip_contacts
+                participant_email_contacts = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        SELECT c.id, c.name, c.email
+                        FROM participant_trip_contacts ptc
+                        JOIN contacts c ON ptc.contact_id = c.id
+                        WHERE ptc.trip_id = :trip_id
+                          AND ptc.participant_user_id = :participant_user_id
+                          AND ptc.contact_id IS NOT NULL
+                          AND c.email IS NOT NULL
+                        """
+                    ),
+                    {"trip_id": trip.id, "participant_user_id": participant_user_id}
+                ).fetchall()
 
-            # Add participant friend email contacts
-            for pfc in participant_friend_email_contacts:
-                if pfc.email:
-                    watched_name = pfc.participant_name.strip() if pfc.participant_name else "Participant"
-                    contacts_for_email.append({
-                        "id": -pfc.id,  # Negative to indicate it's a user, not a contact
-                        "name": pfc.name or "Friend",
-                        "email": pfc.email,
-                        "watched_user_name": watched_name
-                    })
+                # Add to contacts list with participant's name as watched_user_name
+                for pc in participant_email_contacts:
+                    if pc.email:
+                        contacts_for_email.append({
+                            "id": pc.id,
+                            "name": pc.name,
+                            "email": pc.email,
+                            "watched_user_name": participant_name
+                        })
+                log.info(f"[Checkin] Found {len(participant_email_contacts)} email contacts for participant {participant_name}")
 
-            log.info(f"[Checkin] Found {len(participant_email_contacts)} participant email contacts, {len(participant_friend_email_contacts)} participant friend email contacts")
+                # Get this participant's friend contacts (friends who have email)
+                participant_friend_contacts = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        SELECT friend.id as id,
+                               TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                               friend.email as email
+                        FROM participant_trip_contacts ptc
+                        JOIN users friend ON ptc.friend_user_id = friend.id
+                        WHERE ptc.trip_id = :trip_id
+                          AND ptc.participant_user_id = :participant_user_id
+                          AND ptc.friend_user_id IS NOT NULL
+                          AND friend.email IS NOT NULL
+                        """
+                    ),
+                    {"trip_id": trip.id, "participant_user_id": participant_user_id}
+                ).fetchall()
+
+                # Add to contacts list with participant's name as watched_user_name
+                for pfc in participant_friend_contacts:
+                    if pfc.email:
+                        contacts_for_email.append({
+                            "id": -pfc.id,  # Negative to indicate it's a user, not a contact
+                            "name": pfc.name or "Friend",
+                            "email": pfc.email,
+                            "watched_user_name": participant_name
+                        })
+                log.info(f"[Checkin] Found {len(participant_friend_contacts)} friend contacts for participant {participant_name}")
 
         log.info(f"[Checkin] Total {len(contacts_for_email)} contacts for email notifications")
         for c in contacts_for_email:

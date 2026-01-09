@@ -652,6 +652,9 @@ def create_trip(
             group_settings_json = json.dumps(GroupSettings().model_dump())
 
         # Insert trip
+        # If starting immediately (is_starting_now), set notified_trip_started = true to prevent
+        # scheduler from sending duplicate trip start emails
+        is_starting_now = initial_status == 'active'
         result = connection.execute(
             sqlalchemy.text(
                 """
@@ -663,7 +666,7 @@ def create_trip(
                     contact1, contact2, contact3, created_at,
                     checkin_token, checkout_token, timezone, start_timezone, eta_timezone,
                     checkin_interval_min, notify_start_hour, notify_end_hour, notify_self,
-                    share_live_location, is_group_trip, group_settings
+                    share_live_location, is_group_trip, group_settings, notified_trip_started
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
                     :location_text, :gen_lat, :gen_lon,
@@ -672,7 +675,7 @@ def create_trip(
                     :contact1, :contact2, :contact3, :created_at,
                     :checkin_token, :checkout_token, :timezone, :start_timezone, :eta_timezone,
                     :checkin_interval_min, :notify_start_hour, :notify_end_hour, :notify_self,
-                    :share_live_location, :is_group_trip, :group_settings
+                    :share_live_location, :is_group_trip, :group_settings, :notified_trip_started
                 )
                 RETURNING id
                 """
@@ -708,7 +711,8 @@ def create_trip(
                 "notify_self": body.notify_self,
                 "share_live_location": body.share_live_location,
                 "is_group_trip": body.is_group_trip,
-                "group_settings": group_settings_json
+                "group_settings": group_settings_json,
+                "notified_trip_started": is_starting_now  # Prevent duplicate scheduler notifications
             }
         )
         row = result.fetchone()
@@ -1682,12 +1686,14 @@ def start_trip(
         contacts_for_email = _get_all_trip_email_contacts(connection, trip)
 
         # Update trip status to active and set start time to now (for early starts)
+        # Also set notified_trip_started = true to prevent scheduler from sending duplicate emails
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
                 SET status = 'active',
-                    start = now()
+                    start = now(),
+                    notified_trip_started = true
                 WHERE id = :trip_id
                 """
             ),
