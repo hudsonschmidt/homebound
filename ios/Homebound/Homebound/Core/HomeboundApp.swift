@@ -59,6 +59,17 @@ struct HomeboundApp: App {
                             }
                         }
                         .transition(.move(edge: .trailing))
+                } else if preferences.shouldShowGettingStarted {
+                    // Profile complete but hasn't seen Getting Started - show walkthrough
+                    GettingStartedView()
+                        .environmentObject(session)
+                        .environmentObject(preferences)
+                        .onOpenURL { url in
+                            // Save friend invite token to show after walkthrough
+                            if let token = extractFriendToken(from: url) {
+                                pendingFriendInviteToken = token
+                            }
+                        }
                 } else {
                     // Authenticated with complete profile - show main tab view
                     MainTabView()
@@ -106,6 +117,7 @@ struct HomeboundApp: App {
             .animation(.easeInOut(duration: 0.3), value: session.accessToken)
             .animation(.easeInOut(duration: 0.3), value: session.isInitialDataLoaded)
             .animation(.easeInOut(duration: 0.3), value: session.profileCompleted)
+            .animation(.easeInOut(duration: 0.3), value: preferences.hasSeenGettingStarted)
             .preferredColorScheme(preferences.colorScheme.colorScheme)
         }
     }

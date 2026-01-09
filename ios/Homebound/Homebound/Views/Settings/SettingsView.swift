@@ -234,6 +234,13 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - Getting Started
+    @Published var hasSeenGettingStarted: Bool {
+        didSet {
+            UserDefaults.standard.set(hasSeenGettingStarted, forKey: "hasSeenGettingStarted")
+        }
+    }
+
     // MARK: - Debug
     @Published var debugUnlockAllAchievements: Bool {
         didSet {
@@ -304,6 +311,14 @@ class AppPreferences: ObservableObject {
     func markWhatsNewAsSeen() {
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         lastSeenWhatsNewVersion = currentVersion
+    }
+
+    var shouldShowGettingStarted: Bool {
+        !hasSeenGettingStarted
+    }
+
+    func markGettingStartedAsSeen() {
+        hasSeenGettingStarted = true
     }
 
     init() {
@@ -377,6 +392,9 @@ class AppPreferences: ObservableObject {
         } else {
             self.lastSeenWhatsNewVersion = storedVersion
         }
+
+        // Getting Started - defaults to false (not seen)
+        self.hasSeenGettingStarted = UserDefaults.standard.bool(forKey: "hasSeenGettingStarted")
 
         // Debug - defaults to false
         self.debugUnlockAllAchievements = UserDefaults.standard.bool(forKey: "debugUnlockAllAchievements")
@@ -463,6 +481,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @State private var showingClearCacheAlert = false
     @State private var showingWhatsNew = false
+    @State private var showingGettingStarted = false
 
     var body: some View {
         NavigationStack {
@@ -647,6 +666,24 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
 
                     Button(action: {
+                        showingGettingStarted = true
+                    }) {
+                        Label {
+                            HStack {
+                                Text("Getting Started")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "flag.fill")
+                                .foregroundStyle(Color.hbBrand)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+
+                    Button(action: {
                         showingClearCacheAlert = true
                     }) {
                         Label {
@@ -780,6 +817,10 @@ struct SettingsView: View {
             }
             .fullScreenCover(isPresented: $showingWhatsNew) {
                 WhatsNewView(isFromSettings: true)
+            }
+            .fullScreenCover(isPresented: $showingGettingStarted) {
+                GettingStartedView(isFromSettings: true)
+                    .environmentObject(preferences)
             }
         }
     }
