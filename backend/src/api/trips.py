@@ -215,9 +215,6 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
     if is_group and trip_id:
         log.info(f"[Trips] _get_all_trip_email_contacts: Group trip {trip_id}, fetching participant contacts")
 
-        # Deduplicate by email - start with owner's contacts
-        existing_emails = {c["email"].lower() for c in contacts if c.get("email")}
-
         # Query 1: Email contacts (contact_id is set) - from contacts table
         email_contacts = connection.execute(
             sqlalchemy.text("""
@@ -253,9 +250,12 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
 
         log.info(f"[Trips] _get_all_trip_email_contacts: Found {len(email_contacts)} participant email contacts, {len(friend_contacts)} participant friend contacts")
 
+        # No cross-user dedup - each notification is personalized with watched_user_name
+        # so the same contact should receive separate emails for each person they watch
+
         # Add email contacts (from contacts table)
         for pc in email_contacts:
-            if pc.email and pc.email.lower() not in existing_emails:
+            if pc.email:
                 watched_name = pc.participant_name.strip() if pc.participant_name else "Participant"
                 contacts.append({
                     "id": pc.id,
@@ -263,11 +263,10 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
                     "email": pc.email,
                     "watched_user_name": watched_name
                 })
-                existing_emails.add(pc.email.lower())
 
         # Add friend contacts (from users table via friend_user_id)
         for fc in friend_contacts:
-            if fc.email and fc.email.lower() not in existing_emails:
+            if fc.email:
                 watched_name = fc.participant_name.strip() if fc.participant_name else "Participant"
                 contacts.append({
                     "id": -fc.id,  # Negative to indicate it's a user, not a contact
@@ -275,7 +274,6 @@ def _get_all_trip_email_contacts(connection, trip) -> list[dict]:
                     "email": fc.email,
                     "watched_user_name": watched_name
                 })
-                existing_emails.add(fc.email.lower())
 
     log.info(f"[Trips] _get_all_trip_email_contacts: Returning {len(contacts)} total contacts")
     return contacts

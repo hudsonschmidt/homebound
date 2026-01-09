@@ -236,7 +236,10 @@ final class RealtimeManager: ObservableObject {
             for await _ in updates {
                 // Refresh participant data - someone accepted/declined
                 debugLog("[Realtime] Participant status changed")
-                await Session.shared.loadActivePlan()
+                // Bug 3 fix: Check protection window before refreshing active plan
+                if Session.shared.shouldLoadActivePlan() {
+                    await Session.shared.loadActivePlan()
+                }
                 _ = await Session.shared.loadAllTrips()
             }
         }
@@ -272,8 +275,11 @@ final class RealtimeManager: ObservableObject {
                 let tripId = record["trip_id"]?.intValue
                 debugLog("[Realtime] New event detected: type=\(eventType), tripId=\(String(describing: tripId))")
 
-                // Refresh all trip data
-                await Session.shared.loadActivePlan()
+                // Bug 3 fix: Check protection window before refreshing active plan
+                // This prevents the extend event from triggering a stale data fetch
+                if Session.shared.shouldLoadActivePlan() {
+                    await Session.shared.loadActivePlan()
+                }
                 _ = await Session.shared.loadAllTrips()
                 _ = await Session.shared.loadFriendActiveTrips()
 

@@ -406,7 +406,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                             UIApplication.shared.endBackgroundTask(backgroundTaskId)
                         }
                     }
-                    await Session.shared.loadActivePlan()
+                    // Bug 3 fix: Check protection window before loading active plan
+                    if Session.shared.shouldLoadActivePlan() {
+                        await Session.shared.loadActivePlan()
+                    }
                     // Verify the loaded trip matches the push (avoid race conditions)
                     if let trip = Session.shared.activeTrip {
                         if tripId == nil || trip.id == tripId {
@@ -434,7 +437,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                             UIApplication.shared.endBackgroundTask(backgroundTaskId)
                         }
                     }
-                    await Session.shared.loadActivePlan()
+                    // Bug 3 fix: Check protection window before loading active plan
+                    if Session.shared.shouldLoadActivePlan() {
+                        await Session.shared.loadActivePlan()
+                    }
                     let trip = Session.shared.activeTrip
                     await LiveActivityManager.shared.restoreActivityIfNeeded(for: trip)
                     completionHandler(.newData)
@@ -471,7 +477,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             case "trip":
                 debugLog("[AppDelegate] 🔄 Silent push: trip data refresh")
                 Task {
-                    await Session.shared.loadActivePlan()
+                    // Bug 3 fix: Check protection window before loading active plan
+                    if Session.shared.shouldLoadActivePlan() {
+                        await Session.shared.loadActivePlan()
+                    }
                     _ = await Session.shared.loadAllTrips()
                     debugLog("[AppDelegate] ✅ Trip data refreshed via push")
                     completionHandler(.newData)

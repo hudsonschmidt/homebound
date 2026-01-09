@@ -530,11 +530,10 @@ async def check_push_notifications():
                             {"trip_id": trip.id}
                         ).fetchall()
 
-                        # Deduplicate by email
-                        existing_emails = {c['email'].lower() for c in contacts_for_email if c.get('email')}
+                        # No cross-user dedup - each notification is personalized with watched_user_name
+                        # so the same contact should receive separate emails for each person they watch
                         for pc in participant_email_contacts:
-                            if pc.email and pc.email.lower() not in existing_emails:
-                                # Bug 1 fix: Add watched_user_name = participant's name
+                            if pc.email:
                                 watched_name = pc.participant_name.strip() if pc.participant_name else "Participant"
                                 contacts_for_email.append({
                                     "id": pc.id,
@@ -542,7 +541,6 @@ async def check_push_notifications():
                                     "email": pc.email,
                                     "watched_user_name": watched_name
                                 })
-                                existing_emails.add(pc.email.lower())
 
                         # Get participant friend contacts' emails (from users table via friend_user_id)
                         # Bug 1 fix: Also fetch participant name for watched_user_name
@@ -563,9 +561,9 @@ async def check_push_notifications():
                             {"trip_id": trip.id}
                         ).fetchall()
 
+                        # No cross-user dedup for friend contacts either
                         for pfc in participant_friend_email_contacts:
-                            if pfc.email and pfc.email.lower() not in existing_emails:
-                                # Bug 1 fix: Add watched_user_name = participant's name
+                            if pfc.email:
                                 watched_name = pfc.participant_name.strip() if pfc.participant_name else "Participant"
                                 contacts_for_email.append({
                                     "id": -pfc.id,  # Negative to indicate it's a user
@@ -573,7 +571,6 @@ async def check_push_notifications():
                                     "email": pfc.email,
                                     "watched_user_name": watched_name
                                 })
-                                existing_emails.add(pfc.email.lower())
 
                         # Get participant friend contacts for push notifications
                         participant_friend_contacts = conn.execute(

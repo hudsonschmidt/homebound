@@ -356,7 +356,12 @@ def test_get_all_trip_email_contacts_group_trip_with_participants():
 
 
 def test_get_all_trip_email_contacts_deduplicates_by_email():
-    """Test that contacts with the same email are deduplicated."""
+    """Test that shared contacts receive separate personalized notifications.
+
+    When the same email address is a contact for both the owner and a participant,
+    they should receive separate emails with different watched_user_name values
+    since each notification is personalized.
+    """
     with db.engine.begin() as connection:
         # Create owner with contact
         owner_id = _create_test_user(connection, "owner_dedup@test.com", "Owner", "Dedup")
@@ -382,9 +387,14 @@ def test_get_all_trip_email_contacts_deduplicates_by_email():
         contacts = _get_all_trip_email_contacts(connection, trip)
 
     try:
-        # Should only have 1 contact (deduplicated)
-        assert len(contacts) == 1, f"Expected 1 contact after deduplication, got {len(contacts)}"
-        assert contacts[0]["email"] == "shared@test.com"
+        # Should have 2 contacts - same email but personalized for different users
+        assert len(contacts) == 2, f"Expected 2 contacts (no dedup), got {len(contacts)}"
+        # Both should have the same email
+        assert all(c["email"] == "shared@test.com" for c in contacts)
+        # But different watched_user_name values
+        watched_names = {c["watched_user_name"] for c in contacts}
+        assert "Owner Dedup" in watched_names, "Owner's contact should watch 'Owner Dedup'"
+        assert "Participant Dedup" in watched_names, "Participant's contact should watch 'Participant Dedup'"
     finally:
         _cleanup_test_data(owner_id, participant_id)
 

@@ -668,10 +668,12 @@ def accept_invitation(
             position += 1
 
         # Get trip details for notification (including status for Bug 1 fix)
+        # Also fetch owner's contact IDs to exclude from participant notification
         trip = connection.execute(
             sqlalchemy.text("""
                 SELECT t.user_id, t.title, t.status, t.timezone, t.location_text, t.eta,
-                       t.has_separate_locations, t.start_location_text, a.name as activity_name
+                       t.has_separate_locations, t.start_location_text, a.name as activity_name,
+                       t.contact1, t.contact2, t.contact3
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
                 WHERE t.id = :trip_id
@@ -748,6 +750,9 @@ def accept_invitation(
                         "watched_user_name": accepter_name
                     })
                     existing_emails.add(pfc.email.lower())
+
+            # Note: No dedup with owner's contacts - each notification is personalized
+            # with watched_user_name so shared contacts should receive separate notifications
 
             if contacts_for_email:
                 trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
