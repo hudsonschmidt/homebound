@@ -24,40 +24,34 @@ enum WhatsNewContent {
         title: "Update 0.5.1",
         features: [
             WhatsNewFeature(
-                icon: "person.2",
-                iconColor: .white,
-                title: "More info on Friends",
-                description: "See more details about your friends, including their adventure stats and achievements."
+                icon: "person.3",
+                iconColor: .primary,
+                title: "Group Trips",
+                description: "Create group trips with your friends and family."
             ),
             WhatsNewFeature(
-                icon: "person.crop.circle.badge.checkmark",
-                iconColor: .white,
-                title: "Request Check in",
-                description: "Send a notification to your friends to check in on their adventures."
+                icon: "questionmark.circle",
+                iconColor: .primary,
+                title: "About Page",
+                description: "New About page with app info, mission, acknowledgements, and community info."
             ),
             WhatsNewFeature(
-                icon: "location",
-                iconColor: .white,
-                title: "Live Location",
-                description: "See your friend's live location during an adventure for added safety. (Opt-in only)"
+                icon: "flag",
+                iconColor: .primary,
+                title: "Getting Started",
+                description: "New onboarding flow to help new users get started with Homebound. Always accessible from Settings."
             ),
             WhatsNewFeature(
-                icon: "qrcode",
-                iconColor: .white,
-                title: "QR Code and Invite Link lasts forever",
-                description: "Invite links and QR codes are no longer single use no longer expire."
-            ),
-            WhatsNewFeature(
-                icon: "text.page",
-                iconColor: .white,
-                title: "See more details in Trip History",
-                description: "Click past trips to see more detailed stats and maps of your adventures."
+                icon: "figure.walk",
+                iconColor: .primary,
+                title: "New Activities",
+                description: "Walks, canyoneering, and river rafting."
             ),
             WhatsNewFeature(
                 icon: "ladybug",
-                iconColor: .white,
+                iconColor: .primary,
                 title: "Bug Fixes",
-                description: "Light mode bug. Friends page updates more. UI switching improvements. Coordinate logging bug."
+                description: "Check in coords are properly saved and displayed. Privacy improvements. Location search fixes. App performance fixes. Trip history fix. And more!"
             )
         ]
     )
@@ -131,7 +125,7 @@ struct WhatsNewView: View {
                     .frame(height: 40)
 
                     Color(.systemBackground)
-                        .frame(height: 90)
+                        .frame(height: 70)
                         .overlay(
                             Button(action: {
                                 if !isFromSettings {

@@ -18,30 +18,30 @@ enum GettingStartedContent {
         GettingStartedStep(
             icon: "map.fill",
             iconColor: Color.hbBrand,
-            title: "Create Your Trip",
+            title: "Create",
             subtitle: "Plan your adventure",
             description: "Choose your activity, set your destination, and pick when you expect to return. Homebound keeps track so someone always knows your plan."
         ),
         GettingStartedStep(
             icon: "person.2.fill",
             iconColor: .orange,
-            title: "Add Safety Contacts",
-            subtitle: "Your trusted circle",
+            title: "Safety",
+            subtitle: "Let someone know",
             description: "Select friends or family who will be notified about your trip. They'll know when you leave and when to expect you back."
         ),
         GettingStartedStep(
-            icon: "figure.walk",
+            icon: "figure.hiking",
             iconColor: .blue,
-            title: "Head Out",
-            subtitle: "Enjoy your adventure",
+            title: "Adventure",
+            subtitle: "Explore the world",
             description: "Start your trip and watch the countdown. Check in during your adventure to let contacts know you're safe."
         ),
         GettingStartedStep(
-            icon: "checkmark.shield.fill",
+            icon: "fireworks",
             iconColor: Color.hbTeal,
-            title: "Return Safely",
-            subtitle: "Complete your journey",
-            description: "Tap \"I'm Safe\" when you arrive home. If you don't check out in time, your safety contacts will be automatically notified."
+            title: "Homebound",
+            subtitle: "Home safe",
+            description: "Tap \"I'm Safe\" when you make it wherever your adventures took you. If you don't check out in time, your safety contacts will be automatically notified. (Following a grace period you set up front.)"
         )
     ]
 }

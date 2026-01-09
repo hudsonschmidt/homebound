@@ -678,7 +678,7 @@ struct SettingsView: View {
                             }
                         } icon: {
                             Image(systemName: "flag.fill")
-                                .foregroundStyle(Color.hbBrand)
+                                .foregroundStyle(.orange)
                         }
                     }
                     .foregroundStyle(.primary)
@@ -1663,8 +1663,68 @@ struct AboutView: View {
 
     // MARK: - Mission Text (Edit these strings to update content)
     private let missionTitle = "Our Mission"
-    private let missionParagraph1 = "Homebound was built with a simple belief: every adventure should end with you making it home safely."
-    private let missionParagraph2 = "Whether you're hiking a remote trail, driving cross-country, or exploring somewhere new—we're here to make sure someone always knows your plan and can help if something goes wrong."
+    private let missionTagline = "Plan in seconds. Get found fast."
+
+    private let missionParagraph1 =
+    "Homebound was built for a simple reason: every adventure should end with you safely back home."
+
+    private let missionParagraph2 =
+    "We help turn a quick, 10-second check-in into a meaningful signal. Share a basic plan and an ETA, then if you don’t check out, the people you chose can get the last-known details to start looking sooner."
+
+    private let missionParagraph3 =
+    "Our goal is to make searches smaller and rescues faster. Especially for day trips, which make up one of the biggest shares of park search and rescue calls."
+
+    private let missionParagraph4 =
+    "We’re building Homebound to be private by design and only track you when you explicitly choose to. No matter what, you are in control of your data and who sees it."
+
+    private let missionFootnote =
+    "Informed by patterns seen across decades of SAR reports and beacon outcomes, we’re aiming to prevent or significantly shorten a large share of lost-person incidents—across outdoor activities."
+        
+    private let aboutSections: [(title: String, body: String)] = [
+        (
+            "Why we built Homebound",
+            "Most trips are uneventful, until they aren’t. When something goes wrong, the hardest part is often the first few hours: figuring out where to start. Homebound exists to make that starting point clearer, faster, and less stressful for everyone involved."
+        ),
+        (
+            "What Homebound does",
+            "• You set a simple plan (where, when, and who should know).\n" +
+            "• You check in along the way if you want.\n" +
+            "• If you miss checkout, your trusted contacts can be alerted with the details they need to help you."
+        ),
+        (
+            "How it works",
+            "1) Create a trip: destination, departure time, ETA, grace period, and notes.\n" +
+            "2) Choose who to share with.\n" +
+            "3) Check in (optional) during the trip.\n" +
+            "4) Check out when you’re safe.\n\n" +
+            "If checkout is missed, Homebound will prompt your contacts with last-known info so they can act quickly."
+        ),
+        (
+            "Privacy by design",
+            "Homebound is built to help you if trouble arrises. Not to watch you.\n\n" +
+            "• No continuous tracking by default.\n" +
+            "• You decide what to share and with whom.\n" +
+            "• The goal is only to use location and trip details when they’re genuinely needed."
+        ),
+        (
+            "Safety note",
+            "Homebound is a safety tool, not a guarantee. Conditions, devices, and connectivity can fail.\n\n" +
+            "Always carry the right gear for your activity (water, layers, light, navigation, etc.), and consider a dedicated SOS device for remote areas."
+        ),
+        (
+            "Who it’s for",
+            "Hikers, runners, skiers, climbers, surfers, divers, anyone who wants a simple way to create and share a plan. All to hopefully make the “where do we start looking?” moment easy if something were to go wrong."
+        ),
+        (
+            "Built with gratitude",
+            "To the search and rescue volunteers, rangers, patrol, and dispatch teams who drop everything to help strangers: thank you. Homebound is built with deep respect for your time and for the families waiting for answers."
+        ),
+        (
+            "Help us improve",
+            "If something feels confusing, slow, unreliable or you find a bug, we want to hear it. Your feedback directly shapes what we build next.\n" +
+            "Report bugs and new feautures at the links in Settings under Resources.\n"
+        )
+    ]
 
     var body: some View {
         List {
@@ -1676,10 +1736,37 @@ struct AboutView: View {
 
                     Text(missionParagraph2)
                         .font(.body)
+
+                    Text(missionParagraph3)
+                        .font(.body)
+
+                    Text(missionParagraph4)
+                        .font(.body)
+
+                    Text("“\(missionTagline)”")
+                        .font(.headline)
+                        .italic()
+                        .padding(.top, 4)
+
+                    Text(missionFootnote)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
                 }
                 .padding(.vertical, 8)
             } header: {
                 Text(missionTitle)
+            }
+
+            // Other About Sections
+            ForEach(aboutSections, id: \.title) { section in
+                Section {
+                    Text(section.body)
+                        .font(.body)
+                        .padding(.vertical, 8)
+                } header: {
+                    Text(section.title)
+                }
             }
 
             // Community Stats Section
