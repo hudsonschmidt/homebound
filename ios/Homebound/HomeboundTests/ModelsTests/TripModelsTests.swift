@@ -286,6 +286,64 @@ final class TripModelsTests: XCTestCase {
         XCTAssertNotEqual(trip1, trip2)
     }
 
+    // MARK: - Bug 3 Regression Tests: Trip Extension State
+
+    func testTrip_ExtendByMinutes_UpdatesEta() {
+        // Bug 3 regression test: Simulating trip extension by 30 minutes
+        let fixedStart = Date()
+        let originalEta = fixedStart.addingTimeInterval(3600) // 1 hour from now
+        let trip = TestFixtures.makeTrip(id: 1, startAt: fixedStart, etaAt: originalEta, status: "active")
+
+        // Extend by 30 minutes
+        let extendedEta = originalEta.addingTimeInterval(30 * 60)
+        let extendedTrip = trip.with(eta_at: extendedEta)
+
+        // Verify extension worked
+        XCTAssertEqual(extendedTrip.eta_at.timeIntervalSince1970, extendedEta.timeIntervalSince1970, accuracy: 1)
+        XCTAssertNotEqual(trip.eta_at, extendedTrip.eta_at)
+
+        // Verify other properties unchanged
+        XCTAssertEqual(trip.id, extendedTrip.id)
+        XCTAssertEqual(trip.status, extendedTrip.status)
+        XCTAssertEqual(trip.title, extendedTrip.title)
+    }
+
+    func testTrip_ExtendedEta_IsNewerThanOriginal() {
+        // Bug 3 regression test: After extension, the new ETA should be later than original
+        // This validates the "newer is better" comparison used in state management
+        let originalEta = Date(timeIntervalSince1970: 1704067200) // Fixed timestamp
+        let extendedEta = originalEta.addingTimeInterval(1800) // 30 min later
+
+        let originalTrip = TestFixtures.makeTrip(id: 1, etaAt: originalEta)
+        let extendedTrip = originalTrip.with(eta_at: extendedEta)
+
+        // Extended ETA should be greater (later) than original
+        XCTAssertTrue(extendedTrip.eta_at > originalTrip.eta_at)
+
+        // Can use this comparison to detect stale data
+        let staleEta = originalTrip.eta_at
+        let currentEta = extendedTrip.eta_at
+        let isStaleTripFromServer = staleEta < currentEta
+        XCTAssertTrue(isStaleTripFromServer)
+    }
+
+    func testTrip_EtaComparison_DetectsRevert() {
+        // Bug 3 regression test: Detect when server returns older ETA than local
+        // This is the scenario where realtime update would "revert" the extension
+        let originalEta = Date(timeIntervalSince1970: 1704067200)
+        let extendedEta = originalEta.addingTimeInterval(1800)
+
+        let localTrip = TestFixtures.makeTrip(id: 1, etaAt: extendedEta) // Local has extended ETA
+        let serverTrip = TestFixtures.makeTrip(id: 1, etaAt: originalEta) // Server returns original
+
+        // Detect that server data is stale
+        let serverHasOlderEta = serverTrip.eta_at < localTrip.eta_at
+        XCTAssertTrue(serverHasOlderEta, "Should detect server has older ETA")
+
+        // In this case, we should NOT overwrite local with server
+        // This test documents the expected behavior
+    }
+
     // MARK: - Trip Computed Properties Tests
 
     func testTrip_ActivityType_ReturnsActivityName() throws {

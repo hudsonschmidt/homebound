@@ -1377,6 +1377,18 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Bug 3 fix: Public method to check if it's safe to call loadActivePlan()
+    /// without overwriting a recent local update (e.g., from trip extension).
+    /// RealtimeManager should call this before triggering loadActivePlan().
+    func shouldLoadActivePlan() -> Bool {
+        if let lastUpdate = lastLocalTripUpdate,
+           Date().timeIntervalSince(lastUpdate) < 3.0 {
+            debugLog("[Session] Realtime skipping loadActivePlan - recent local update within 3s")
+            return false
+        }
+        return true
+    }
+
     func loadActivePlan() async {
         // Prevent Realtime from overwriting recent local updates (race condition fix)
         // This happens when extending a trip: we update locally, then Realtime triggers

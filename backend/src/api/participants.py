@@ -18,12 +18,14 @@ from src.services.notifications import (
     send_checkout_vote_push,
     send_data_refresh_push,
     send_friend_checkin_push,
+    send_friend_trip_starting_push,
     send_participant_checkin_push,
     send_participant_left_push,
     send_trip_completed_by_vote_push,
     send_trip_invitation_accepted_push,
     send_trip_invitation_declined_push,
     send_trip_invitation_push,
+    send_trip_starting_now_emails,
 )
 
 log = logging.getLogger(__name__)
@@ -665,15 +667,21 @@ def accept_invitation(
             )
             position += 1
 
-        # Get trip owner and trip title for notification
+        # Get trip details for notification (including status for Bug 1 fix)
         trip = connection.execute(
-            sqlalchemy.text("SELECT user_id, title FROM trips WHERE id = :trip_id"),
+            sqlalchemy.text("""
+                SELECT t.user_id, t.title, t.status, t.timezone, t.location_text, t.eta,
+                       t.has_separate_locations, t.start_location_text, a.name as activity_name
+                FROM trips t
+                JOIN activities a ON t.activity = a.id
+                WHERE t.id = :trip_id
+            """),
             {"trip_id": trip_id}
         ).fetchone()
 
         # Get accepter's name
         accepter = connection.execute(
-            sqlalchemy.text("SELECT first_name, last_name FROM users WHERE id = :user_id"),
+            sqlalchemy.text("SELECT first_name, last_name, email FROM users WHERE id = :user_id"),
             {"user_id": user_id}
         ).fetchone()
         accepter_name = f"{accepter.first_name} {accepter.last_name}".strip() if accepter else "Someone"
@@ -691,6 +699,100 @@ def accept_invitation(
                 ))
 
             background_tasks.add_task(send_accepted_push)
+
+        # Bug 1 fix: If trip is already active, send trip start notifications to new participant's contacts
+        if trip and trip.status in ('active', 'overdue', 'overdue_notified'):
+            log.info(f"[ACCEPT] Trip {trip_id} is active - sending trip start notifications to new participant's contacts")
+
+            # Get the new participant's email contacts for this trip
+            participant_email_contacts = connection.execute(
+                sqlalchemy.text("""
+                    SELECT c.id, c.name, c.email
+                    FROM participant_trip_contacts ptc
+                    JOIN contacts c ON ptc.contact_id = c.id
+                    WHERE ptc.trip_id = :trip_id
+                      AND ptc.participant_user_id = :user_id
+                      AND c.email IS NOT NULL
+                """),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchall()
+
+            contacts_for_email = [
+                {**dict(c._mapping), "watched_user_name": accepter_name}
+                for c in participant_email_contacts
+            ]
+
+            # Also get participant's friend contacts' emails
+            participant_friend_email_contacts = connection.execute(
+                sqlalchemy.text("""
+                    SELECT friend.id as id,
+                           TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                           friend.email as email
+                    FROM participant_trip_contacts ptc
+                    JOIN users friend ON ptc.friend_user_id = friend.id
+                    WHERE ptc.trip_id = :trip_id
+                      AND ptc.participant_user_id = :user_id
+                      AND ptc.friend_user_id IS NOT NULL
+                      AND friend.email IS NOT NULL
+                """),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchall()
+
+            existing_emails = {c['email'].lower() for c in contacts_for_email}
+            for pfc in participant_friend_email_contacts:
+                if pfc.email and pfc.email.lower() not in existing_emails:
+                    contacts_for_email.append({
+                        "id": -pfc.id,
+                        "name": pfc.name or "Friend",
+                        "email": pfc.email,
+                        "watched_user_name": accepter_name
+                    })
+                    existing_emails.add(pfc.email.lower())
+
+            if contacts_for_email:
+                trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
+                start_location = trip.start_location_text if trip.has_separate_locations else None
+
+                def send_trip_start_emails():
+                    asyncio.run(send_trip_starting_now_emails(
+                        trip=trip_data,
+                        contacts=contacts_for_email,
+                        user_name=accepter_name,
+                        activity_name=trip.activity_name,
+                        user_timezone=trip.timezone,
+                        start_location=start_location,
+                        owner_email=None  # Don't notify the participant themselves
+                    ))
+
+                background_tasks.add_task(send_trip_start_emails)
+                log.info(f"[ACCEPT] Scheduled trip start emails for {len(contacts_for_email)} contacts of new participant")
+
+            # Get participant's friend contacts for push notifications
+            participant_friend_contacts = connection.execute(
+                sqlalchemy.text("""
+                    SELECT friend_user_id FROM participant_trip_contacts
+                    WHERE trip_id = :trip_id
+                      AND participant_user_id = :user_id
+                      AND friend_user_id IS NOT NULL
+                """),
+                {"trip_id": trip_id, "user_id": user_id}
+            ).fetchall()
+
+            friend_user_ids = [f.friend_user_id for f in participant_friend_contacts]
+            if friend_user_ids:
+                trip_title_for_push = trip.title
+                user_name_for_push = accepter_name
+
+                def send_friend_trip_start_push():
+                    for friend_id in friend_user_ids:
+                        asyncio.run(send_friend_trip_starting_push(
+                            friend_user_id=friend_id,
+                            user_name=user_name_for_push,
+                            trip_title=trip_title_for_push
+                        ))
+
+                background_tasks.add_task(send_friend_trip_start_push)
+                log.info(f"[ACCEPT] Scheduled trip start push for {len(friend_user_ids)} friend contacts of new participant")
 
         # Send data refresh push to all other accepted participants
         other_participants = connection.execute(

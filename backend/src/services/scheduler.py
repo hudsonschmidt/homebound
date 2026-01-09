@@ -487,7 +487,7 @@ async def check_push_notifications():
                         user_name = "A Homebound user"
                     owner_email = user.email if user and trip.notify_self else None
 
-                    # Get owner's email contacts
+                    # Get owner's email contacts - they watch the owner
                     owner_contacts = conn.execute(
                         sqlalchemy.text("""
                             SELECT c.id, c.name, c.email
@@ -496,7 +496,11 @@ async def check_push_notifications():
                         """),
                         {"c1": trip.contact1 or -1, "c2": trip.contact2 or -1, "c3": trip.contact3 or -1}
                     ).fetchall()
-                    contacts_for_email = [dict(c._mapping) for c in owner_contacts]
+                    # Bug 1 fix: Add watched_user_name for owner's contacts
+                    contacts_for_email = [
+                        {**dict(c._mapping), "watched_user_name": user_name}
+                        for c in owner_contacts
+                    ]
 
                     # Get owner's friend contacts
                     owner_friend_contacts = conn.execute(
@@ -511,11 +515,14 @@ async def check_push_notifications():
                     # For group trips, also get participant contacts and send notifications
                     if trip.is_group_trip:
                         # Get participant email contacts (from contacts table via contact_id)
+                        # Bug 1 fix: Also fetch participant name for watched_user_name
                         participant_email_contacts = conn.execute(
                             sqlalchemy.text("""
-                                SELECT DISTINCT c.id, c.name, c.email
+                                SELECT DISTINCT c.id, c.name, c.email,
+                                       COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
                                 FROM participant_trip_contacts ptc
                                 JOIN contacts c ON ptc.contact_id = c.id
+                                JOIN users u ON ptc.participant_user_id = u.id
                                 WHERE ptc.trip_id = :trip_id
                                   AND ptc.contact_id IS NOT NULL
                                   AND c.email IS NOT NULL
@@ -527,18 +534,28 @@ async def check_push_notifications():
                         existing_emails = {c['email'].lower() for c in contacts_for_email if c.get('email')}
                         for pc in participant_email_contacts:
                             if pc.email and pc.email.lower() not in existing_emails:
-                                contacts_for_email.append(dict(pc._mapping))
+                                # Bug 1 fix: Add watched_user_name = participant's name
+                                watched_name = pc.participant_name.strip() if pc.participant_name else "Participant"
+                                contacts_for_email.append({
+                                    "id": pc.id,
+                                    "name": pc.name,
+                                    "email": pc.email,
+                                    "watched_user_name": watched_name
+                                })
                                 existing_emails.add(pc.email.lower())
 
                         # Get participant friend contacts' emails (from users table via friend_user_id)
+                        # Bug 1 fix: Also fetch participant name for watched_user_name
                         participant_friend_email_contacts = conn.execute(
                             sqlalchemy.text("""
                                 SELECT DISTINCT
                                        friend.id as id,
                                        TRIM(friend.first_name || ' ' || friend.last_name) as name,
-                                       friend.email as email
+                                       friend.email as email,
+                                       COALESCE(TRIM(participant.first_name || ' ' || participant.last_name), 'Participant') as participant_name
                                 FROM participant_trip_contacts ptc
                                 JOIN users friend ON ptc.friend_user_id = friend.id
+                                JOIN users participant ON ptc.participant_user_id = participant.id
                                 WHERE ptc.trip_id = :trip_id
                                   AND ptc.friend_user_id IS NOT NULL
                                   AND friend.email IS NOT NULL
@@ -548,10 +565,13 @@ async def check_push_notifications():
 
                         for pfc in participant_friend_email_contacts:
                             if pfc.email and pfc.email.lower() not in existing_emails:
+                                # Bug 1 fix: Add watched_user_name = participant's name
+                                watched_name = pfc.participant_name.strip() if pfc.participant_name else "Participant"
                                 contacts_for_email.append({
                                     "id": -pfc.id,  # Negative to indicate it's a user
                                     "name": pfc.name or "Friend",
-                                    "email": pfc.email
+                                    "email": pfc.email,
+                                    "watched_user_name": watched_name
                                 })
                                 existing_emails.add(pfc.email.lower())
 

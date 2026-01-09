@@ -164,7 +164,10 @@ final class RealtimeManager: ObservableObject {
                 let tripId = record["trip_id"]?.intValue ?? record["id"]?.intValue
                 debugLog("[Realtime] Trip update detected: tripId=\(String(describing: tripId))")
 
-                await Session.shared.loadActivePlan()
+                // Bug 3 fix: Check if it's safe to load active plan (respects local update protection window)
+                if Session.shared.shouldLoadActivePlan() {
+                    await Session.shared.loadActivePlan()
+                }
                 _ = await Session.shared.loadAllTrips()
                 _ = await Session.shared.loadFriendActiveTrips()
 

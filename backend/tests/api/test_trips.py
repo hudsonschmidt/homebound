@@ -4553,3 +4553,114 @@ def test_extend_group_trip_updates_participant_checkin():
 
     finally:
         _cleanup_group_trip_data(owner_id, participant_id)
+
+
+# =============================================================================
+# BUG 3 REGRESSION TESTS: EXTEND TRIP API RESPONSE
+# =============================================================================
+
+def test_extend_trip_returns_new_eta_in_response():
+    """Bug 3 Regression Test: Verify extend endpoint returns new_eta in response body.
+
+    The iOS client relies on new_eta in the response to update the UI immediately.
+    Without this, there's a race condition where realtime updates might overwrite
+    the local state with stale data.
+    """
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create active trip
+    now = datetime.now(UTC)
+    original_eta = now + timedelta(hours=2)
+    trip_data = TripCreate(
+        title="Extend Response Test",
+        activity="Hiking",
+        start=now,
+        eta=original_eta,
+        grace_min=30,
+        location_text="Test Trail",
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    try:
+        # Extend by 30 minutes
+        result = extend_trip(trip.id, 30, background_tasks, user_id=user_id)
+
+        # Verify response structure
+        assert result["ok"] is True, "Response should indicate success"
+        assert "new_eta" in result, "Response MUST include new_eta field"
+        assert result["new_eta"] is not None, "new_eta should not be None"
+
+        # Verify new_eta is a valid ISO8601 string
+        new_eta_str = result["new_eta"]
+        assert isinstance(new_eta_str, str), "new_eta should be a string"
+
+        # Parse the ISO8601 string to verify format
+        from datetime import datetime as dt
+        try:
+            parsed_eta = dt.fromisoformat(new_eta_str.replace('Z', '+00:00'))
+        except ValueError:
+            pytest.fail(f"new_eta is not valid ISO8601 format: {new_eta_str}")
+
+        # Verify the new ETA is approximately 30 minutes after original
+        original_eta_utc = original_eta.replace(tzinfo=UTC) if original_eta.tzinfo is None else original_eta
+        expected_eta = original_eta_utc + timedelta(minutes=30)
+
+        # Allow 60 second tolerance
+        eta_diff = abs((parsed_eta - expected_eta).total_seconds())
+        assert eta_diff < 60, f"new_eta should be ~30 min after original ETA, diff={eta_diff}s"
+
+    finally:
+        cleanup_test_data(user_id)
+
+
+def test_extend_trip_new_eta_matches_database():
+    """Verify that the new_eta in response matches what's stored in the database."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    # Create active trip
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="ETA Match Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=1),
+        grace_min=30,
+        location_text="Test Trail",
+        contact1=contact_id,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+
+    try:
+        # Extend by 45 minutes
+        result = extend_trip(trip.id, 45, background_tasks, user_id=user_id)
+
+        assert "new_eta" in result, "Response should include new_eta"
+        response_eta_str = result["new_eta"]
+
+        # Get ETA from database
+        with db.engine.begin() as connection:
+            db_trip = connection.execute(
+                sqlalchemy.text("SELECT eta FROM trips WHERE id = :trip_id"),
+                {"trip_id": trip.id}
+            ).fetchone()
+
+        # Parse and compare
+        from datetime import datetime as dt
+        response_eta = dt.fromisoformat(response_eta_str.replace('Z', '+00:00'))
+        db_eta = db_trip.eta.replace(tzinfo=UTC) if db_trip.eta.tzinfo is None else db_trip.eta
+
+        # They should match exactly (or within 1 second due to timing)
+        eta_diff = abs((response_eta - db_eta).total_seconds())
+        assert eta_diff < 2, f"Response new_eta should match database ETA, diff={eta_diff}s"
+
+    finally:
+        cleanup_test_data(user_id)

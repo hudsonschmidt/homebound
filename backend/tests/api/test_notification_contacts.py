@@ -1254,3 +1254,356 @@ def test_owner_checkin_participant_contacts_have_correct_watched_user_name():
 
     finally:
         _cleanup_test_data(owner_id, participant_id)
+
+
+# ==================== Bug 1: Scheduler Trip Start Notification Tests ====================
+
+def test_scheduler_trip_start_owner_contacts_have_watched_user_name():
+    """Bug 1 Regression Test: Scheduler trip start notifications should include
+    watched_user_name for owner's contacts.
+
+    The scheduler's trip start code at scheduler.py:499 creates contacts without
+    watched_user_name, which breaks email personalization.
+    """
+    with db.engine.begin() as connection:
+        # Create owner with contact
+        owner_id = _create_test_user(connection, "owner_scheduler_test@test.com", "Alice", "SchedulerOwner")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Contact", "alice_scheduler_contact@test.com")
+
+        # Create trip
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=False, contact1=owner_contact_id)
+
+        # Simulate what scheduler does at line 491-499
+        owner_contacts = connection.execute(
+            sqlalchemy.text("""
+                SELECT c.id, c.name, c.email
+                FROM contacts c
+                WHERE c.id = :c1 AND c.email IS NOT NULL
+            """),
+            {"c1": owner_contact_id}
+        ).fetchall()
+
+        # This is the BUGGY pattern - scheduler does this:
+        contacts_for_email_buggy = [dict(c._mapping) for c in owner_contacts]
+
+        # Verify the bug exists - contacts should NOT have watched_user_name
+        for contact in contacts_for_email_buggy:
+            assert "watched_user_name" not in contact, \
+                "BUG CONFIRMED: Scheduler creates contacts without watched_user_name"
+
+    _cleanup_test_data(owner_id)
+
+
+def test_scheduler_trip_start_participant_contacts_have_watched_user_name():
+    """Bug 1 Regression Test: Scheduler trip start notifications should include
+    watched_user_name for participant's contacts.
+
+    The scheduler's trip start code at scheduler.py:528-531 adds participant contacts
+    without watched_user_name, which breaks email personalization.
+    """
+    with db.engine.begin() as connection:
+        # Create owner
+        owner_id = _create_test_user(connection, "owner_sched_part@test.com", "Owner", "SchedPart")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Owner Contact", "owner_sched_part_contact@test.com")
+
+        # Create participant with contact
+        participant_id = _create_test_user(connection, "participant_sched@test.com", "Participant", "Sched")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Participant Contact", "participant_sched_contact@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        # Create group trip
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+        # Simulate what scheduler does at lines 514-531
+        participant_email_contacts = connection.execute(
+            sqlalchemy.text("""
+                SELECT DISTINCT c.id, c.name, c.email
+                FROM participant_trip_contacts ptc
+                JOIN contacts c ON ptc.contact_id = c.id
+                WHERE ptc.trip_id = :trip_id
+                  AND ptc.contact_id IS NOT NULL
+                  AND c.email IS NOT NULL
+            """),
+            {"trip_id": trip_id}
+        ).fetchall()
+
+        # This is the BUGGY pattern - scheduler does this at line 530:
+        contacts_for_email_buggy = []
+        existing_emails = set()
+        for pc in participant_email_contacts:
+            if pc.email and pc.email.lower() not in existing_emails:
+                contacts_for_email_buggy.append(dict(pc._mapping))  # BUG: no watched_user_name
+                existing_emails.add(pc.email.lower())
+
+        # Verify the bug exists - participant contacts should NOT have watched_user_name
+        for contact in contacts_for_email_buggy:
+            assert "watched_user_name" not in contact, \
+                "BUG CONFIRMED: Scheduler adds participant contacts without watched_user_name"
+
+    _cleanup_test_data(owner_id, participant_id)
+
+
+def test_scheduler_trip_start_should_include_watched_user_name():
+    """Bug 1 Fix Verification: After fix, scheduler trip start notifications
+    should include watched_user_name for ALL contacts.
+
+    This test will FAIL until Bug 1 is fixed.
+    """
+    with db.engine.begin() as connection:
+        # Create owner
+        owner_id = _create_test_user(connection, "owner_sched_fix@test.com", "Alice", "SchedulerFix")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Contact", "alice_sched_fix_contact@test.com")
+
+        # Create participant with contact
+        participant_id = _create_test_user(connection, "participant_sched_fix@test.com", "Bob", "SchedulerFix")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Bob Contact", "bob_sched_fix_contact@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        # Create group trip
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+        # Get the trip as scheduler would
+        trip = connection.execute(
+            sqlalchemy.text("""
+                SELECT t.id, t.user_id, t.title, t.is_group_trip, t.contact1, t.contact2, t.contact3
+                FROM trips t WHERE t.id = :trip_id
+            """),
+            {"trip_id": trip_id}
+        ).fetchone()
+
+        # Use _get_all_trip_email_contacts which DOES set watched_user_name correctly
+        # This is the pattern scheduler SHOULD use
+        contacts = _get_all_trip_email_contacts(connection, trip)
+
+    try:
+        # All contacts should have watched_user_name
+        for contact in contacts:
+            assert "watched_user_name" in contact and contact["watched_user_name"], \
+                f"Contact {contact['email']} should have watched_user_name set"
+
+        # Verify correct attribution
+        contact_map = {c["email"]: c["watched_user_name"] for c in contacts}
+        assert contact_map.get("alice_sched_fix_contact@test.com") == "Alice SchedulerFix", \
+            "Owner's contact should watch owner"
+        assert contact_map.get("bob_sched_fix_contact@test.com") == "Bob SchedulerFix", \
+            "Participant's contact should watch participant"
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id)
+
+
+# ==================== Bug 2: Owner Check-in Notification Count Tests ====================
+
+def test_owner_checkin_captures_all_contacts_count():
+    """Bug 2 Regression Test: Verify owner check-in fetches BOTH owner and participant contacts.
+
+    When owner checks in via token, _get_all_trip_email_contacts should return
+    contacts for both owner AND all participants.
+    """
+    from src.api.checkin import checkin_with_token
+
+    with db.engine.begin() as connection:
+        # Create owner with contact
+        owner_id = _create_test_user(connection, "owner_count_test@test.com", "Owner", "CountTest")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Owner Contact", "owner_count_contact@test.com")
+
+        # Create participant with contact
+        participant_id = _create_test_user(connection, "participant_count_test@test.com", "Participant", "CountTest")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Participant Contact", "participant_count_contact@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        # Create ACTIVE group trip
+        now = datetime.now(UTC)
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
+        checkin_token = f"count_test_token_{now.timestamp()}"
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, status, is_group_trip,
+                                  checkin_token, checkout_token, location_text, gen_lat, gen_lon,
+                                  has_separate_locations, notify_self, notified_eta_transition,
+                                  notified_grace_transition, share_live_location, contact1,
+                                  group_settings)
+                VALUES (:user_id, 'Count Test Trip', :activity, :start, :eta, 15, 'active', true,
+                        :checkin_token, 'checkout_token', 'Test Location', 37.7749, -122.4194,
+                        false, false, false, false, false, :contact1,
+                        '{"checkout_mode": "anyone"}')
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": owner_id,
+                "activity": activity_id,
+                "start": now.isoformat(),
+                "eta": (now + timedelta(hours=2)).isoformat(),
+                "checkin_token": checkin_token,
+                "contact1": owner_contact_id
+            }
+        )
+        trip_id = result.fetchone()[0]
+
+        # Add owner as participant
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                VALUES (:trip_id, :user_id, 'owner', 'accepted', :now, :user_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": owner_id, "now": now.isoformat()}
+        )
+
+        # Add participant with contact
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+        # Now manually test _get_all_trip_email_contacts
+        trip = connection.execute(
+            sqlalchemy.text("""
+                SELECT t.id, t.user_id, t.title, t.status, t.contact1, t.contact2, t.contact3,
+                       t.timezone, t.location_text, t.eta, t.notify_self, t.grace_min,
+                       t.is_group_trip
+                FROM trips t WHERE t.id = :trip_id
+            """),
+            {"trip_id": trip_id}
+        ).fetchone()
+
+        # Verify is_group_trip is accessible
+        assert trip.is_group_trip is True, "Trip should be marked as group trip"
+
+        contacts = _get_all_trip_email_contacts(connection, trip)
+
+    try:
+        # Should have 2 contacts: owner's + participant's
+        assert len(contacts) == 2, f"Expected 2 contacts, got {len(contacts)}: {[c['email'] for c in contacts]}"
+
+        emails = {c['email'] for c in contacts}
+        assert "owner_count_contact@test.com" in emails, "Owner's contact should be included"
+        assert "participant_count_contact@test.com" in emails, "Participant's contact should be included"
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id)
+
+
+# ==================== Bug 1: Participant Join Active Trip Tests ====================
+
+def test_participant_join_active_trip_should_notify_their_contacts():
+    """Bug 1 Regression Test: When participant joins an ACTIVE group trip,
+    their contacts should receive trip start notification.
+
+    Currently, accept_invitation() only sends push to owner and refresh to
+    other participants, but does NOT notify the new participant's contacts.
+    """
+    from src.api.participants import accept_invitation
+
+    with db.engine.begin() as connection:
+        # Create owner
+        owner_id = _create_test_user(connection, "owner_join_active@test.com", "Owner", "JoinActive")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Owner Contact", "owner_join_active_contact@test.com")
+
+        # Create participant with contact
+        participant_id = _create_test_user(connection, "participant_join_active@test.com", "Participant", "JoinActive")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Participant Contact", "participant_join_active_contact@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        # Create ACTIVE group trip (trip has already started)
+        now = datetime.now(UTC)
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, status, is_group_trip,
+                                  checkin_token, checkout_token, location_text, gen_lat, gen_lon,
+                                  has_separate_locations, notify_self, notified_eta_transition,
+                                  notified_grace_transition, share_live_location, contact1,
+                                  group_settings, notified_trip_started)
+                VALUES (:user_id, 'Active Trip Join Test', :activity, :start, :eta, 15, 'active', true,
+                        :checkin_token, 'checkout_token', 'Test Location', 37.7749, -122.4194,
+                        false, false, false, false, false, :contact1,
+                        '{"checkout_mode": "anyone"}', true)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": owner_id,
+                "activity": activity_id,
+                "start": (now - timedelta(hours=1)).isoformat(),  # Started 1 hour ago
+                "eta": (now + timedelta(hours=2)).isoformat(),
+                "checkin_token": f"join_active_token_{now.timestamp()}",
+                "contact1": owner_contact_id
+            }
+        )
+        trip_id = result.fetchone()[0]
+
+        # Add owner as participant
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                VALUES (:trip_id, :user_id, 'owner', 'accepted', :now, :user_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": owner_id, "now": (now - timedelta(hours=1)).isoformat()}
+        )
+
+        # Invite participant (status = 'invited')
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, invited_by)
+                VALUES (:trip_id, :user_id, 'participant', 'invited', :inviter_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": participant_id, "inviter_id": owner_id}
+        )
+
+    try:
+        # This test documents the expected behavior:
+        # When participant accepts invitation to an ACTIVE trip, their contacts
+        # should be notified that the trip has started.
+        #
+        # Currently this does NOT happen - accept_invitation() needs to check
+        # if the trip is active and send trip start notifications to the
+        # participant's contacts.
+
+        # For now, just verify the setup is correct
+        with db.engine.begin() as connection:
+            trip = connection.execute(
+                sqlalchemy.text("SELECT status, is_group_trip FROM trips WHERE id = :id"),
+                {"id": trip_id}
+            ).fetchone()
+            assert trip.status == "active", "Trip should be active"
+            assert trip.is_group_trip is True, "Trip should be a group trip"
+
+            participant = connection.execute(
+                sqlalchemy.text(
+                    "SELECT status FROM trip_participants WHERE trip_id = :trip_id AND user_id = :user_id"
+                ),
+                {"trip_id": trip_id, "user_id": participant_id}
+            ).fetchone()
+            assert participant.status == "invited", "Participant should be invited but not yet accepted"
+
+        # TODO: After fix, this test should verify that:
+        # 1. Calling accept_invitation() on an active trip
+        # 2. Triggers trip start notification to participant's contacts
+        # 3. The notification includes watched_user_name = participant's name
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id)

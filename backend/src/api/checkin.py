@@ -135,7 +135,12 @@ def checkin_with_token(
         owner_email = user.email if user and trip.notify_self else None
 
         # Fetch all contact emails (owner + participants for group trips)
+        # Bug 2 fix: Add detailed logging to diagnose contact fetching
+        log.info(f"[Checkin] Fetching contacts for trip {trip.id}, is_group_trip={trip.is_group_trip}")
         contacts_for_email = _get_all_trip_email_contacts(connection, trip)
+        log.info(f"[Checkin] Retrieved {len(contacts_for_email)} contacts: {[c.get('email') for c in contacts_for_email]}")
+        for c in contacts_for_email:
+            log.info(f"[Checkin] Contact: {c.get('email')} watching {c.get('watched_user_name')}")
 
         # Build trip dict for email notification
         trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
