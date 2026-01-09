@@ -148,7 +148,8 @@ struct CreatePlanView: View {
                                     groupParticipants: $groupParticipants,
                                     checkoutMode: $checkoutMode,
                                     voteThreshold: $voteThreshold,
-                                    shareLocationsBetweenParticipants: $shareLocationsBetweenParticipants
+                                    shareLocationsBetweenParticipants: $shareLocationsBetweenParticipants,
+                                    selectedFriends: $selectedFriends
                                 )
                                 .environmentObject(session)
                             } else {
@@ -2664,9 +2665,16 @@ struct Step4GroupSettings: View {
     @Binding var checkoutMode: String
     @Binding var voteThreshold: Double
     @Binding var shareLocationsBetweenParticipants: Bool
+    @Binding var selectedFriends: [Friend]  // Friends already selected as safety contacts
 
     @State private var showParticipantPicker = false
     @State private var showGroupTripInfo = false
+
+    // Filter out friends already selected as safety contacts
+    var availableFriendsForInvite: [Friend] {
+        let safetyContactIds = Set(selectedFriends.map { $0.user_id })
+        return session.friends.filter { !safetyContactIds.contains($0.user_id) }
+    }
 
     var body: some View {
         ScrollView {
@@ -2833,8 +2841,14 @@ struct Step4GroupSettings: View {
         .sheet(isPresented: $showParticipantPicker) {
             GroupParticipantPicker(
                 selectedParticipants: $groupParticipants,
-                friends: session.friends
+                friends: availableFriendsForInvite
             )
+        }
+        .onAppear {
+            // Remove any group participants who are now safety contacts
+            // (handles case where user navigated back and added friend as safety contact)
+            let safetyContactIds = Set(selectedFriends.map { $0.user_id })
+            groupParticipants.removeAll { safetyContactIds.contains($0.user_id) }
         }
     }
 
