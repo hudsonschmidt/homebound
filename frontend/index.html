@@ -165,7 +165,7 @@
                 activities.sort((a, b) => a.order - b.order);
 
                 container.innerHTML = activities.map(activity => {
-                    const glowColor = activity.colors?.glow || '#6C63FF';
+                    const glowColor = activity.colors?.primary || '#6C63FF';
                     return `
                         <div class="activity" style="--glow-color: ${glowColor};">
                             <span class="activity-icon">${activity.icon}</span>
