@@ -1617,3 +1617,930 @@ def test_participant_join_active_trip_should_notify_their_contacts():
 
     finally:
         _cleanup_test_data(owner_id, participant_id)
+
+
+# ==================== Check-In Notification Parity Tests ====================
+# These tests verify that owner check-in and participant check-in
+# produce IDENTICAL contact lists for email notifications.
+
+def _add_owner_friend_contact(connection, trip_id: int, friend_user_id: int, position: int = 1):
+    """Add a friend safety contact for the owner on a trip."""
+    connection.execute(
+        sqlalchemy.text(
+            """
+            INSERT INTO trip_safety_contacts (trip_id, friend_user_id, position)
+            VALUES (:trip_id, :friend_user_id, :position)
+            ON CONFLICT DO NOTHING
+            """
+        ),
+        {"trip_id": trip_id, "friend_user_id": friend_user_id, "position": position}
+    )
+
+
+def _add_participant_friend_contact(connection, trip_id: int, participant_user_id: int, friend_user_id: int, position: int = 2):
+    """Add a friend safety contact for a participant on a trip.
+
+    Note: Uses position=2 by default to avoid conflict with email contacts which use position=1.
+    """
+    connection.execute(
+        sqlalchemy.text(
+            """
+            INSERT INTO participant_trip_contacts (trip_id, participant_user_id, friend_user_id, position)
+            VALUES (:trip_id, :participant_user_id, :friend_user_id, :position)
+            ON CONFLICT DO NOTHING
+            """
+        ),
+        {"trip_id": trip_id, "participant_user_id": participant_user_id, "friend_user_id": friend_user_id, "position": position}
+    )
+
+
+def _build_owner_checkin_contacts(connection, trip_id: int, owner_name: str):
+    """
+    Build the contact list as owner token check-in does.
+    This mirrors the logic in checkin.py checkin_with_token().
+    """
+    contacts_for_email = []
+
+    # Step 1: Get owner's email contacts from trips.contact1/2/3
+    owner_email_contacts = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT c.id, c.name, c.email
+            FROM contacts c
+            JOIN trips t ON (c.id = t.contact1 OR c.id = t.contact2 OR c.id = t.contact3)
+            WHERE t.id = :trip_id AND c.email IS NOT NULL
+            """
+        ),
+        {"trip_id": trip_id}
+    ).fetchall()
+
+    for c in owner_email_contacts:
+        contacts_for_email.append({
+            "id": c.id,
+            "name": c.name,
+            "email": c.email,
+            "watched_user_name": owner_name
+        })
+
+    # Step 2: Get ALL accepted participants and their contacts
+    accepted_participants = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT tp.user_id,
+                   COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
+            FROM trip_participants tp
+            JOIN users u ON tp.user_id = u.id
+            WHERE tp.trip_id = :trip_id
+              AND tp.status = 'accepted'
+              AND tp.role = 'participant'
+            """
+        ),
+        {"trip_id": trip_id}
+    ).fetchall()
+
+    for participant in accepted_participants:
+        participant_name = participant.participant_name.strip() if participant.participant_name else "Participant"
+        participant_user_id = participant.user_id
+
+        # Get participant's email contacts
+        participant_email_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT c.id, c.name, c.email
+                FROM participant_trip_contacts ptc
+                JOIN contacts c ON ptc.contact_id = c.id
+                WHERE ptc.trip_id = :trip_id
+                  AND ptc.participant_user_id = :participant_user_id
+                  AND ptc.contact_id IS NOT NULL
+                  AND c.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id, "participant_user_id": participant_user_id}
+        ).fetchall()
+
+        for pc in participant_email_contacts:
+            if pc.email:
+                contacts_for_email.append({
+                    "id": pc.id,
+                    "name": pc.name,
+                    "email": pc.email,
+                    "watched_user_name": participant_name
+                })
+
+        # Get participant's friend contacts
+        participant_friend_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend.id as id,
+                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                       friend.email as email
+                FROM participant_trip_contacts ptc
+                JOIN users friend ON ptc.friend_user_id = friend.id
+                WHERE ptc.trip_id = :trip_id
+                  AND ptc.participant_user_id = :participant_user_id
+                  AND ptc.friend_user_id IS NOT NULL
+                  AND friend.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id, "participant_user_id": participant_user_id}
+        ).fetchall()
+
+        for pfc in participant_friend_contacts:
+            if pfc.email:
+                contacts_for_email.append({
+                    "id": -pfc.id,
+                    "name": pfc.name or "Friend",
+                    "email": pfc.email,
+                    "watched_user_name": participant_name
+                })
+
+    # Step 3: Get owner's friend safety contacts
+    owner_friend_contacts = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT friend.id as id,
+                   TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                   friend.email as email
+            FROM trip_safety_contacts tsc
+            JOIN users friend ON tsc.friend_user_id = friend.id
+            WHERE tsc.trip_id = :trip_id
+              AND tsc.friend_user_id IS NOT NULL
+              AND friend.email IS NOT NULL
+            ORDER BY tsc.position
+            """
+        ),
+        {"trip_id": trip_id}
+    ).fetchall()
+
+    for ofc in owner_friend_contacts:
+        if ofc.email:
+            contacts_for_email.append({
+                "id": -ofc.id,
+                "name": ofc.name or "Friend",
+                "email": ofc.email,
+                "watched_user_name": owner_name
+            })
+
+    return contacts_for_email
+
+
+def _build_participant_checkin_contacts(connection, trip_id: int, checker_user_id: int, checker_name: str, owner_name: str):
+    """
+    Build the contact list as participant authenticated check-in does.
+    This mirrors the logic in participants.py participant_checkin().
+
+    Now includes ALL participants' contacts, not just the checking-in participant.
+    No deduplication - emails are personalized to watched_user_name so same email
+    watching multiple users should receive multiple emails.
+    """
+    contacts_for_email = []
+
+    # Get checking-in participant's email safety contacts
+    participant_email_contacts = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT c.id, c.name, c.email
+            FROM participant_trip_contacts ptc
+            JOIN contacts c ON ptc.contact_id = c.id
+            WHERE ptc.trip_id = :trip_id
+            AND ptc.participant_user_id = :user_id
+            AND c.email IS NOT NULL
+            """
+        ),
+        {"trip_id": trip_id, "user_id": checker_user_id}
+    ).fetchall()
+
+    for c in participant_email_contacts:
+        contacts_for_email.append({**dict(c._mapping), "watched_user_name": checker_name})
+
+    # Get trip owner's email contacts
+    owner_email_contacts = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT c.id, c.name, c.email
+            FROM contacts c
+            JOIN trips t ON (c.id = t.contact1 OR c.id = t.contact2 OR c.id = t.contact3)
+            WHERE t.id = :trip_id AND c.email IS NOT NULL
+            """
+        ),
+        {"trip_id": trip_id}
+    ).fetchall()
+
+    for oc in owner_email_contacts:
+        if oc.email:
+            contacts_for_email.append({
+                **dict(oc._mapping),
+                "watched_user_name": owner_name
+            })
+
+    # Get checking-in participant's friend contacts WITH email
+    participant_friend_email_contacts = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT friend.id as id,
+                   TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                   friend.email as email
+            FROM participant_trip_contacts ptc
+            JOIN users friend ON ptc.friend_user_id = friend.id
+            WHERE ptc.trip_id = :trip_id
+            AND ptc.participant_user_id = :user_id
+            AND ptc.friend_user_id IS NOT NULL
+            AND friend.email IS NOT NULL
+            """
+        ),
+        {"trip_id": trip_id, "user_id": checker_user_id}
+    ).fetchall()
+
+    for pfc in participant_friend_email_contacts:
+        if pfc.email:
+            contacts_for_email.append({
+                "id": -pfc.id,
+                "name": pfc.name or "Friend",
+                "email": pfc.email,
+                "watched_user_name": checker_name
+            })
+
+    # Get owner's friend contacts WITH email
+    owner_friend_email_contacts = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT friend.id as id,
+                   TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                   friend.email as email
+            FROM trip_safety_contacts tsc
+            JOIN users friend ON tsc.friend_user_id = friend.id
+            WHERE tsc.trip_id = :trip_id
+            AND tsc.friend_user_id IS NOT NULL
+            AND friend.email IS NOT NULL
+            """
+        ),
+        {"trip_id": trip_id}
+    ).fetchall()
+
+    for ofc in owner_friend_email_contacts:
+        if ofc.email:
+            contacts_for_email.append({
+                "id": -ofc.id,
+                "name": ofc.name or "Friend",
+                "email": ofc.email,
+                "watched_user_name": owner_name
+            })
+
+    # Get ALL other accepted participants and their contacts
+    other_accepted_participants = connection.execute(
+        sqlalchemy.text(
+            """
+            SELECT tp.user_id,
+                   COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
+            FROM trip_participants tp
+            JOIN users u ON tp.user_id = u.id
+            WHERE tp.trip_id = :trip_id
+              AND tp.status = 'accepted'
+              AND tp.role = 'participant'
+              AND tp.user_id != :checking_in_user_id
+            """
+        ),
+        {"trip_id": trip_id, "checking_in_user_id": checker_user_id}
+    ).fetchall()
+
+    for other_participant in other_accepted_participants:
+        other_participant_name = other_participant.participant_name.strip() if other_participant.participant_name else "Participant"
+        other_participant_user_id = other_participant.user_id
+
+        # Get other participant's email contacts
+        other_participant_email_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT c.id, c.name, c.email
+                FROM participant_trip_contacts ptc
+                JOIN contacts c ON ptc.contact_id = c.id
+                WHERE ptc.trip_id = :trip_id
+                  AND ptc.participant_user_id = :participant_user_id
+                  AND ptc.contact_id IS NOT NULL
+                  AND c.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id, "participant_user_id": other_participant_user_id}
+        ).fetchall()
+
+        for opc in other_participant_email_contacts:
+            if opc.email:
+                contacts_for_email.append({
+                    "id": opc.id,
+                    "name": opc.name,
+                    "email": opc.email,
+                    "watched_user_name": other_participant_name
+                })
+
+        # Get other participant's friend contacts
+        other_participant_friend_contacts = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT friend.id as id,
+                       TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                       friend.email as email
+                FROM participant_trip_contacts ptc
+                JOIN users friend ON ptc.friend_user_id = friend.id
+                WHERE ptc.trip_id = :trip_id
+                  AND ptc.participant_user_id = :participant_user_id
+                  AND ptc.friend_user_id IS NOT NULL
+                  AND friend.email IS NOT NULL
+                """
+            ),
+            {"trip_id": trip_id, "participant_user_id": other_participant_user_id}
+        ).fetchall()
+
+        for opfc in other_participant_friend_contacts:
+            if opfc.email:
+                contacts_for_email.append({
+                    "id": -opfc.id,
+                    "name": opfc.name or "Friend",
+                    "email": opfc.email,
+                    "watched_user_name": other_participant_name
+                })
+
+    return contacts_for_email
+
+
+def _normalize_contacts(contacts):
+    """Normalize contact list for comparison - sort by email and extract key fields."""
+    return sorted(
+        [(c['email'].lower(), c['watched_user_name']) for c in contacts],
+        key=lambda x: x[0]
+    )
+
+
+def test_owner_and_participant_checkin_notify_same_contacts_basic():
+    """
+    CRITICAL TEST: Verify owner check-in and participant check-in
+    produce the same contact list for email notifications.
+
+    Basic case: 1 owner with 1 email contact, 1 participant with 1 email contact.
+    """
+    with db.engine.begin() as connection:
+        # Create owner with email contact
+        owner_id = _create_test_user(connection, "owner_parity_basic@test.com", "Alice", "Owner")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_emergency@test.com")
+
+        # Create participant with email contact
+        participant_id = _create_test_user(connection, "participant_parity_basic@test.com", "Bob", "Participant")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Bob Emergency", "bob_emergency@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        # Create group trip
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+        # Build contact lists for both check-in paths
+        owner_checkin_contacts = _build_owner_checkin_contacts(connection, trip_id, "Alice Owner")
+        participant_checkin_contacts = _build_participant_checkin_contacts(
+            connection, trip_id, participant_id, "Bob Participant", "Alice Owner"
+        )
+
+    try:
+        # Both should have 2 contacts
+        assert len(owner_checkin_contacts) == 2, f"Owner check-in should notify 2 contacts, got {len(owner_checkin_contacts)}"
+        assert len(participant_checkin_contacts) == 2, f"Participant check-in should notify 2 contacts, got {len(participant_checkin_contacts)}"
+
+        # Normalize and compare
+        owner_normalized = _normalize_contacts(owner_checkin_contacts)
+        participant_normalized = _normalize_contacts(participant_checkin_contacts)
+
+        assert owner_normalized == participant_normalized, (
+            f"Contact lists should be identical!\n"
+            f"Owner check-in: {owner_normalized}\n"
+            f"Participant check-in: {participant_normalized}"
+        )
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id)
+
+
+def test_owner_and_participant_checkin_notify_same_contacts_with_friends():
+    """
+    CRITICAL TEST: Verify owner and participant check-in produce same contact list
+    when BOTH have friend safety contacts (not just email contacts).
+    """
+    with db.engine.begin() as connection:
+        # Create owner with email contact
+        owner_id = _create_test_user(connection, "owner_parity_friends@test.com", "Alice", "Owner")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_emergency_friends@test.com")
+
+        # Create participant with email contact
+        participant_id = _create_test_user(connection, "participant_parity_friends@test.com", "Bob", "Participant")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Bob Emergency", "bob_emergency_friends@test.com")
+
+        # Create friends who will be safety contacts
+        owner_friend_id = _create_test_user(connection, "owner_friend@test.com", "Owner", "Friend")
+        participant_friend_id = _create_test_user(connection, "participant_friend@test.com", "Participant", "Friend")
+
+        _create_friendship(connection, owner_id, participant_id)
+        _create_friendship(connection, owner_id, owner_friend_id)
+        _create_friendship(connection, participant_id, participant_friend_id)
+
+        # Create group trip
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+        # Add friend safety contacts
+        _add_owner_friend_contact(connection, trip_id, owner_friend_id, position=1)
+        _add_participant_friend_contact(connection, trip_id, participant_id, participant_friend_id)
+
+        # Build contact lists
+        owner_checkin_contacts = _build_owner_checkin_contacts(connection, trip_id, "Alice Owner")
+        participant_checkin_contacts = _build_participant_checkin_contacts(
+            connection, trip_id, participant_id, "Bob Participant", "Alice Owner"
+        )
+
+    try:
+        # Both should have 4 contacts: owner email + owner friend + participant email + participant friend
+        assert len(owner_checkin_contacts) == 4, f"Owner check-in should notify 4 contacts, got {len(owner_checkin_contacts)}: {[c['email'] for c in owner_checkin_contacts]}"
+        assert len(participant_checkin_contacts) == 4, f"Participant check-in should notify 4 contacts, got {len(participant_checkin_contacts)}: {[c['email'] for c in participant_checkin_contacts]}"
+
+        # Normalize and compare
+        owner_normalized = _normalize_contacts(owner_checkin_contacts)
+        participant_normalized = _normalize_contacts(participant_checkin_contacts)
+
+        assert owner_normalized == participant_normalized, (
+            f"Contact lists should be identical!\n"
+            f"Owner check-in: {owner_normalized}\n"
+            f"Participant check-in: {participant_normalized}"
+        )
+
+        # Verify all 4 emails are present
+        owner_emails = {c['email'].lower() for c in owner_checkin_contacts}
+        assert "alice_emergency_friends@test.com" in owner_emails, "Owner's email contact missing"
+        assert "bob_emergency_friends@test.com" in owner_emails, "Participant's email contact missing"
+        assert "owner_friend@test.com" in owner_emails, "Owner's friend contact missing"
+        assert "participant_friend@test.com" in owner_emails, "Participant's friend contact missing"
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id, owner_friend_id, participant_friend_id)
+
+
+def test_owner_and_participant_checkin_have_complete_parity_multiple_participants():
+    """
+    CRITICAL PARITY TEST: With multiple participants, verify that:
+    - Owner check-in notifies ALL contacts (6 total)
+    - Participant check-in ALSO notifies ALL contacts (6 total)
+    - The contact lists are IDENTICAL
+
+    This ensures every group check-in notifies everyone regardless of who checks in.
+    """
+    with db.engine.begin() as connection:
+        # Create owner
+        owner_id = _create_test_user(connection, "owner_full_parity@test.com", "Alice", "Owner")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_full_parity@test.com")
+        owner_friend_id = _create_test_user(connection, "owner_friend_full_parity@test.com", "Alice", "Friend")
+
+        # Create 2 participants with contacts
+        p1_id = _create_test_user(connection, "p1_full_parity@test.com", "Bob", "One")
+        p1_contact_id = _create_test_contact(connection, p1_id, "Bob Emergency", "bob_full_parity@test.com")
+        p1_friend_id = _create_test_user(connection, "p1_friend_full_parity@test.com", "Bob", "Friend")
+
+        p2_id = _create_test_user(connection, "p2_full_parity@test.com", "Carol", "Two")
+        p2_contact_id = _create_test_contact(connection, p2_id, "Carol Emergency", "carol_full_parity@test.com")
+        p2_friend_id = _create_test_user(connection, "p2_friend_full_parity@test.com", "Carol", "Friend")
+
+        # Create friendships
+        _create_friendship(connection, owner_id, p1_id)
+        _create_friendship(connection, owner_id, p2_id)
+        _create_friendship(connection, owner_id, owner_friend_id)
+        _create_friendship(connection, p1_id, p1_friend_id)
+        _create_friendship(connection, p2_id, p2_friend_id)
+
+        # Create group trip
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+
+        # Add participants
+        _add_participant_to_trip(connection, trip_id, p1_id, owner_id)
+        _add_participant_to_trip(connection, trip_id, p2_id, owner_id)
+
+        # Add email contacts
+        _add_participant_contact(connection, trip_id, p1_id, p1_contact_id)
+        _add_participant_contact(connection, trip_id, p2_id, p2_contact_id)
+
+        # Add friend contacts
+        _add_owner_friend_contact(connection, trip_id, owner_friend_id, position=1)
+        _add_participant_friend_contact(connection, trip_id, p1_id, p1_friend_id)
+        _add_participant_friend_contact(connection, trip_id, p2_id, p2_friend_id)
+
+        # Build contact lists
+        owner_checkin_contacts = _build_owner_checkin_contacts(connection, trip_id, "Alice Owner")
+        p1_checkin_contacts = _build_participant_checkin_contacts(connection, trip_id, p1_id, "Bob One", "Alice Owner")
+
+    try:
+        # Both should have ALL 6 contacts
+        assert len(owner_checkin_contacts) == 6, f"Owner check-in should notify 6 contacts, got {len(owner_checkin_contacts)}: {[c['email'] for c in owner_checkin_contacts]}"
+        assert len(p1_checkin_contacts) == 6, f"P1 check-in should notify 6 contacts, got {len(p1_checkin_contacts)}: {[c['email'] for c in p1_checkin_contacts]}"
+
+        # Normalize and compare - they should be IDENTICAL
+        owner_normalized = _normalize_contacts(owner_checkin_contacts)
+        p1_normalized = _normalize_contacts(p1_checkin_contacts)
+
+        assert owner_normalized == p1_normalized, (
+            f"Contact lists should be IDENTICAL!\n"
+            f"Owner check-in: {owner_normalized}\n"
+            f"P1 check-in: {p1_normalized}"
+        )
+
+        # Verify all 6 emails are present
+        emails = {c['email'].lower() for c in owner_checkin_contacts}
+        expected_emails = {
+            "alice_full_parity@test.com",       # Owner's email contact
+            "owner_friend_full_parity@test.com", # Owner's friend
+            "bob_full_parity@test.com",          # P1's email contact
+            "p1_friend_full_parity@test.com",    # P1's friend
+            "carol_full_parity@test.com",        # P2's email contact
+            "p2_friend_full_parity@test.com",    # P2's friend
+        }
+        assert emails == expected_emails, f"Expected {expected_emails}, got {emails}"
+
+    finally:
+        _cleanup_test_data(owner_id, p1_id, p2_id, owner_friend_id, p1_friend_id, p2_friend_id)
+
+
+def test_owner_checkin_notifies_all_participants_contacts():
+    """
+    Test that owner check-in notifies ALL contacts across all participants.
+    Owner check-in is comprehensive - it notifies everyone watching anyone in the trip.
+    """
+    with db.engine.begin() as connection:
+        # Create owner
+        owner_id = _create_test_user(connection, "owner_multi_parity@test.com", "Alice", "Owner")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_multi_emergency@test.com")
+
+        # Create 2 participants
+        p1_id = _create_test_user(connection, "p1_multi_parity@test.com", "Bob", "One")
+        p1_contact_id = _create_test_contact(connection, p1_id, "Bob Emergency", "bob_one_emergency@test.com")
+        p1_friend_id = _create_test_user(connection, "p1_friend_multi@test.com", "Bob", "Friend")
+
+        p2_id = _create_test_user(connection, "p2_multi_parity@test.com", "Carol", "Two")
+        p2_contact_id = _create_test_contact(connection, p2_id, "Carol Emergency", "carol_two_emergency@test.com")
+        p2_friend_id = _create_test_user(connection, "p2_friend_multi@test.com", "Carol", "Friend")
+
+        # Owner's friend
+        owner_friend_id = _create_test_user(connection, "owner_friend_multi@test.com", "Alice", "Friend")
+
+        # Create friendships
+        _create_friendship(connection, owner_id, p1_id)
+        _create_friendship(connection, owner_id, p2_id)
+        _create_friendship(connection, owner_id, owner_friend_id)
+        _create_friendship(connection, p1_id, p1_friend_id)
+        _create_friendship(connection, p2_id, p2_friend_id)
+
+        # Create group trip
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+
+        # Add participants
+        _add_participant_to_trip(connection, trip_id, p1_id, owner_id)
+        _add_participant_to_trip(connection, trip_id, p2_id, owner_id)
+
+        # Add email contacts
+        _add_participant_contact(connection, trip_id, p1_id, p1_contact_id)
+        _add_participant_contact(connection, trip_id, p2_id, p2_contact_id)
+
+        # Add friend contacts (use default position=2 for participant friends to avoid conflict with email contacts)
+        _add_owner_friend_contact(connection, trip_id, owner_friend_id, position=1)
+        _add_participant_friend_contact(connection, trip_id, p1_id, p1_friend_id)
+        _add_participant_friend_contact(connection, trip_id, p2_id, p2_friend_id)
+
+        owner_checkin_contacts = _build_owner_checkin_contacts(connection, trip_id, "Alice Owner")
+
+    try:
+        # Owner check-in should see ALL 6 contacts:
+        # - Owner email contact
+        # - Owner friend contact
+        # - P1 email contact
+        # - P1 friend contact
+        # - P2 email contact
+        # - P2 friend contact
+        assert len(owner_checkin_contacts) == 6, f"Owner check-in should notify 6 contacts, got {len(owner_checkin_contacts)}: {[c['email'] for c in owner_checkin_contacts]}"
+
+        # Verify all emails are present
+        emails = {c['email'].lower() for c in owner_checkin_contacts}
+        assert "alice_multi_emergency@test.com" in emails, "Owner's email contact missing"
+        assert "owner_friend_multi@test.com" in emails, "Owner's friend contact missing"
+        assert "bob_one_emergency@test.com" in emails, "P1's email contact missing"
+        assert "p1_friend_multi@test.com" in emails, "P1's friend contact missing"
+        assert "carol_two_emergency@test.com" in emails, "P2's email contact missing"
+        assert "p2_friend_multi@test.com" in emails, "P2's friend contact missing"
+
+    finally:
+        _cleanup_test_data(owner_id, p1_id, p2_id, owner_friend_id, p1_friend_id, p2_friend_id)
+
+
+def test_participant_checkin_notifies_all_contacts():
+    """
+    Test that participant check-in notifies ALL contacts in the group:
+    - The checking-in participant's contacts (watching them)
+    - The owner's contacts (watching the owner)
+    - ALL other participants' contacts too
+
+    This is the same set of contacts as owner check-in - complete parity.
+    """
+    with db.engine.begin() as connection:
+        # Create owner
+        owner_id = _create_test_user(connection, "owner_p_checkin@test.com", "Alice", "Owner")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_p_checkin@test.com")
+        owner_friend_id = _create_test_user(connection, "owner_friend_p_checkin@test.com", "Alice", "Friend")
+
+        # Create participant
+        participant_id = _create_test_user(connection, "participant_p_checkin@test.com", "Bob", "Participant")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Bob Emergency", "bob_p_checkin@test.com")
+        participant_friend_id = _create_test_user(connection, "participant_friend_p_checkin@test.com", "Bob", "Friend")
+
+        _create_friendship(connection, owner_id, participant_id)
+        _create_friendship(connection, owner_id, owner_friend_id)
+        _create_friendship(connection, participant_id, participant_friend_id)
+
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+        _add_owner_friend_contact(connection, trip_id, owner_friend_id, position=1)
+        _add_participant_friend_contact(connection, trip_id, participant_id, participant_friend_id)
+
+        participant_checkin_contacts = _build_participant_checkin_contacts(
+            connection, trip_id, participant_id, "Bob Participant", "Alice Owner"
+        )
+
+    try:
+        # Participant check-in should notify ALL 4 contacts (same as owner check-in):
+        # - Owner's email contact (watching owner)
+        # - Owner's friend contact (watching owner)
+        # - Participant's email contact (watching participant)
+        # - Participant's friend contact (watching participant)
+        assert len(participant_checkin_contacts) == 4, f"Participant check-in should notify 4 contacts, got {len(participant_checkin_contacts)}: {[c['email'] for c in participant_checkin_contacts]}"
+
+        emails = {c['email'].lower() for c in participant_checkin_contacts}
+        assert "bob_p_checkin@test.com" in emails, "Participant's email contact missing"
+        assert "participant_friend_p_checkin@test.com" in emails, "Participant's friend contact missing"
+        assert "alice_p_checkin@test.com" in emails, "Owner's email contact missing"
+        assert "owner_friend_p_checkin@test.com" in emails, "Owner's friend contact missing"
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id, owner_friend_id, participant_friend_id)
+
+
+def test_checkin_contact_parity_watched_user_name_correct():
+    """
+    Verify that watched_user_name is correctly set for ALL contact types:
+    - Owner's email contacts watch the owner
+    - Owner's friend contacts watch the owner
+    - Participant's email contacts watch the participant
+    - Participant's friend contacts watch the participant
+    """
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner_watched_parity@test.com", "Alice", "Owner")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_watched_parity@test.com")
+
+        participant_id = _create_test_user(connection, "participant_watched_parity@test.com", "Bob", "Participant")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Bob Emergency", "bob_watched_parity@test.com")
+
+        owner_friend_id = _create_test_user(connection, "owner_friend_watched@test.com", "Alice", "Friend")
+        participant_friend_id = _create_test_user(connection, "participant_friend_watched@test.com", "Bob", "Friend")
+
+        _create_friendship(connection, owner_id, participant_id)
+        _create_friendship(connection, owner_id, owner_friend_id)
+        _create_friendship(connection, participant_id, participant_friend_id)
+
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+        _add_owner_friend_contact(connection, trip_id, owner_friend_id, position=1)
+        _add_participant_friend_contact(connection, trip_id, participant_id, participant_friend_id)
+
+        owner_contacts = _build_owner_checkin_contacts(connection, trip_id, "Alice Owner")
+
+    try:
+        contact_map = {c['email'].lower(): c['watched_user_name'] for c in owner_contacts}
+
+        # Owner's email contact watches owner
+        assert contact_map.get("alice_watched_parity@test.com") == "Alice Owner", \
+            "Owner's email contact should watch 'Alice Owner'"
+
+        # Owner's friend watches owner
+        assert contact_map.get("owner_friend_watched@test.com") == "Alice Owner", \
+            "Owner's friend should watch 'Alice Owner'"
+
+        # Participant's email contact watches participant
+        assert contact_map.get("bob_watched_parity@test.com") == "Bob Participant", \
+            "Participant's email contact should watch 'Bob Participant'"
+
+        # Participant's friend watches participant
+        assert contact_map.get("participant_friend_watched@test.com") == "Bob Participant", \
+            "Participant's friend should watch 'Bob Participant'"
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id, owner_friend_id, participant_friend_id)
+
+
+def test_owner_checkin_without_is_group_trip_flag_still_notifies_participants():
+    """
+    Regression test: Owner check-in should notify participant contacts
+    even if is_group_trip flag is False (as long as participants exist).
+
+    This was a bug where participant contacts weren't notified because
+    the code was inside 'if trip.is_group_trip:' block.
+    """
+    with db.engine.begin() as connection:
+        # Create owner
+        owner_id = _create_test_user(connection, "owner_no_flag@test.com", "Alice", "NoFlag")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_no_flag@test.com")
+
+        # Create participant
+        participant_id = _create_test_user(connection, "participant_no_flag@test.com", "Bob", "NoFlag")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Bob Emergency", "bob_no_flag@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        # Create trip WITHOUT is_group_trip flag (defaults to false)
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=False, contact1=owner_contact_id)
+
+        # But still add a participant (edge case)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+        owner_contacts = _build_owner_checkin_contacts(connection, trip_id, "Alice NoFlag")
+
+    try:
+        # Should still have 2 contacts even without is_group_trip flag
+        assert len(owner_contacts) == 2, (
+            f"Owner check-in should notify 2 contacts even without is_group_trip flag, "
+            f"got {len(owner_contacts)}: {[c['email'] for c in owner_contacts]}"
+        )
+
+        emails = {c['email'].lower() for c in owner_contacts}
+        assert "alice_no_flag@test.com" in emails, "Owner's contact should be included"
+        assert "bob_no_flag@test.com" in emails, "Participant's contact should be included (BUG if missing!)"
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id)
+
+
+def test_checkin_deduplication_same_email_different_watched_users():
+    """
+    Test that if the same email appears as contact for both owner and participant,
+    both entries are kept (NOT deduplicated) because they have different watched_user_name.
+
+    This ensures personalized emails are sent for each watched user.
+    """
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner_dedup_test@test.com", "Alice", "Owner")
+        participant_id = _create_test_user(connection, "participant_dedup_test@test.com", "Bob", "Participant")
+
+        # Create contact with SAME email for both owner and participant
+        owner_contact_id = _create_test_contact(connection, owner_id, "Shared Contact Owner", "shared_dedup@test.com")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Shared Contact Participant", "shared_dedup@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        trip_id = _create_test_trip(connection, owner_id, is_group_trip=True, contact1=owner_contact_id)
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+        owner_contacts = _build_owner_checkin_contacts(connection, trip_id, "Alice Owner")
+
+    try:
+        # Should have 2 entries for the same email (different watched_user_name)
+        shared_contacts = [c for c in owner_contacts if c['email'].lower() == "shared_dedup@test.com"]
+        assert len(shared_contacts) == 2, (
+            f"Should have 2 entries for shared email (personalized for each user), "
+            f"got {len(shared_contacts)}"
+        )
+
+        watched_names = {c['watched_user_name'] for c in shared_contacts}
+        assert "Alice Owner" in watched_names, "One email should be for watching Alice"
+        assert "Bob Participant" in watched_names, "One email should be for watching Bob"
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id)
+
+
+def test_actual_checkin_endpoints_produce_matching_contacts():
+    """
+    Integration test: Actually call the check-in endpoint functions
+    and verify they produce matching notification behavior.
+    """
+    from src.api.checkin import checkin_with_token
+    from src.api.participants import participant_checkin
+    from unittest.mock import MagicMock, patch
+
+    with db.engine.begin() as connection:
+        owner_id = _create_test_user(connection, "owner_actual_checkin@test.com", "Alice", "Actual")
+        owner_contact_id = _create_test_contact(connection, owner_id, "Alice Emergency", "alice_actual@test.com")
+
+        participant_id = _create_test_user(connection, "participant_actual_checkin@test.com", "Bob", "Actual")
+        participant_contact_id = _create_test_contact(connection, participant_id, "Bob Emergency", "bob_actual@test.com")
+
+        _create_friendship(connection, owner_id, participant_id)
+
+        now = datetime.now(UTC)
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
+        checkin_token = f"actual_checkin_token_{now.timestamp()}"
+
+        result = connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trips (user_id, title, activity, start, eta, grace_min, status, is_group_trip,
+                                  checkin_token, checkout_token, location_text, gen_lat, gen_lon,
+                                  has_separate_locations, notify_self, notified_eta_transition,
+                                  notified_grace_transition, share_live_location, contact1,
+                                  group_settings)
+                VALUES (:user_id, 'Actual Check-in Test', :activity, :start, :eta, 15, 'active', true,
+                        :checkin_token, 'checkout_token', 'Test Location', 37.7749, -122.4194,
+                        false, false, false, false, false, :contact1,
+                        '{"checkout_mode": "anyone"}')
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": owner_id,
+                "activity": activity_id,
+                "start": now.isoformat(),
+                "eta": (now + timedelta(hours=2)).isoformat(),
+                "checkin_token": checkin_token,
+                "contact1": owner_contact_id
+            }
+        )
+        trip_id = result.fetchone()[0]
+
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO trip_participants (trip_id, user_id, role, status, joined_at, invited_by)
+                VALUES (:trip_id, :user_id, 'owner', 'accepted', :now, :user_id)
+                """
+            ),
+            {"trip_id": trip_id, "user_id": owner_id, "now": now.isoformat()}
+        )
+
+        _add_participant_to_trip(connection, trip_id, participant_id, owner_id)
+        _add_participant_contact(connection, trip_id, participant_id, participant_contact_id)
+
+    captured_contacts = {"owner": None, "participant": None}
+
+    def capture_owner_contacts(*args, **kwargs):
+        captured_contacts["owner"] = kwargs.get("contacts", [])
+
+    def capture_participant_contacts(*args, **kwargs):
+        captured_contacts["participant"] = kwargs.get("contacts", [])
+
+    try:
+        # Test owner check-in via token
+        with patch("src.api.checkin.send_checkin_update_emails", side_effect=capture_owner_contacts):
+            with patch("src.api.checkin.send_live_activity_update"):
+                with patch("src.api.checkin.send_push_to_user"):
+                    with patch("src.api.checkin.send_friend_checkin_push"):
+                        with patch("src.api.checkin.send_data_refresh_push"):
+                            with patch("src.api.checkin.reverse_geocode_sync", return_value=None):
+                                background_tasks = MagicMock(spec=BackgroundTasks)
+                                checkin_with_token(checkin_token, background_tasks, lat=None, lon=None)
+
+                                # Execute background tasks
+                                for call in background_tasks.add_task.call_args_list:
+                                    task_func = call[0][0]
+                                    task_func()
+
+        # Test participant check-in via authenticated endpoint
+        with patch("src.api.participants.send_checkin_update_emails", side_effect=capture_participant_contacts):
+            with patch("src.api.participants.send_participant_checkin_push"):
+                with patch("src.api.participants.send_friend_checkin_push"):
+                    with patch("src.api.participants.send_data_refresh_push"):
+                        with patch("src.api.participants.reverse_geocode_sync", return_value=None):
+                            background_tasks2 = MagicMock(spec=BackgroundTasks)
+                            participant_checkin(trip_id, background_tasks2, lat=None, lon=None, user_id=participant_id)
+
+                            for call in background_tasks2.add_task.call_args_list:
+                                task_func = call[0][0]
+                                task_func()
+
+        # Compare captured contacts
+        assert captured_contacts["owner"] is not None, "Owner check-in should have captured contacts"
+        assert captured_contacts["participant"] is not None, "Participant check-in should have captured contacts"
+
+        owner_count = len(captured_contacts["owner"])
+        participant_count = len(captured_contacts["participant"])
+
+        assert owner_count == participant_count, (
+            f"Contact counts should match! Owner: {owner_count}, Participant: {participant_count}"
+        )
+
+        owner_emails = {c['email'].lower() for c in captured_contacts["owner"]}
+        participant_emails = {c['email'].lower() for c in captured_contacts["participant"]}
+
+        assert owner_emails == participant_emails, (
+            f"Contact emails should be identical!\n"
+            f"Owner: {owner_emails}\n"
+            f"Participant: {participant_emails}"
+        )
+
+    finally:
+        _cleanup_test_data(owner_id, participant_id)

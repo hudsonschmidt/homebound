@@ -740,19 +740,16 @@ def accept_invitation(
                 {"trip_id": trip_id, "user_id": user_id}
             ).fetchall()
 
-            existing_emails = {c['email'].lower() for c in contacts_for_email}
+            # No deduplication - each notification is personalized with watched_user_name
+            # so if same email watches multiple users, they should get separate emails
             for pfc in participant_friend_email_contacts:
-                if pfc.email and pfc.email.lower() not in existing_emails:
+                if pfc.email:
                     contacts_for_email.append({
                         "id": -pfc.id,
                         "name": pfc.name or "Friend",
                         "email": pfc.email,
                         "watched_user_name": accepter_name
                     })
-                    existing_emails.add(pfc.email.lower())
-
-            # Note: No dedup with owner's contacts - each notification is personalized
-            # with watched_user_name so shared contacts should receive separate notifications
 
             if contacts_for_email:
                 trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
@@ -1323,15 +1320,13 @@ def participant_checkin(
             {"trip_id": trip_id}
         ).fetchall()
 
-        # Deduplicate by email - owner's contacts watch the owner, not the participant
-        existing_emails = {c['email'].lower() for c in contacts_for_email if c.get('email')}
+        # Owner's contacts watch the owner, not the participant
         for oc in owner_email_contacts:
-            if oc.email and oc.email.lower() not in existing_emails:
+            if oc.email:
                 contacts_for_email.append({
                     **dict(oc._mapping),
                     "watched_user_name": owner_name  # Owner's contacts watch the owner
                 })
-                existing_emails.add(oc.email.lower())
 
         # Get checking-in participant's friend contacts WITH email for email notifications
         participant_friend_email_contacts = connection.execute(
@@ -1353,14 +1348,13 @@ def participant_checkin(
 
         # Add participant's friends to email list (they watch the participant)
         for pfc in participant_friend_email_contacts:
-            if pfc.email and pfc.email.lower() not in existing_emails:
+            if pfc.email:
                 contacts_for_email.append({
                     "id": -pfc.id,
                     "name": pfc.name or "Friend",
                     "email": pfc.email,
                     "watched_user_name": checker_name
                 })
-                existing_emails.add(pfc.email.lower())
 
         # Get owner's friend contacts WITH email for email notifications
         owner_friend_email_contacts = connection.execute(
@@ -1381,14 +1375,90 @@ def participant_checkin(
 
         # Add owner's friends to email list (they watch the owner)
         for ofc in owner_friend_email_contacts:
-            if ofc.email and ofc.email.lower() not in existing_emails:
+            if ofc.email:
                 contacts_for_email.append({
                     "id": -ofc.id,
                     "name": ofc.name or "Friend",
                     "email": ofc.email,
                     "watched_user_name": owner_name
                 })
-                existing_emails.add(ofc.email.lower())
+
+        # Get ALL other accepted participants and their contacts
+        # This ensures everyone watching any participant is notified
+        other_accepted_participants = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT tp.user_id,
+                       COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Participant') as participant_name
+                FROM trip_participants tp
+                JOIN users u ON tp.user_id = u.id
+                WHERE tp.trip_id = :trip_id
+                  AND tp.status = 'accepted'
+                  AND tp.role = 'participant'
+                  AND tp.user_id != :checking_in_user_id
+                """
+            ),
+            {"trip_id": trip_id, "checking_in_user_id": user_id}
+        ).fetchall()
+
+        # For each other participant, get their email and friend contacts
+        for other_participant in other_accepted_participants:
+            other_participant_name = other_participant.participant_name.strip() if other_participant.participant_name else "Participant"
+            other_participant_user_id = other_participant.user_id
+
+            # Get other participant's email contacts
+            other_participant_email_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT c.id, c.name, c.email
+                    FROM participant_trip_contacts ptc
+                    JOIN contacts c ON ptc.contact_id = c.id
+                    WHERE ptc.trip_id = :trip_id
+                      AND ptc.participant_user_id = :participant_user_id
+                      AND ptc.contact_id IS NOT NULL
+                      AND c.email IS NOT NULL
+                    """
+                ),
+                {"trip_id": trip_id, "participant_user_id": other_participant_user_id}
+            ).fetchall()
+
+            for opc in other_participant_email_contacts:
+                if opc.email:
+                    contacts_for_email.append({
+                        "id": opc.id,
+                        "name": opc.name,
+                        "email": opc.email,
+                        "watched_user_name": other_participant_name
+                    })
+
+            # Get other participant's friend contacts
+            other_participant_friend_contacts = connection.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT friend.id as id,
+                           TRIM(friend.first_name || ' ' || friend.last_name) as name,
+                           friend.email as email
+                    FROM participant_trip_contacts ptc
+                    JOIN users friend ON ptc.friend_user_id = friend.id
+                    WHERE ptc.trip_id = :trip_id
+                      AND ptc.participant_user_id = :participant_user_id
+                      AND ptc.friend_user_id IS NOT NULL
+                      AND friend.email IS NOT NULL
+                    """
+                ),
+                {"trip_id": trip_id, "participant_user_id": other_participant_user_id}
+            ).fetchall()
+
+            for opfc in other_participant_friend_contacts:
+                if opfc.email:
+                    contacts_for_email.append({
+                        "id": -opfc.id,
+                        "name": opfc.name or "Friend",
+                        "email": opfc.email,
+                        "watched_user_name": other_participant_name
+                    })
+
+        log.info(f"[Participants] Total {len(contacts_for_email)} contacts for email notifications")
 
         # Get checking-in participant's friend safety contacts (for push notifications)
         participant_friend_contacts = connection.execute(
