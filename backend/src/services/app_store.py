@@ -50,7 +50,7 @@ class AppStoreService:
 
     def __init__(self):
         settings = config.get_settings()
-        self.bundle_id = getattr(settings, "APP_BUNDLE_ID", "com.homeboundapp.homebound")
+        self.bundle_id = getattr(settings, "APP_BUNDLE_ID", "com.hudsonschmidt.Homebound")
         self.key_id = getattr(settings, "APP_STORE_KEY_ID", None)
         self.issuer_id = getattr(settings, "APP_STORE_ISSUER_ID", None)
         self.private_key = getattr(settings, "APP_STORE_PRIVATE_KEY", None)
