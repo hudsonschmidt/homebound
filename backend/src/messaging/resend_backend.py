@@ -206,12 +206,14 @@ def build_custom_message_section(custom_message: str | None, message_type: str =
         <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 15px; margin: 20px 0;">
             <p style="margin: 0 0 8px 0;"><strong>Message from {"{user_name}"}:</strong></p>
             <p style="margin: 0; font-style: italic;">{custom_message}</p>
+            <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">(This message was written by {"{user_name}"} before their trip started)</p>
         </div>"""
     else:  # start
         return f"""
         <div style="background: #e8f4fd; border-left: 4px solid #6C63FF; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-            <p style="margin: 0 0 8px 0;"><strong>Personal note:</strong></p>
+            <p style="margin: 0 0 8px 0;"><strong>Personal note from {"{user_name}"}:</strong></p>
             <p style="margin: 0; font-style: italic;">{custom_message}</p>
+            <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">(This message was preset before the trip started)</p>
         </div>"""
 
 
@@ -284,7 +286,7 @@ def create_trip_starting_now_email_html(
     If custom_message is provided, it will be included in the email.
     """
     start_location_section = build_start_location_section(start_location, location)
-    custom_message_section = build_custom_message_section(custom_message, "start")
+    custom_message_section = build_custom_message_section(custom_message, "start").replace("{user_name}", user_name)
 
     return render_template(
         "new_trip_now",

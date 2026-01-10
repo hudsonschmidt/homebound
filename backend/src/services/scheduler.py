@@ -375,7 +375,8 @@ async def _process_overdue_trip(trip, now: datetime):
                     friend_user_id=friend.friend_user_id,
                     user_name=user_name,
                     trip_title=trip.title,
-                    trip_id=trip_id
+                    trip_id=trip_id,
+                    custom_message=custom_overdue_message
                 )
             log.info(f"[Scheduler] Friend overdue notifications sent for trip {trip_id}")
 
@@ -585,7 +586,8 @@ async def check_push_notifications():
                         await send_friend_trip_starting_push(
                             friend_user_id=friend_id,
                             user_name=user_name,
-                            trip_title=trip.title
+                            trip_title=trip.title,
+                            custom_message=custom_start_message
                         )
                     if friend_user_ids:
                         log.info(f"[Push] Sent friend trip starting push to {len(friend_user_ids)} friends for trip {trip.id}")

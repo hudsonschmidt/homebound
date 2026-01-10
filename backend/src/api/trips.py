@@ -869,6 +869,8 @@ def create_trip(
         is_starting_now = initial_status == 'active'
         # Only include start location if trip has separate start/destination
         trip_start_location = trip["start_location_text"] if trip["has_separate_locations"] else None
+        # Capture custom start message for immediate trips
+        custom_start_msg = body.custom_start_message
 
         # Schedule background task to send emails to contacts
         # Use different email templates based on whether trip is starting now or upcoming
@@ -882,7 +884,8 @@ def create_trip(
                     activity_name=activity_obj.name,
                     user_timezone=user_timezone,
                     start_location=trip_start_location,
-                    owner_email=owner_email
+                    owner_email=owner_email,
+                    custom_message=custom_start_msg
                 ))
             else:
                 # Trip is scheduled for later - send "upcoming trip" email
@@ -923,7 +926,8 @@ def create_trip(
                         asyncio.run(send_friend_trip_starting_push(
                             friend_user_id=friend_id,
                             user_name=user_name,
-                            trip_title=trip_title_for_push
+                            trip_title=trip_title_for_push,
+                            custom_message=custom_start_msg
                         ))
                     else:
                         asyncio.run(send_friend_trip_created_push(
@@ -1733,6 +1737,7 @@ def start_trip(
                 SELECT t.id, t.status, t.start, t.title, t.eta, t.location_text,
                        t.start_location_text, t.has_separate_locations,
                        t.contact1, t.contact2, t.contact3, t.timezone, t.is_group_trip,
+                       t.custom_start_message,
                        a.name as activity_name
                 FROM trips t
                 JOIN activities a ON t.activity = a.id
@@ -1788,6 +1793,7 @@ def start_trip(
         trip_start_location = trip.start_location_text if trip.has_separate_locations else None
         user_timezone = trip.timezone
         activity_name = trip.activity_name
+        custom_start_msg = trip.custom_start_message
 
         # Schedule background task to send emails to contacts
         def send_emails_sync():
@@ -1797,7 +1803,8 @@ def start_trip(
                 user_name=user_name,
                 activity_name=activity_name,
                 user_timezone=user_timezone,
-                start_location=trip_start_location
+                start_location=trip_start_location,
+                custom_message=custom_start_msg
             ))
 
         if contacts_for_email:
@@ -1836,13 +1843,15 @@ def start_trip(
         if friend_user_ids:
             trip_title_for_push = trip.title
             user_name_for_push = user_name
+            custom_start_msg_for_push = custom_start_msg
             def send_friend_starting_push_sync():
                 for friend_id in friend_user_ids:
                     log.info(f"[Trips] Sending trip starting push to friend {friend_id}")
                     asyncio.run(send_friend_trip_starting_push(
                         friend_user_id=friend_id,
                         user_name=user_name_for_push,
-                        trip_title=trip_title_for_push
+                        trip_title=trip_title_for_push,
+                        custom_message=custom_start_msg_for_push
                     ))
 
             background_tasks.add_task(send_friend_starting_push_sync)

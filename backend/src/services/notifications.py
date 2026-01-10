@@ -42,11 +42,21 @@ async def send_friend_trip_created_push(
 async def send_friend_trip_starting_push(
     friend_user_id: int,
     user_name: str,
-    trip_title: str
+    trip_title: str,
+    custom_message: str | None = None
 ):
-    """Send push notification to a friend when the trip they're monitoring starts."""
+    """Send push notification to a friend when the trip they're monitoring starts.
+
+    If custom_message is provided, it will be included in the notification.
+    """
     title = "Trip Started"
     body = f"{user_name}'s trip '{trip_title}' has started. You'll be notified if they need help."
+
+    # Append custom message if provided (truncated for push notification)
+    if custom_message and custom_message.strip():
+        # Truncate to keep push notification reasonable length
+        msg = custom_message.strip()[:150]
+        body = f"{body}\n\n📝 {user_name}'s note: \"{msg}\""
 
     await send_push_to_user(
         friend_user_id,
@@ -65,12 +75,14 @@ async def send_friend_overdue_push(
     last_location_name: str | None = None,
     last_location_coords: tuple[float, float] | None = None,
     destination_text: str | None = None,
-    time_overdue_minutes: int = 0
+    time_overdue_minutes: int = 0,
+    custom_message: str | None = None
 ):
     """Send URGENT push notification to a friend when a trip they're monitoring is overdue.
 
     This is a high-priority notification that should always be delivered.
     Enhanced: Now includes location information for better friend visibility.
+    If custom_message is provided, it will be prominently displayed.
     """
     title = f"🚨 URGENT: {user_name} is overdue!"
 
@@ -85,6 +97,11 @@ async def send_friend_overdue_push(
     body_parts.append("They may need help!")
 
     body = ". ".join(body_parts)
+
+    # Append custom emergency message if provided (important for safety info)
+    if custom_message and custom_message.strip():
+        msg = custom_message.strip()[:200]  # Slightly longer for emergency info
+        body = f"{body}\n\n⚠️ {user_name}'s emergency note: \"{msg}\""
 
     # Include coordinates in data for map deep linking
     data: dict = {"trip_id": trip_id, "is_overdue_alert": True}
