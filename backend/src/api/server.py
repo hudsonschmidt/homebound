@@ -102,6 +102,7 @@ app.include_router(checkin.router)
 app.include_router(profile.router)
 app.include_router(stats.router)
 app.include_router(subscriptions.router)
+app.include_router(subscriptions.webhook_router)  # Apple webhook (no auth)
 app.include_router(invite_page.router)
 
 

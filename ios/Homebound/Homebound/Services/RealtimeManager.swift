@@ -13,6 +13,7 @@ final class RealtimeManager: ObservableObject {
     private var participantsChannel: RealtimeChannelV2?
     private var eventsChannel: RealtimeChannelV2?
     private var votesChannel: RealtimeChannelV2?
+    private var usersChannel: RealtimeChannelV2?
 
     private var currentUserId: Int?
     private var isRunning = false
@@ -38,6 +39,7 @@ final class RealtimeManager: ObservableObject {
         await subscribeToParticipants()
         await subscribeToEvents()
         await subscribeToVotes()
+        await subscribeToUserChanges()
 
         debugLog("[Realtime] All subscriptions started")
     }
@@ -54,12 +56,14 @@ final class RealtimeManager: ObservableObject {
         await participantsChannel?.unsubscribe()
         await eventsChannel?.unsubscribe()
         await votesChannel?.unsubscribe()
+        await usersChannel?.unsubscribe()
 
         friendshipsChannel = nil
         tripsChannel = nil
         participantsChannel = nil
         eventsChannel = nil
         votesChannel = nil
+        usersChannel = nil
         currentUserId = nil
         isRunning = false
 
@@ -348,5 +352,49 @@ final class RealtimeManager: ObservableObject {
         }
 
         debugLog("[Realtime] Subscribed to checkout_votes")
+    }
+
+    /// Subscribe to users table for subscription tier changes
+    private func subscribeToUserChanges() async {
+        guard let userId = currentUserId else { return }
+
+        let channel = supabase.channel("user-\(userId)")
+        usersChannel = channel
+
+        // Listen for user updates (subscription_tier, subscription_expires_at)
+        let updates = channel.postgresChange(
+            UpdateAction.self,
+            schema: "public",
+            table: "users",
+            filter: "id=eq.\(userId)"
+        )
+
+        do {
+            try await channel.subscribe()
+        } catch {
+            debugLog("[Realtime] Failed to subscribe to user changes: \(error)")
+            return
+        }
+
+        // Handle user updates
+        Task {
+            for await update in updates {
+                let oldRecord = update.oldRecord
+                let newRecord = update.record
+
+                // Check if subscription-related fields changed
+                let oldTier = oldRecord["subscription_tier"]?.stringValue
+                let newTier = newRecord["subscription_tier"]?.stringValue
+                let oldExpires = oldRecord["subscription_expires_at"]?.stringValue
+                let newExpires = newRecord["subscription_expires_at"]?.stringValue
+
+                if oldTier != newTier || oldExpires != newExpires {
+                    debugLog("[Realtime] Subscription change detected: \(oldTier ?? "nil") -> \(newTier ?? "nil")")
+                    await Session.shared.handleSubscriptionChange()
+                }
+            }
+        }
+
+        debugLog("[Realtime] Subscribed to user changes")
     }
 }

@@ -673,6 +673,20 @@ struct SettingsView: View {
                             }
                         }
                         .padding(.vertical, 4)
+
+                        Button(action: {
+                            SubscriptionManager.shared.resetForDebug()
+                            session.featureLimits = .free
+                            session.subscriptionTier = "free"
+                        }) {
+                            Label {
+                                Text("Reset Subscription State")
+                            } icon: {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        .foregroundStyle(.red)
                     }
                 }
 

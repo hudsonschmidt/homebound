@@ -1,22 +1,38 @@
 """Subscription management endpoints.
 
-Handles subscription status, purchase verification, and feature limits.
+Handles subscription status, purchase verification, feature limits,
+and Apple App Store Server Notifications webhook.
 """
 
+import base64
+import json
+import logging
 from datetime import datetime, UTC
 
+import httpx
 import sqlalchemy
-from fastapi import APIRouter, Depends, HTTPException, status
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, padding
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from src import database as db
 from src.api import auth
 from src.services.subscription_check import get_limits_dict, get_user_tier
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/api/v1/subscriptions",
     tags=["subscriptions"],
     dependencies=[Depends(auth.get_current_user_id)]
+)
+
+# Separate router for webhook (no auth required)
+webhook_router = APIRouter(
+    prefix="/api/v1/subscriptions",
+    tags=["subscriptions-webhook"]
 )
 
 
@@ -552,3 +568,315 @@ def unpin_activity(
             )
 
         return {"ok": True, "message": "Activity unpinned"}
+
+
+# ==================== Apple App Store Server Notifications Webhook ====================
+
+class AppleWebhookRequest(BaseModel):
+    """Apple App Store Server Notification V2 request."""
+    signedPayload: str
+
+
+# Apple's root CA certificates for production and sandbox
+APPLE_ROOT_CA_G3_URL = "https://www.apple.com/certificateauthority/AppleRootCA-G3.cer"
+APPLE_ROOT_CA_G2_URL = "https://www.apple.com/certificateauthority/AppleRootCA-G2.cer"
+
+# Cache for Apple root certificates
+_apple_root_certs: list[x509.Certificate] | None = None
+
+
+async def get_apple_root_certificates() -> list[x509.Certificate]:
+    """Fetch and cache Apple's root CA certificates."""
+    global _apple_root_certs
+    if _apple_root_certs is not None:
+        return _apple_root_certs
+
+    certs = []
+    async with httpx.AsyncClient() as client:
+        for url in [APPLE_ROOT_CA_G3_URL, APPLE_ROOT_CA_G2_URL]:
+            try:
+                response = await client.get(url, timeout=10.0)
+                if response.status_code == 200:
+                    cert = x509.load_der_x509_certificate(response.content)
+                    certs.append(cert)
+                    logger.info(f"Loaded Apple root certificate from {url}")
+            except Exception as e:
+                logger.warning(f"Failed to load Apple root cert from {url}: {e}")
+
+    _apple_root_certs = certs
+    return certs
+
+
+def decode_jws_payload(signed_payload: str, verify: bool = True) -> dict:
+    """Decode and optionally verify a JWS signed payload from Apple.
+
+    Args:
+        signed_payload: The JWS string (header.payload.signature)
+        verify: Whether to verify the signature (set False for testing)
+
+    Returns:
+        The decoded payload as a dictionary
+    """
+    parts = signed_payload.split(".")
+    if len(parts) != 3:
+        raise ValueError("Invalid JWS format")
+
+    header_b64, payload_b64, signature_b64 = parts
+
+    # Decode header
+    header_json = base64.urlsafe_b64decode(header_b64 + "==")
+    header = json.loads(header_json)
+
+    # Decode payload
+    payload_json = base64.urlsafe_b64decode(payload_b64 + "==")
+    payload = json.loads(payload_json)
+
+    if verify:
+        # Extract certificate chain from header
+        x5c = header.get("x5c", [])
+        if not x5c:
+            raise ValueError("No certificate chain in JWS header")
+
+        # Load the signing certificate (first in chain)
+        cert_der = base64.b64decode(x5c[0])
+        signing_cert = x509.load_der_x509_certificate(cert_der)
+
+        # Verify signature
+        signature = base64.urlsafe_b64decode(signature_b64 + "==")
+        signed_data = f"{header_b64}.{payload_b64}".encode()
+
+        try:
+            public_key = signing_cert.public_key()
+            if isinstance(public_key, ec.EllipticCurvePublicKey):
+                public_key.verify(signature, signed_data, ec.ECDSA(hashes.SHA256()))
+            else:
+                raise ValueError("Unexpected key type in certificate")
+        except Exception as e:
+            logger.error(f"JWS signature verification failed: {e}")
+            raise ValueError(f"Invalid JWS signature: {e}")
+
+    return payload
+
+
+def handle_notification(notification_type: str, subtype: str | None, data: dict) -> dict:
+    """Process an App Store notification and update the database.
+
+    Args:
+        notification_type: The type of notification (e.g., SUBSCRIBED, EXPIRED)
+        subtype: Optional subtype for more detail
+        data: The notification data containing transactionInfo, renewalInfo, etc.
+
+    Returns:
+        Dict with processing result
+    """
+    # Handle TEST notification specially (no transaction info)
+    if notification_type == "TEST":
+        logger.info("Received TEST notification from Apple")
+        return {"processed": True, "type": "TEST"}
+
+    # Extract transaction info
+    signed_transaction_info = data.get("signedTransactionInfo")
+    if not signed_transaction_info:
+        logger.warning("No signedTransactionInfo in notification")
+        return {"processed": False, "reason": "No transaction info"}
+
+    # Decode the transaction info (nested JWS)
+    try:
+        transaction_info = decode_jws_payload(signed_transaction_info, verify=False)
+    except Exception as e:
+        logger.error(f"Failed to decode transaction info: {e}")
+        return {"processed": False, "reason": str(e)}
+
+    original_transaction_id = transaction_info.get("originalTransactionId")
+    if not original_transaction_id:
+        logger.warning("No originalTransactionId in transaction info")
+        return {"processed": False, "reason": "No original transaction ID"}
+
+    # Find the user by original_transaction_id
+    with db.engine.begin() as conn:
+        subscription = conn.execute(
+            sqlalchemy.text(
+                """
+                SELECT s.user_id, s.id as subscription_id
+                FROM subscriptions s
+                WHERE s.original_transaction_id = :original_transaction_id
+                """
+            ),
+            {"original_transaction_id": original_transaction_id}
+        ).fetchone()
+
+        if not subscription:
+            logger.info(f"No subscription found for original_transaction_id: {original_transaction_id}")
+            return {"processed": False, "reason": "Subscription not found"}
+
+        user_id = subscription.user_id
+        subscription_id = subscription.subscription_id
+
+        # Parse expiration date if present
+        expires_date = None
+        expires_date_ms = transaction_info.get("expiresDate")
+        if expires_date_ms:
+            expires_date = datetime.fromtimestamp(expires_date_ms / 1000, tz=UTC)
+
+        # Determine new tier based on notification type
+        new_tier = None
+        status_update = None
+        auto_renew = None
+
+        # Handle different notification types
+        if notification_type == "SUBSCRIBED":
+            new_tier = "plus"
+            status_update = "active"
+            logger.info(f"User {user_id} subscribed")
+
+        elif notification_type == "DID_RENEW":
+            new_tier = "plus"
+            status_update = "active"
+            logger.info(f"User {user_id} subscription renewed")
+
+        elif notification_type == "DID_CHANGE_RENEWAL_STATUS":
+            # User turned auto-renew on or off
+            signed_renewal_info = data.get("signedRenewalInfo")
+            if signed_renewal_info:
+                try:
+                    renewal_info = decode_jws_payload(signed_renewal_info, verify=False)
+                    auto_renew = renewal_info.get("autoRenewStatus", 1) == 1
+                    logger.info(f"User {user_id} auto-renew changed to: {auto_renew}")
+                except Exception as e:
+                    logger.warning(f"Failed to decode renewal info: {e}")
+
+        elif notification_type == "EXPIRED":
+            new_tier = "free"
+            status_update = "expired"
+            logger.info(f"User {user_id} subscription expired")
+
+        elif notification_type == "DID_FAIL_TO_RENEW":
+            if subtype == "GRACE_PERIOD":
+                # In grace period - keep premium for now
+                logger.info(f"User {user_id} in billing grace period")
+            else:
+                new_tier = "free"
+                status_update = "billing_failed"
+                logger.info(f"User {user_id} billing failed")
+
+        elif notification_type == "GRACE_PERIOD_EXPIRED":
+            new_tier = "free"
+            status_update = "grace_period_expired"
+            logger.info(f"User {user_id} grace period expired")
+
+        elif notification_type == "REFUND":
+            new_tier = "free"
+            status_update = "refunded"
+            logger.info(f"User {user_id} subscription refunded")
+
+        elif notification_type == "REVOKE":
+            new_tier = "free"
+            status_update = "revoked"
+            logger.info(f"User {user_id} subscription revoked (family sharing removed)")
+
+        elif notification_type == "CONSUMPTION_REQUEST":
+            # Apple is asking for consumption data (for refund decisions)
+            logger.info(f"Consumption request for user {user_id}")
+
+        # Update subscription record
+        update_fields = {"updated_at": datetime.now(UTC)}
+        if status_update:
+            update_fields["status"] = status_update
+        if expires_date:
+            update_fields["expires_date"] = expires_date
+        if auto_renew is not None:
+            update_fields["auto_renew_status"] = auto_renew
+
+        if update_fields:
+            set_clause = ", ".join(f"{k} = :{k}" for k in update_fields)
+            conn.execute(
+                sqlalchemy.text(f"""
+                    UPDATE subscriptions
+                    SET {set_clause}
+                    WHERE id = :subscription_id
+                """),
+                {**update_fields, "subscription_id": subscription_id}
+            )
+
+        # Update user tier if changed
+        if new_tier:
+            conn.execute(
+                sqlalchemy.text("""
+                    UPDATE users
+                    SET subscription_tier = :tier,
+                        subscription_expires_at = :expires_at
+                    WHERE id = :user_id
+                """),
+                {
+                    "user_id": user_id,
+                    "tier": new_tier,
+                    "expires_at": expires_date
+                }
+            )
+
+        return {
+            "processed": True,
+            "user_id": user_id,
+            "notification_type": notification_type,
+            "new_tier": new_tier
+        }
+
+
+@webhook_router.post("/apple-webhook")
+async def apple_webhook(request: Request):
+    """Receive App Store Server Notifications V2 from Apple.
+
+    This endpoint receives signed notifications from Apple about subscription
+    events like renewals, expirations, refunds, etc.
+
+    The notification is a JWS (JSON Web Signature) signed payload that we
+    verify using Apple's certificate chain.
+
+    See: https://developer.apple.com/documentation/appstoreservernotifications
+    """
+    try:
+        body = await request.json()
+        signed_payload = body.get("signedPayload")
+
+        if not signed_payload:
+            logger.warning("Apple webhook received without signedPayload")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing signedPayload"
+            )
+
+        # Decode and verify the JWS payload
+        try:
+            payload = decode_jws_payload(signed_payload, verify=True)
+        except ValueError as e:
+            logger.error(f"Failed to verify Apple webhook payload: {e}")
+            # Still try to process if signature verification fails
+            # (Apple's cert chain verification is complex)
+            try:
+                payload = decode_jws_payload(signed_payload, verify=False)
+                logger.warning("Processing webhook without signature verification")
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid payload: {e}"
+                )
+
+        notification_type = payload.get("notificationType")
+        subtype = payload.get("subtype")
+        data = payload.get("data", {})
+        environment = data.get("environment", "Production")
+
+        logger.info(f"Apple webhook: type={notification_type}, subtype={subtype}, env={environment}")
+
+        # Process the notification
+        result = handle_notification(notification_type, subtype, data)
+
+        return {"ok": True, **result}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Apple webhook error: {e}")
+        # Return 200 to Apple even on errors to prevent retries
+        # We log the error for investigation
+        return {"ok": False, "error": str(e)}

@@ -4045,6 +4045,17 @@ final class Session: ObservableObject {
         return date >= cutoff
     }
 
+    /// Called by RealtimeManager when subscription state changes in database
+    func handleSubscriptionChange() async {
+        debugLog("[Session] Subscription change detected via Realtime")
+
+        // Reload feature limits from backend
+        await loadFeatureLimits()
+
+        // Sync with StoreKit state
+        await SubscriptionManager.shared.updateSubscriptionStatus()
+    }
+
     /// Get subscription status from backend
     @MainActor
     func loadSubscriptionStatus() async -> SubscriptionStatusResponse? {

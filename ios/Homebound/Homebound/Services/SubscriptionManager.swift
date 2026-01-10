@@ -424,6 +424,17 @@ final class SubscriptionManager: ObservableObject {
         debugLog("[SubscriptionManager] No active subscription")
     }
 
+    /// Debug only: Reset subscription state to free tier for testing
+    func resetForDebug() {
+        subscriptionStatus = .free
+        purchasedProductIDs.removeAll()
+        expirationDate = nil
+        isTrialing = false
+        isInGracePeriod = false
+        willAutoRenew = true
+        debugLog("[SubscriptionManager] DEBUG: Subscription state reset to free")
+    }
+
     /// Check if subscription is in Apple's billing grace period
     private func checkGracePeriodStatus(for productID: String) async -> (isInGracePeriod: Bool, gracePeriodExpiresDate: Date?) {
         guard let product = products.first(where: { $0.id == productID }),

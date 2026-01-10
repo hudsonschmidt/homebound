@@ -924,3 +924,426 @@ def test_restore_no_subscription():
                 sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
                 {"user_id": user_id}
             )
+
+
+# ==================== Apple Webhook Tests ====================
+
+import base64
+import json
+from src.api.subscriptions import decode_jws_payload, handle_notification
+
+
+def create_mock_jws(payload: dict) -> str:
+    """Create a mock JWS for testing (without valid signature)."""
+    header = {"alg": "ES256", "x5c": []}
+    header_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    signature_b64 = base64.urlsafe_b64encode(b"mock_signature").decode().rstrip("=")
+    return f"{header_b64}.{payload_b64}.{signature_b64}"
+
+
+def test_decode_jws_payload_without_verification():
+    """Test JWS decoding without signature verification."""
+    payload = {"test": "data", "nested": {"key": "value"}}
+    jws = create_mock_jws(payload)
+
+    decoded = decode_jws_payload(jws, verify=False)
+
+    assert decoded["test"] == "data"
+    assert decoded["nested"]["key"] == "value"
+
+
+def test_decode_jws_invalid_format():
+    """Test JWS decoding with invalid format."""
+    with pytest.raises(ValueError, match="Invalid JWS format"):
+        decode_jws_payload("not.a.valid.jws.format", verify=False)
+
+
+def test_handle_notification_subscribed():
+    """Test handling SUBSCRIBED notification."""
+    test_email = "webhook-subscribed@homeboundapp.com"
+    original_txn_id = "orig_webhook_subscribed_123"
+
+    with db.engine.begin() as conn:
+        # Clean up
+        conn.execute(
+            sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+            {"txn_id": original_txn_id}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create user
+        result = conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, :tier)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Webhook",
+                "last_name": "Test",
+                "age": 25,
+                "tier": "free"
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create subscription record (normally created by verify-purchase)
+        conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO subscriptions (user_id, original_transaction_id, product_id, purchase_date, status)
+                VALUES (:user_id, :txn_id, :product_id, :purchase_date, :status)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "txn_id": original_txn_id,
+                "product_id": "com.homeboundapp.homebound.plus.monthly",
+                "purchase_date": datetime.now(UTC),
+                "status": "pending"
+            }
+        )
+
+    try:
+        # Create mock transaction info JWS
+        transaction_info = {
+            "originalTransactionId": original_txn_id,
+            "expiresDate": int((datetime.now(UTC) + timedelta(days=30)).timestamp() * 1000)
+        }
+        signed_transaction_info = create_mock_jws(transaction_info)
+
+        data = {
+            "signedTransactionInfo": signed_transaction_info,
+            "environment": "Sandbox"
+        }
+
+        result = handle_notification("SUBSCRIBED", None, data)
+
+        assert result["processed"] is True
+        assert result["user_id"] == user_id
+        assert result["new_tier"] == "plus"
+
+        # Verify user tier was updated
+        with db.engine.begin() as conn:
+            user = conn.execute(
+                sqlalchemy.text("SELECT subscription_tier FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            ).fetchone()
+            assert user.subscription_tier == "plus"
+
+    finally:
+        with db.engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+                {"txn_id": original_txn_id}
+            )
+            conn.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
+
+
+def test_handle_notification_expired():
+    """Test handling EXPIRED notification."""
+    test_email = "webhook-expired@homeboundapp.com"
+    original_txn_id = "orig_webhook_expired_123"
+
+    with db.engine.begin() as conn:
+        # Clean up
+        conn.execute(
+            sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+            {"txn_id": original_txn_id}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create premium user
+        result = conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, :tier)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Webhook",
+                "last_name": "Expired",
+                "age": 25,
+                "tier": "plus"
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create subscription record
+        conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO subscriptions (user_id, original_transaction_id, product_id, purchase_date, status)
+                VALUES (:user_id, :txn_id, :product_id, :purchase_date, :status)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "txn_id": original_txn_id,
+                "product_id": "com.homeboundapp.homebound.plus.monthly",
+                "purchase_date": datetime.now(UTC) - timedelta(days=30),
+                "status": "active"
+            }
+        )
+
+    try:
+        transaction_info = {
+            "originalTransactionId": original_txn_id,
+            "expiresDate": int((datetime.now(UTC) - timedelta(days=1)).timestamp() * 1000)
+        }
+        signed_transaction_info = create_mock_jws(transaction_info)
+
+        data = {
+            "signedTransactionInfo": signed_transaction_info,
+            "environment": "Sandbox"
+        }
+
+        result = handle_notification("EXPIRED", None, data)
+
+        assert result["processed"] is True
+        assert result["new_tier"] == "free"
+
+        # Verify user tier was updated to free
+        with db.engine.begin() as conn:
+            user = conn.execute(
+                sqlalchemy.text("SELECT subscription_tier FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            ).fetchone()
+            assert user.subscription_tier == "free"
+
+    finally:
+        with db.engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+                {"txn_id": original_txn_id}
+            )
+            conn.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
+
+
+def test_handle_notification_refund():
+    """Test handling REFUND notification."""
+    test_email = "webhook-refund@homeboundapp.com"
+    original_txn_id = "orig_webhook_refund_123"
+
+    with db.engine.begin() as conn:
+        # Clean up
+        conn.execute(
+            sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+            {"txn_id": original_txn_id}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create premium user
+        result = conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, :tier)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Webhook",
+                "last_name": "Refund",
+                "age": 25,
+                "tier": "plus"
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create subscription record
+        conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO subscriptions (user_id, original_transaction_id, product_id, purchase_date, status)
+                VALUES (:user_id, :txn_id, :product_id, :purchase_date, :status)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "txn_id": original_txn_id,
+                "product_id": "com.homeboundapp.homebound.plus.monthly",
+                "purchase_date": datetime.now(UTC),
+                "status": "active"
+            }
+        )
+
+    try:
+        transaction_info = {"originalTransactionId": original_txn_id}
+        signed_transaction_info = create_mock_jws(transaction_info)
+
+        data = {
+            "signedTransactionInfo": signed_transaction_info,
+            "environment": "Sandbox"
+        }
+
+        result = handle_notification("REFUND", None, data)
+
+        assert result["processed"] is True
+        assert result["new_tier"] == "free"
+
+        # Verify user tier was updated to free
+        with db.engine.begin() as conn:
+            user = conn.execute(
+                sqlalchemy.text("SELECT subscription_tier FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            ).fetchone()
+            assert user.subscription_tier == "free"
+
+            # Verify subscription status was updated
+            sub = conn.execute(
+                sqlalchemy.text("SELECT status FROM subscriptions WHERE original_transaction_id = :txn_id"),
+                {"txn_id": original_txn_id}
+            ).fetchone()
+            assert sub.status == "refunded"
+
+    finally:
+        with db.engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+                {"txn_id": original_txn_id}
+            )
+            conn.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
+
+
+def test_handle_notification_test_type():
+    """Test handling TEST notification from Apple."""
+    result = handle_notification("TEST", None, {})
+    assert result["processed"] is True
+    assert result["type"] == "TEST"
+
+
+def test_handle_notification_unknown_subscription():
+    """Test handling notification for unknown subscription."""
+    transaction_info = {"originalTransactionId": "unknown_txn_12345"}
+    signed_transaction_info = create_mock_jws(transaction_info)
+
+    data = {
+        "signedTransactionInfo": signed_transaction_info,
+        "environment": "Sandbox"
+    }
+
+    result = handle_notification("SUBSCRIBED", None, data)
+
+    assert result["processed"] is False
+    assert "not found" in result["reason"].lower()
+
+
+def test_handle_notification_did_renew():
+    """Test handling DID_RENEW notification."""
+    test_email = "webhook-renew@homeboundapp.com"
+    original_txn_id = "orig_webhook_renew_123"
+
+    with db.engine.begin() as conn:
+        # Clean up
+        conn.execute(
+            sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+            {"txn_id": original_txn_id}
+        )
+        conn.execute(
+            sqlalchemy.text("DELETE FROM users WHERE email = :email"),
+            {"email": test_email}
+        )
+
+        # Create premium user
+        result = conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, :tier)
+                RETURNING id
+                """
+            ),
+            {
+                "email": test_email,
+                "first_name": "Webhook",
+                "last_name": "Renew",
+                "age": 25,
+                "tier": "plus"
+            }
+        )
+        user_id = result.fetchone()[0]
+
+        # Create subscription record
+        conn.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO subscriptions (user_id, original_transaction_id, product_id, purchase_date, expires_date, status)
+                VALUES (:user_id, :txn_id, :product_id, :purchase_date, :expires_date, :status)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "txn_id": original_txn_id,
+                "product_id": "com.homeboundapp.homebound.plus.monthly",
+                "purchase_date": datetime.now(UTC) - timedelta(days=30),
+                "expires_date": datetime.now(UTC) - timedelta(days=1),
+                "status": "active"
+            }
+        )
+
+    try:
+        # New expiration after renewal
+        new_expires = datetime.now(UTC) + timedelta(days=30)
+        transaction_info = {
+            "originalTransactionId": original_txn_id,
+            "expiresDate": int(new_expires.timestamp() * 1000)
+        }
+        signed_transaction_info = create_mock_jws(transaction_info)
+
+        data = {
+            "signedTransactionInfo": signed_transaction_info,
+            "environment": "Sandbox"
+        }
+
+        result = handle_notification("DID_RENEW", None, data)
+
+        assert result["processed"] is True
+        assert result["new_tier"] == "plus"
+
+        # Verify expires_date was updated
+        with db.engine.begin() as conn:
+            sub = conn.execute(
+                sqlalchemy.text("SELECT expires_date FROM subscriptions WHERE original_transaction_id = :txn_id"),
+                {"txn_id": original_txn_id}
+            ).fetchone()
+            assert sub.expires_date is not None
+            # Should be close to new_expires (within a second)
+            assert abs((sub.expires_date - new_expires).total_seconds()) < 2
+
+    finally:
+        with db.engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("DELETE FROM subscriptions WHERE original_transaction_id = :txn_id"),
+                {"txn_id": original_txn_id}
+            )
+            conn.execute(
+                sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
+                {"user_id": user_id}
+            )
