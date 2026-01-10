@@ -286,6 +286,14 @@ struct SubscriptionSettingsView: View {
         isLoading = true
         defer { isLoading = false }
 
+        // Sync with App Store to get latest subscription state
+        try? await AppStore.sync()
+
+        // Ensure products are loaded (required for renewal status check)
+        if subscriptionManager.products.isEmpty {
+            await subscriptionManager.loadProducts()
+        }
+
         // Update from StoreKit (source of truth for subscription status)
         await subscriptionManager.updateSubscriptionStatus()
 
@@ -297,7 +305,18 @@ struct SubscriptionSettingsView: View {
     /// (e.g., after user cancels subscription in Apple Settings)
     private func refreshOnForeground() {
         Task {
+            // Sync with App Store to get latest subscription state
+            // This is important after user cancels/modifies in iOS Settings
+            try? await AppStore.sync()
+
+            // Ensure products are loaded (required for renewal status check)
+            if subscriptionManager.products.isEmpty {
+                await subscriptionManager.loadProducts()
+            }
+            // Update subscription status from StoreKit
             await subscriptionManager.updateSubscriptionStatus()
+            // Also refresh feature limits to stay in sync
+            await session.loadFeatureLimits()
         }
     }
 

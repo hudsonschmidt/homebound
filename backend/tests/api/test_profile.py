@@ -1085,12 +1085,12 @@ def test_export_user_data_basic():
             {"email": test_email}
         )
 
-        # Create user
+        # Create user with premium subscription (export requires premium)
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'plus')
                 RETURNING id
                 """
             ),
@@ -1150,12 +1150,12 @@ def test_export_user_data_with_contacts():
             {"email": test_email}
         )
 
-        # Create user
+        # Create user with premium subscription (export requires premium)
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'plus')
                 RETURNING id
                 """
             ),
@@ -1227,12 +1227,12 @@ def test_export_user_data_with_trips():
             {"email": test_email}
         )
 
-        # Create user
+        # Create user with premium subscription (export requires premium)
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'plus')
                 RETURNING id
                 """
             ),
@@ -1316,11 +1316,15 @@ def test_export_user_data_with_trips():
 
 
 def test_export_user_data_nonexistent_user():
-    """Test exporting data for non-existent user returns 404"""
+    """Test exporting data for non-existent user returns 403.
+
+    Note: The subscription check happens before user existence check,
+    so a non-existent user returns 403 (no subscription) not 404.
+    """
     with pytest.raises(HTTPException) as exc_info:
         export_user_data(user_id=999999)
-    assert exc_info.value.status_code == 404
-    assert "not found" in exc_info.value.detail.lower()
+    assert exc_info.value.status_code == 403
+    assert "Homebound+" in exc_info.value.detail
 
 
 def test_get_profile_includes_notification_preferences():
@@ -1549,12 +1553,12 @@ def test_export_user_data_full():
             {"email": test_email}
         )
 
-        # Create user
+        # Create user with premium subscription (export requires premium)
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'plus')
                 RETURNING id
                 """
             ),

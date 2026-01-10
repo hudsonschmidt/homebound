@@ -159,6 +159,100 @@ enum TestFixtures {
     }
     """.data(using: .utf8)!
 
+    // MARK: - Subscription JSON Data
+
+    static let featureLimitsPlusJSON = """
+    {
+        "tier": "plus",
+        "is_premium": true,
+        "contacts_per_trip": 5,
+        "saved_trips_limit": 10,
+        "history_days": null,
+        "extensions": [30, 60, 120, 180, 240],
+        "visible_stats": 8,
+        "widgets_enabled": true,
+        "live_activity_enabled": true,
+        "custom_intervals_enabled": true,
+        "trip_map_enabled": true,
+        "pinned_activities_limit": 3,
+        "group_trips_enabled": true,
+        "contact_groups_enabled": true,
+        "custom_messages_enabled": true,
+        "export_enabled": true,
+        "family_sharing_enabled": true
+    }
+    """.data(using: .utf8)!
+
+    static let featureLimitsFreeJSON = """
+    {
+        "tier": "free",
+        "is_premium": false,
+        "contacts_per_trip": 2,
+        "saved_trips_limit": 0,
+        "history_days": 30,
+        "extensions": [30],
+        "visible_stats": 2,
+        "widgets_enabled": false,
+        "live_activity_enabled": false,
+        "custom_intervals_enabled": false,
+        "trip_map_enabled": false,
+        "pinned_activities_limit": 0,
+        "group_trips_enabled": false,
+        "contact_groups_enabled": false,
+        "custom_messages_enabled": false,
+        "export_enabled": false,
+        "family_sharing_enabled": false
+    }
+    """.data(using: .utf8)!
+
+    static let subscriptionStatusActiveJSON = """
+    {
+        "tier": "plus",
+        "is_active": true,
+        "expires_at": "2025-12-31T23:59:59Z",
+        "auto_renew": true,
+        "is_family_shared": false,
+        "is_trial": false,
+        "product_id": "com.homeboundapp.homebound.plus.monthly"
+    }
+    """.data(using: .utf8)!
+
+    static let subscriptionStatusTrialJSON = """
+    {
+        "tier": "plus",
+        "is_active": true,
+        "expires_at": "2025-01-15T23:59:59Z",
+        "auto_renew": true,
+        "is_family_shared": false,
+        "is_trial": true,
+        "product_id": "com.homeboundapp.homebound.plus.yearly"
+    }
+    """.data(using: .utf8)!
+
+    static let subscriptionStatusCancelledJSON = """
+    {
+        "tier": "plus",
+        "is_active": true,
+        "expires_at": "2025-02-28T23:59:59Z",
+        "auto_renew": false,
+        "is_family_shared": false,
+        "is_trial": false,
+        "product_id": "com.homeboundapp.homebound.plus.monthly"
+    }
+    """.data(using: .utf8)!
+
+    static let subscriptionStatusFreeJSON = """
+    {
+        "tier": "free",
+        "is_active": false,
+        "expires_at": null,
+        "auto_renew": false,
+        "is_family_shared": false,
+        "is_trial": false,
+        "product_id": null
+    }
+    """.data(using: .utf8)!
+
     // MARK: - Factory Methods
 
     static func makeActivity(
@@ -247,9 +341,10 @@ enum TestFixtures {
         id: Int = 1,
         userId: Int = 100,
         name: String = "Emergency Contact",
-        email: String = "emergency@example.com"
+        email: String = "emergency@example.com",
+        group: String? = nil
     ) -> Contact {
-        Contact(id: id, user_id: userId, name: name, email: email)
+        Contact(id: id, user_id: userId, name: name, email: email, group: group)
     }
 
     static func makeFriend(
@@ -260,24 +355,20 @@ enum TestFixtures {
         achievementsCount: Int? = 15,
         totalAchievements: Int? = 40
     ) -> Friend {
-        let decoder = JSONDecoder()
-        let json = """
-        {
-            "user_id": \(userId),
-            "first_name": "\(firstName)",
-            "last_name": "\(lastName)",
-            "profile_photo_url": null,
-            "member_since": "2024-01-15T00:00:00Z",
-            "friendship_since": "2024-06-01T00:00:00Z",
-            "age": 28,
-            "achievements_count": \(achievementsCount ?? 0),
-            "total_achievements": \(totalAchievements ?? 0),
-            "total_trips": 25,
-            "total_adventure_hours": \(totalAdventureHours ?? 0),
-            "favorite_activity_name": "Hiking",
-            "favorite_activity_icon": "figure.hiking"
-        }
-        """.data(using: .utf8)!
-        return try! decoder.decode(Friend.self, from: json)
+        Friend(
+            user_id: userId,
+            first_name: firstName,
+            last_name: lastName,
+            profile_photo_url: nil,
+            member_since: "2024-01-15T00:00:00Z",
+            friendship_since: "2024-06-01T00:00:00Z",
+            age: 28,
+            achievements_count: achievementsCount,
+            total_achievements: totalAchievements,
+            total_trips: 25,
+            total_adventure_hours: totalAdventureHours,
+            favorite_activity_name: "Hiking",
+            favorite_activity_icon: "figure.hiking"
+        )
     }
 }

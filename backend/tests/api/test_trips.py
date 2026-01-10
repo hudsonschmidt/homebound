@@ -25,8 +25,12 @@ from src.api.trips import (
 )
 
 
-def setup_test_user_and_contact():
-    """Helper function to set up test user and contact"""
+def setup_test_user_and_contact(premium: bool = False):
+    """Helper function to set up test user and contact.
+
+    Args:
+        premium: If True, creates user with Homebound+ subscription
+    """
     test_email = "test@homeboundapp.com"
     with db.engine.begin() as connection:
         # Clean up - NULL out last_checkin, then delete events, then trips
@@ -51,12 +55,16 @@ def setup_test_user_and_contact():
             {"email": test_email}
         )
 
-        # Create user
+        # Create user with optional premium subscription
+        from datetime import timedelta
+        expires_at = datetime.now(UTC) + timedelta(days=30) if premium else None
+        tier = "plus" if premium else "free"
+
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier, subscription_expires_at)
+                VALUES (:email, :first_name, :last_name, :age, :tier, :expires_at)
                 RETURNING id
                 """
             ),
@@ -64,7 +72,9 @@ def setup_test_user_and_contact():
                 "email": test_email,
                 "first_name": "Trip",
                 "last_name": "Test",
-                "age": 30
+                "age": 30,
+                "tier": tier,
+                "expires_at": expires_at
             }
         )
         user_id = result.fetchone()[0]
@@ -830,7 +840,7 @@ def test_update_trip_empty_update():
 
 def test_create_trip_with_notification_settings():
     """Test creating a trip with custom notification settings"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -888,7 +898,7 @@ def test_create_trip_default_notification_settings():
 
 def test_create_trip_custom_checkin_interval():
     """Test creating a trip with a custom check-in interval"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -943,7 +953,7 @@ def test_create_trip_quiet_hours_only():
 
 def test_update_trip_notification_settings():
     """Test updating a planned trip's notification settings"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     trip = create_planned_trip(user_id, contact_id)
 
@@ -974,7 +984,7 @@ def test_update_trip_notification_settings():
 
 def test_update_trip_checkin_interval_only():
     """Test updating only the check-in interval"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     trip = create_planned_trip(user_id, contact_id)
 
@@ -990,7 +1000,7 @@ def test_update_trip_checkin_interval_only():
 
 def test_get_trip_includes_notification_settings():
     """Test that get_trip returns notification settings"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -1022,7 +1032,7 @@ def test_get_trip_includes_notification_settings():
 
 def test_get_trips_includes_notification_settings():
     """Test that get_trips returns notification settings for all trips"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     background_tasks = MagicMock(spec=BackgroundTasks)
@@ -1080,7 +1090,7 @@ def test_get_trips_includes_notification_settings():
 
 def test_get_active_trip_includes_notification_settings():
     """Test that get_active_trip returns notification settings"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -1112,7 +1122,7 @@ def test_get_active_trip_includes_notification_settings():
 
 def test_create_trip_with_overnight_notification_hours():
     """Test creating a trip with overnight notification hours (start > end)"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -1141,7 +1151,7 @@ def test_create_trip_with_overnight_notification_hours():
 
 def test_create_trip_with_short_interval():
     """Test creating a trip with 15-minute check-in interval"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -1166,7 +1176,7 @@ def test_create_trip_with_short_interval():
 
 def test_create_trip_with_long_interval():
     """Test creating a trip with 2-hour check-in interval"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -2486,7 +2496,7 @@ def test_update_trip_notify_self_unchanged():
 
 def test_create_trip_notify_self_with_all_features():
     """Test creating a trip with notify_self and all other features"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     now = datetime.now(UTC)
     trip_data = TripCreate(
@@ -2826,7 +2836,7 @@ def test_extend_trip_basic():
 
 def test_extend_trip_updates_overdue_to_active():
     """Extending an overdue trip should change status back to active and extend from current time"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     # Create active trip with ETA in the past (simulating overdue)
     now = datetime.now(UTC)
@@ -3021,7 +3031,7 @@ def test_extend_trip_nonexistent_fails():
 
 def test_extend_trip_multiple_times():
     """Multiple extensions should accumulate ETA correctly"""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     # Create active trip
     now = datetime.now(UTC)
@@ -3041,12 +3051,12 @@ def test_extend_trip_multiple_times():
     background_tasks = MagicMock(spec=BackgroundTasks)
     trip = create_trip(trip_data, background_tasks, user_id=user_id)
 
-    # Extend 3 times: 15 + 30 + 15 = 60 minutes total
-    extend_trip(trip.id, 15, background_tasks, user_id=user_id)
+    # Extend 3 times: 30 + 60 + 30 = 120 minutes total (using allowed values)
     extend_trip(trip.id, 30, background_tasks, user_id=user_id)
-    extend_trip(trip.id, 15, background_tasks, user_id=user_id)
+    extend_trip(trip.id, 60, background_tasks, user_id=user_id)
+    extend_trip(trip.id, 30, background_tasks, user_id=user_id)
 
-    # Verify ETA was extended by ~60 minutes total
+    # Verify ETA was extended by ~120 minutes total
     with db.engine.begin() as connection:
         db_trip = connection.execute(
             sqlalchemy.text("SELECT eta FROM trips WHERE id = :trip_id"),
@@ -3054,7 +3064,7 @@ def test_extend_trip_multiple_times():
         ).fetchone()
 
         db_eta = db_trip.eta.replace(tzinfo=UTC) if db_trip.eta.tzinfo is None else db_trip.eta
-        expected_eta = original_eta + timedelta(minutes=60)
+        expected_eta = original_eta + timedelta(minutes=120)
         eta_diff = abs((db_eta - expected_eta).total_seconds())
         assert eta_diff < 60, f"ETA not extended correctly after multiple extensions: diff={eta_diff}s"
 
@@ -3494,9 +3504,9 @@ def test_create_trip_with_multiple_friend_contacts():
             {}
         )
 
-        # Create main user
+        # Create main user with premium subscription (test needs 4 contacts, free tier allows 2)
         result = connection.execute(
-            sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age) VALUES (:email, 'Main', 'User', 30) RETURNING id"),
+            sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES (:email, 'Main', 'User', 30, 'plus') RETURNING id"),
             {"email": test_email}
         )
         user_id = result.fetchone()[0]
@@ -4275,12 +4285,12 @@ def _setup_group_trip_with_contacts():
                 {"email": email}
             )
 
-        # Create owner
+        # Create owner with premium subscription (group trips require premium)
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age, created_at)
-                VALUES (:email, 'Owner', 'ExtendGroup', 30, :created_at)
+                INSERT INTO users (email, first_name, last_name, age, created_at, subscription_tier)
+                VALUES (:email, 'Owner', 'ExtendGroup', 30, :created_at, 'plus')
                 RETURNING id
                 """
             ),
@@ -4301,12 +4311,12 @@ def _setup_group_trip_with_contacts():
         )
         owner_contact_id = result.fetchone()[0]
 
-        # Create participant
+        # Create participant with premium subscription
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age, created_at)
-                VALUES (:email, 'Participant', 'ExtendGroup', 25, :created_at)
+                INSERT INTO users (email, first_name, last_name, age, created_at, subscription_tier)
+                VALUES (:email, 'Participant', 'ExtendGroup', 25, :created_at, 'plus')
                 RETURNING id
                 """
             ),
@@ -4521,10 +4531,10 @@ def test_extend_group_trip_updates_participant_checkin():
     try:
         background_tasks = MagicMock(spec=BackgroundTasks)
 
-        # Participant extends the trip
+        # Participant extends the trip (using allowed extension value)
         result = extend_trip(
             trip_id=trip_id,
-            minutes=45,
+            minutes=60,
             background_tasks=background_tasks,
             user_id=participant_id,
             lat=37.7749,
@@ -4620,7 +4630,7 @@ def test_extend_trip_returns_new_eta_in_response():
 
 def test_extend_trip_new_eta_matches_database():
     """Verify that the new_eta in response matches what's stored in the database."""
-    user_id, contact_id = setup_test_user_and_contact()
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
 
     # Create active trip
     now = datetime.now(UTC)
@@ -4640,8 +4650,8 @@ def test_extend_trip_new_eta_matches_database():
     trip = create_trip(trip_data, background_tasks, user_id=user_id)
 
     try:
-        # Extend by 45 minutes
-        result = extend_trip(trip.id, 45, background_tasks, user_id=user_id)
+        # Extend by 60 minutes (using allowed extension value)
+        result = extend_trip(trip.id, 60, background_tasks, user_id=user_id)
 
         assert "new_eta" in result, "Response should include new_eta"
         response_eta_str = result["new_eta"]

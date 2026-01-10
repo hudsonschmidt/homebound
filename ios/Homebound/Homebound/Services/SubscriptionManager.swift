@@ -298,7 +298,14 @@ final class SubscriptionManager: ObservableObject {
                             self.purchasedProductIDs.insert(transaction.productID)
 
                             // Get renewal info to check if subscription will auto-renew
+                            let previousAutoRenew = self.willAutoRenew
                             await updateRenewalStatus(for: transaction.productID)
+
+                            // Sync with backend if auto-renew status changed (e.g., user cancelled)
+                            if previousAutoRenew != self.willAutoRenew {
+                                debugLog("[SubscriptionManager] Auto-renew status changed: \(previousAutoRenew) -> \(self.willAutoRenew), syncing with backend")
+                                await verifyWithBackend(transaction: transaction)
+                            }
 
                             debugLog("[SubscriptionManager] Active subscription: \(transaction.productID), expires: \(expDate), willAutoRenew: \(willAutoRenew)")
                             return

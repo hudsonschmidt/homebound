@@ -31,8 +31,13 @@ from src.api.trips import TripCreate, TripResponse, create_trip, get_trips, get_
 
 # ==================== Test Helpers ====================
 
-def _create_test_user(connection, email: str, first_name: str = "Test", last_name: str = "User") -> int:
-    """Create a test user and return their ID."""
+def _create_test_user(connection, email: str, first_name: str = "Test", last_name: str = "User", premium: bool = True) -> int:
+    """Create a test user and return their ID.
+
+    Args:
+        premium: If True (default), creates user with Homebound+ subscription.
+                 Group trips require premium subscription.
+    """
     # Clean up existing data first
     connection.execute(
         sqlalchemy.text("DELETE FROM trip_participants WHERE user_id IN (SELECT id FROM users WHERE email = :email)"),
@@ -79,11 +84,12 @@ def _create_test_user(connection, email: str, first_name: str = "Test", last_nam
         {"email": email}
     )
 
+    tier = "plus" if premium else "free"
     result = connection.execute(
         sqlalchemy.text(
             """
-            INSERT INTO users (email, first_name, last_name, age, created_at)
-            VALUES (:email, :first_name, :last_name, 30, :created_at)
+            INSERT INTO users (email, first_name, last_name, age, created_at, subscription_tier)
+            VALUES (:email, :first_name, :last_name, 30, :created_at, :tier)
             RETURNING id
             """
         ),
@@ -91,7 +97,8 @@ def _create_test_user(connection, email: str, first_name: str = "Test", last_nam
             "email": email,
             "first_name": first_name,
             "last_name": last_name,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.utcnow(),
+            "tier": tier
         }
     )
     return result.fetchone()[0]

@@ -6,7 +6,7 @@ final class SafetyContactTests: XCTestCase {
     // MARK: - SafetyContact ID Tests
 
     func testSafetyContact_EmailContact_ID() {
-        let contact = Contact(id: 42, user_id: 100, name: "Test", email: "test@example.com")
+        let contact = Contact(id: 42, user_id: 100, name: "Test", email: "test@example.com", group: nil)
         let safetyContact = SafetyContact.emailContact(contact)
 
         XCTAssertEqual(safetyContact.id, "contact-42")
@@ -22,7 +22,7 @@ final class SafetyContactTests: XCTestCase {
     // MARK: - SafetyContact Display Name Tests
 
     func testSafetyContact_DisplayName_EmailContact() {
-        let contact = Contact(id: 1, user_id: 100, name: "Emergency Contact", email: "emergency@example.com")
+        let contact = Contact(id: 1, user_id: 100, name: "Emergency Contact", email: "emergency@example.com", group: nil)
         let safetyContact = SafetyContact.emailContact(contact)
 
         XCTAssertEqual(safetyContact.displayName, "Emergency Contact")
@@ -38,7 +38,7 @@ final class SafetyContactTests: XCTestCase {
     // MARK: - SafetyContact Type Check Tests
 
     func testSafetyContact_IsEmailContact_True() {
-        let contact = Contact(id: 1, user_id: 100, name: "Test", email: "test@example.com")
+        let contact = Contact(id: 1, user_id: 100, name: "Test", email: "test@example.com", group: nil)
         let safetyContact = SafetyContact.emailContact(contact)
 
         XCTAssertTrue(safetyContact.isEmailContact)
@@ -56,7 +56,7 @@ final class SafetyContactTests: XCTestCase {
     // MARK: - SafetyContact Icon Tests
 
     func testSafetyContact_IconName_EmailContact() {
-        let contact = Contact(id: 1, user_id: 100, name: "Test", email: "test@example.com")
+        let contact = Contact(id: 1, user_id: 100, name: "Test", email: "test@example.com", group: nil)
         let safetyContact = SafetyContact.emailContact(contact)
 
         XCTAssertEqual(safetyContact.iconName, "envelope.fill")
@@ -72,9 +72,9 @@ final class SafetyContactTests: XCTestCase {
     // MARK: - SafetyContact Hashable Tests
 
     func testSafetyContact_Hashable_EmailContacts() {
-        let contact1 = Contact(id: 1, user_id: 100, name: "Test1", email: "test1@example.com")
-        let contact2 = Contact(id: 1, user_id: 100, name: "Test1", email: "test1@example.com")
-        let contact3 = Contact(id: 2, user_id: 100, name: "Test2", email: "test2@example.com")
+        let contact1 = Contact(id: 1, user_id: 100, name: "Test1", email: "test1@example.com", group: nil)
+        let contact2 = Contact(id: 1, user_id: 100, name: "Test1", email: "test1@example.com", group: nil)
+        let contact3 = Contact(id: 2, user_id: 100, name: "Test2", email: "test2@example.com", group: nil)
 
         let safetyContact1 = SafetyContact.emailContact(contact1)
         let safetyContact2 = SafetyContact.emailContact(contact2)
@@ -107,7 +107,7 @@ final class SafetyContactTests: XCTestCase {
     }
 
     func testSafetyContact_Hashable_MixedTypes() {
-        let contact = Contact(id: 42, user_id: 100, name: "Test", email: "test@example.com")
+        let contact = Contact(id: 42, user_id: 100, name: "Test", email: "test@example.com", group: nil)
         let friend = TestFixtures.makeFriend(userId: 42)
 
         let emailContact = SafetyContact.emailContact(contact)

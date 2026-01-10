@@ -1305,8 +1305,7 @@ def update_trip(
             sqlalchemy.text(
                 """
                 SELECT id, status, activity,
-                       contact1, contact2, contact3,
-                       friend_contact1, friend_contact2, friend_contact3
+                       contact1, contact2, contact3
                 FROM trips
                 WHERE id = :trip_id AND user_id = :user_id
                 """
@@ -1326,15 +1325,18 @@ def update_trip(
                 detail="Only planned trips can be edited"
             )
 
+        # Get friend contacts from junction table
+        current_friends = _get_friend_contacts_for_trip(connection, trip_id)
+
         # Check contact limit: merge current contacts with updates and count
         # Use body value if provided, otherwise keep existing
         final_contacts = [
             body.contact1 if body.contact1 is not None else trip.contact1,
             body.contact2 if body.contact2 is not None else trip.contact2,
             body.contact3 if body.contact3 is not None else trip.contact3,
-            body.friend_contact1 if body.friend_contact1 is not None else trip.friend_contact1,
-            body.friend_contact2 if body.friend_contact2 is not None else trip.friend_contact2,
-            body.friend_contact3 if body.friend_contact3 is not None else trip.friend_contact3,
+            body.friend_contact1 if body.friend_contact1 is not None else current_friends["friend_contact1"],
+            body.friend_contact2 if body.friend_contact2 is not None else current_friends["friend_contact2"],
+            body.friend_contact3 if body.friend_contact3 is not None else current_friends["friend_contact3"],
         ]
         contact_count = sum(1 for c in final_contacts if c is not None)
         from src.services.subscription_check import (
@@ -1479,8 +1481,7 @@ def update_trip(
             contact2 = body.contact2 if body.contact2 is not None else current.contact2
             contact3 = body.contact3 if body.contact3 is not None else current.contact3
 
-            # Get current friend contacts from junction table
-            current_friends = _get_friend_contacts_for_trip(connection, trip_id)
+            # Use current_friends already fetched earlier in function
             friend1 = body.friend_contact1 if body.friend_contact1 is not None else current_friends["friend_contact1"]
             friend2 = body.friend_contact2 if body.friend_contact2 is not None else current_friends["friend_contact2"]
             friend3 = body.friend_contact3 if body.friend_contact3 is not None else current_friends["friend_contact3"]

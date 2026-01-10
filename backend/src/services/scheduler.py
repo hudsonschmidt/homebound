@@ -23,6 +23,7 @@ from .notifications import (
     send_friend_trip_starting_push,
     send_data_refresh_push,
 )
+from .app_store import app_store_service
 
 
 def parse_datetime_robust(dt_value: Any) -> datetime | None:
@@ -1089,6 +1090,211 @@ async def clean_old_live_locations():
         log.error(f"Error cleaning old live locations: {e}", exc_info=True)
 
 
+async def sync_subscription_status():
+    """Sync subscription status with Apple's App Store Server API.
+
+    This job ensures our database stays accurate even when:
+    - User uninstalls the app (we never learn about cancellation)
+    - User doesn't open the app after cancelling
+    - Refunds are processed through Apple Support
+    - Payment failures cause subscription to lapse
+
+    Runs periodically to verify active subscriptions are still valid.
+    """
+    if not app_store_service.is_configured:
+        log.debug("[Scheduler] App Store API not configured, skipping subscription sync")
+        return
+
+    try:
+        now = datetime.utcnow()
+        log.info(f"[Scheduler] Starting subscription sync at {now}")
+
+        # Get all subscriptions that are still supposed to be active
+        with db.engine.connect() as conn:
+            active_subscriptions = conn.execute(
+                sqlalchemy.text("""
+                    SELECT s.id, s.user_id, s.original_transaction_id, s.product_id,
+                           s.expires_date, s.status, s.auto_renew_status, s.environment,
+                           u.subscription_tier
+                    FROM subscriptions s
+                    JOIN users u ON s.user_id = u.id
+                    WHERE s.expires_date > :now
+                    ORDER BY s.updated_at ASC
+                    LIMIT 100
+                """),
+                {"now": now}
+            ).fetchall()
+
+        log.info(f"[Scheduler] Found {len(active_subscriptions)} active subscriptions to verify")
+
+        synced_count = 0
+        error_count = 0
+
+        for sub in active_subscriptions:
+            try:
+                # Query Apple for the current subscription status
+                apple_status = await app_store_service.get_subscription_status(
+                    sub.original_transaction_id,
+                    environment=sub.environment or "production"
+                )
+
+                if apple_status is None:
+                    log.warning(f"[Scheduler] Could not verify subscription {sub.id} - Apple returned no data")
+                    continue
+
+                # Parse Apple's response to extract subscription info
+                # The response contains signedRenewalInfo and signedTransactionInfo
+                renewal_info = _parse_apple_renewal_info(apple_status)
+                if renewal_info is None:
+                    continue
+
+                # Check for discrepancies
+                needs_update = False
+                new_status = sub.status
+                new_auto_renew = sub.auto_renew_status
+                new_expires_date = sub.expires_date
+
+                # Check auto-renew status
+                if renewal_info.get("will_auto_renew") is not None:
+                    apple_auto_renew = renewal_info["will_auto_renew"]
+                    if apple_auto_renew != sub.auto_renew_status:
+                        log.info(f"[Scheduler] Subscription {sub.id}: auto_renew changed {sub.auto_renew_status} -> {apple_auto_renew}")
+                        new_auto_renew = apple_auto_renew
+                        new_status = "active" if apple_auto_renew else "cancelled"
+                        needs_update = True
+
+                # Check expiration date
+                if renewal_info.get("expires_date"):
+                    apple_expires = renewal_info["expires_date"]
+                    if apple_expires != sub.expires_date:
+                        log.info(f"[Scheduler] Subscription {sub.id}: expires_date changed {sub.expires_date} -> {apple_expires}")
+                        new_expires_date = apple_expires
+                        needs_update = True
+
+                # Check for revocation (refund)
+                if renewal_info.get("is_revoked"):
+                    log.info(f"[Scheduler] Subscription {sub.id}: was revoked/refunded")
+                    new_status = "cancelled"
+                    new_auto_renew = False
+                    needs_update = True
+
+                # Update database if needed
+                if needs_update:
+                    # Determine new tier
+                    is_still_active = (
+                        new_expires_date is not None and
+                        new_expires_date > now
+                    )
+                    new_tier = "plus" if is_still_active else "free"
+
+                    with db.engine.begin() as conn:
+                        # Update subscription record
+                        conn.execute(
+                            sqlalchemy.text("""
+                                UPDATE subscriptions
+                                SET status = :status,
+                                    auto_renew_status = :auto_renew,
+                                    expires_date = :expires_date,
+                                    updated_at = :updated_at
+                                WHERE id = :sub_id
+                            """),
+                            {
+                                "sub_id": sub.id,
+                                "status": new_status,
+                                "auto_renew": new_auto_renew,
+                                "expires_date": new_expires_date,
+                                "updated_at": now
+                            }
+                        )
+
+                        # Update user tier if needed
+                        if new_tier != sub.subscription_tier:
+                            conn.execute(
+                                sqlalchemy.text("""
+                                    UPDATE users
+                                    SET subscription_tier = :tier,
+                                        subscription_expires_at = :expires_at
+                                    WHERE id = :user_id
+                                """),
+                                {
+                                    "user_id": sub.user_id,
+                                    "tier": new_tier,
+                                    "expires_at": new_expires_date
+                                }
+                            )
+                            log.info(f"[Scheduler] Updated user {sub.user_id} tier: {sub.subscription_tier} -> {new_tier}")
+
+                    synced_count += 1
+
+            except Exception as e:
+                log.error(f"[Scheduler] Error syncing subscription {sub.id}: {e}")
+                error_count += 1
+
+        log.info(f"[Scheduler] Subscription sync complete: {synced_count} updated, {error_count} errors")
+
+    except Exception as e:
+        log.error(f"Error syncing subscription status: {e}", exc_info=True)
+
+
+def _parse_apple_renewal_info(apple_response: dict) -> dict | None:
+    """Parse Apple's subscription status response.
+
+    Apple returns JWS (signed JWT) tokens that need to be decoded.
+    In production, you should verify the signature using Apple's certificate.
+    """
+    import base64
+    import json
+
+    try:
+        # Get the signed renewal info
+        data = apple_response.get("data", [])
+        if not data:
+            return None
+
+        # Get the first (most recent) subscription group status
+        group_status = data[0] if data else {}
+        last_transactions = group_status.get("lastTransactions", [])
+        if not last_transactions:
+            return None
+
+        # Get the most recent transaction
+        last_tx = last_transactions[0] if last_transactions else {}
+        signed_renewal = last_tx.get("signedRenewalInfo", "")
+        signed_transaction = last_tx.get("signedTransactionInfo", "")
+
+        result = {}
+
+        # Decode renewal info
+        if signed_renewal:
+            parts = signed_renewal.split(".")
+            if len(parts) == 3:
+                payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+                result["will_auto_renew"] = payload.get("autoRenewStatus") == 1
+                result["is_in_billing_retry"] = payload.get("isInBillingRetryPeriod", False)
+
+        # Decode transaction info
+        if signed_transaction:
+            parts = signed_transaction.split(".")
+            if len(parts) == 3:
+                payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+
+                # Parse expiration date
+                expires_ms = payload.get("expiresDate")
+                if expires_ms:
+                    result["expires_date"] = datetime.utcfromtimestamp(expires_ms / 1000)
+
+                # Check for revocation
+                result["is_revoked"] = payload.get("revocationDate") is not None
+
+        return result if result else None
+
+    except Exception as e:
+        log.error(f"[Scheduler] Error parsing Apple renewal info: {e}")
+        return None
+
+
 def init_scheduler() -> AsyncIOScheduler:
     """Initialize and configure the scheduler."""
     global scheduler
@@ -1138,6 +1344,17 @@ def init_scheduler() -> AsyncIOScheduler:
         IntervalTrigger(hours=24),
         id="clean_live_locations",
         name="Clean old live location records",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    # Sync subscription status with Apple every 6 hours
+    # This catches cancellations, refunds, and expirations that the app didn't report
+    scheduler.add_job(
+        sync_subscription_status,
+        IntervalTrigger(hours=6),
+        id="sync_subscription_status",
+        name="Sync subscription status with Apple",
         replace_existing=True,
         max_instances=1,
     )
