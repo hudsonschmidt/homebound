@@ -7,13 +7,28 @@ struct SubscriptionSettingsView: View {
     @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var subscriptionStatus: SubscriptionStatusResponse?
     @State private var showPaywall = false
+    @State private var showFeatures = false
     @State private var isLoading = true
+
+    /// Whether the subscription is cancelled (not auto-renewing)
+    private var isCancelled: Bool {
+        subscriptionStatus?.autoRenew == false
+    }
 
     var body: some View {
         List {
-            // Current plan section
+            // Current plan section - tappable to show features (premium) or paywall (free)
             Section {
-                currentPlanCard
+                Button {
+                    if subscriptionManager.subscriptionStatus.isPremium {
+                        showFeatures = true
+                    } else {
+                        showPaywall = true
+                    }
+                } label: {
+                    currentPlanCard
+                }
+                .buttonStyle(.plain)
             }
 
             // Upgrade or manage section
@@ -23,7 +38,7 @@ struct SubscriptionSettingsView: View {
                         openSubscriptionManagement()
                     } label: {
                         HStack {
-                            Label("Manage on App Store", systemImage: "gear")
+                            Label("Manage in Settings", systemImage: "gear")
                             Spacer()
                             Image(systemName: "arrow.up.right")
                                 .font(.caption)
@@ -31,12 +46,43 @@ struct SubscriptionSettingsView: View {
                         }
                     }
 
-                    if let expirationDate = subscriptionManager.expirationDate {
+                    // Show trial info, cancelled info, or renewal date
+                    if subscriptionManager.isTrialing, let expirationDate = subscriptionManager.expirationDate {
                         HStack {
-                            Label("Renews", systemImage: "calendar")
+                            Label("Free trial ends", systemImage: "clock")
                             Spacer()
                             Text(expirationDate, style: .date)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.orange)
+                        }
+
+                        if !isCancelled {
+                            HStack {
+                                if let price = subscriptionManager.currentSubscriptionPrice,
+                                   let period = subscriptionManager.currentSubscriptionPeriod {
+                                    Label("Then \(price)/\(period)", systemImage: "creditcard")
+                                } else {
+                                    Label("You'll be charged", systemImage: "creditcard")
+                                }
+                                Spacer()
+                                Text(expirationDate, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else if let expirationDate = subscriptionManager.expirationDate {
+                        if isCancelled {
+                            HStack {
+                                Label("Expires", systemImage: "calendar.badge.exclamationmark")
+                                Spacer()
+                                Text(expirationDate, style: .date)
+                                    .foregroundStyle(.orange)
+                            }
+                        } else {
+                            HStack {
+                                Label("Renews", systemImage: "calendar")
+                                Spacer()
+                                Text(expirationDate, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -114,6 +160,9 @@ struct SubscriptionSettingsView: View {
         .sheet(isPresented: $showPaywall) {
             PaywallView(feature: nil)
         }
+        .sheet(isPresented: $showFeatures) {
+            FeaturesOnlyView()
+        }
         .task {
             await loadData()
         }
@@ -142,10 +191,14 @@ struct SubscriptionSettingsView: View {
 
                 Spacer()
 
-                if subscriptionManager.isTrialing {
-                    Text("Trial")
+                if subscriptionManager.isTrialing, let expirationDate = subscriptionManager.expirationDate {
+                    Text("Trial ends \(expirationDate, style: .relative)")
                         .font(.caption.bold())
                         .foregroundStyle(.orange)
+                } else if isCancelled {
+                    Text("Cancelled")
+                        .font(.caption.bold())
+                        .foregroundStyle(.red)
                 }
             }
 
@@ -153,12 +206,27 @@ struct SubscriptionSettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(subscriptionManager.subscriptionStatus.isPremium ? "Homebound+" : "Free Plan")
                         .font(.title2.bold())
+                        .foregroundStyle(.primary)
 
                     if subscriptionManager.subscriptionStatus.isPremium {
-                        if let status = subscriptionStatus {
-                            Text(status.autoRenew ? "Auto-renews" : "Expires soon")
+                        if subscriptionManager.isTrialing {
+                            if isCancelled {
+                                Text("Trial cancelled")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            } else {
+                                Text("Free trial active")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        } else if isCancelled {
+                            Text("Access until expiration")
                                 .font(.caption)
-                                .foregroundStyle(status.autoRenew ? .green : .orange)
+                                .foregroundStyle(.orange)
+                        } else {
+                            Text("Auto-renews")
+                                .font(.caption)
+                                .foregroundStyle(.green)
                         }
                     } else {
                         Text("Basic features")
@@ -169,9 +237,23 @@ struct SubscriptionSettingsView: View {
 
                 Spacer()
 
-                Image(systemName: subscriptionManager.subscriptionStatus.isPremium ? "star.circle.fill" : "person.circle")
-                    .font(.system(size: 44))
-                    .foregroundStyle(subscriptionManager.subscriptionStatus.isPremium ? Color.hbBrand : .secondary)
+                HStack(spacing: 8) {
+                    if subscriptionManager.subscriptionStatus.isPremium {
+                        Image("Logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        Image(systemName: "person.circle")
+                            .font(.system(size: 44))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding()
@@ -218,6 +300,136 @@ struct SubscriptionSettingsView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Features Only View
+
+/// Shows Homebound+ features without subscription options (for already subscribed users)
+private struct FeaturesOnlyView: View {
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Hero section
+                    VStack(spacing: 16) {
+                        HStack(spacing: 12) {
+                            Image("Logo")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 48, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                            Text("Homebound+")
+                                .font(.title.bold())
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [Color.hbBrand, Color.hbTeal],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                        }
+
+                        Text("Your premium features")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 8)
+
+                    // Feature grid
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("What's Included")
+                            .font(.headline)
+                            .padding(.horizontal, 4)
+
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            FeatureCell(icon: "person.2.fill", title: "Group Trips", subtitle: "Travel with friends")
+                            FeatureCell(icon: "clock.arrow.circlepath", title: "Unlimited History", subtitle: "Relive every adventure")
+                            FeatureCell(icon: "platter.filled.bottom.iphone", title: "Live Activity", subtitle: "& Dynamic Island")
+                            FeatureCell(icon: "widget.small.badge.plus", title: "Widgets", subtitle: "Quick trip status")
+                            FeatureCell(icon: "map.fill", title: "Trip Map", subtitle: "See all your adventures")
+                            FeatureCell(icon: "bookmark.fill", title: "Trip Templates", subtitle: "Start trips in seconds")
+                            FeatureCell(icon: "timer", title: "Flexible Extensions", subtitle: "Up to 4 hour extensions")
+                            FeatureCell(icon: "square.and.arrow.up", title: "Export Your Data", subtitle: "Download trip history")
+                        }
+
+                        // Additional features
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Also included:")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 8)
+
+                            ForEach([
+                                "5 contacts per trip",
+                                "8 trip statistics",
+                                "3 favorite activities",
+                                "Contact groups",
+                                "Custom notification messages",
+                                "Custom check-in intervals"
+                            ], id: \.self) { feature in
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption)
+                                        .fontWeight(.bold)
+                                        .foregroundStyle(Color.hbBrand)
+                                    Text(feature)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                    }
+
+                    Spacer(minLength: 40)
+                }
+                .padding()
+            }
+            .navigationTitle("Your Plan")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct FeatureCell: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(Color.hbBrand)
+                .frame(width: 36, height: 36)
+                .background(Color.hbBrand.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .frame(height: 100)
+        .background(Color.hbCardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

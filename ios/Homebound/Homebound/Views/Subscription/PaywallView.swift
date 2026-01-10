@@ -197,7 +197,7 @@ struct PaywallView: View {
     private var pricingOptions: some View {
         VStack(spacing: 12) {
             if subscriptionManager.products.isEmpty && !subscriptionManager.isLoading {
-                // No products loaded - show error state with debug info
+                // No products loaded - show error state
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.title)
@@ -205,19 +205,6 @@ struct PaywallView: View {
                     Text("Unable to load subscription options")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-
-                    // Debug info - remove after fixing
-                    Text("Requested: \(SubscriptionProduct.allCases.map { $0.rawValue }.joined(separator: ", "))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-
-                    if let error = subscriptionManager.purchaseError {
-                        Text("Error: \(error)")
-                            .font(.caption2)
-                            .foregroundStyle(.red)
-                            .multilineTextAlignment(.center)
-                    }
 
                     Button("Retry") {
                         Task {
@@ -254,6 +241,17 @@ struct PaywallView: View {
 
     // MARK: - Subscribe Button
 
+    /// Check if selected product has a free trial
+    private var selectedProductHasTrial: Bool {
+        guard let product = selectedProduct,
+              let subscription = product.subscription,
+              let intro = subscription.introductoryOffer,
+              intro.paymentMode == .freeTrial else {
+            return false
+        }
+        return true
+    }
+
     private var subscribeButton: some View {
         Button {
             guard let product = selectedProduct else { return }
@@ -266,9 +264,13 @@ struct PaywallView: View {
             }
         } label: {
             HStack {
-                Text("Subscribe Now")
-                if let product = selectedProduct {
-                    Text("- \(product.displayPrice)/\(product.id == SubscriptionProduct.yearlyPlus.rawValue ? "year" : "month")")
+                if selectedProductHasTrial {
+                    Text("Start Free Trial")
+                } else {
+                    Text("Subscribe Now")
+                    if let product = selectedProduct {
+                        Text("- \(product.displayPrice)/\(product.id == SubscriptionProduct.yearlyPlus.rawValue ? "year" : "month")")
+                    }
                 }
             }
         }
@@ -357,6 +359,31 @@ private struct PricingCard: View {
     let monthlyPrice: String?
     let onSelect: () -> Void
 
+    /// Get the trial period description from the product's introductory offer
+    private var trialDescription: String? {
+        guard let subscription = product.subscription,
+              let intro = subscription.introductoryOffer,
+              intro.paymentMode == .freeTrial else {
+            return nil
+        }
+
+        let period = intro.period
+        let value = period.value
+
+        switch period.unit {
+        case .day:
+            return "\(value)-day free trial"
+        case .week:
+            return value == 1 ? "1-week free trial" : "\(value)-week free trial"
+        case .month:
+            return value == 1 ? "1-month free trial" : "\(value)-month free trial"
+        case .year:
+            return value == 1 ? "1-year free trial" : "\(value)-year free trial"
+        @unknown default:
+            return "Free trial"
+        }
+    }
+
     var body: some View {
         Button(action: onSelect) {
             HStack {
@@ -381,7 +408,21 @@ private struct PricingCard: View {
                         }
                     }
 
-                    if let monthlyPrice = monthlyPrice {
+                    if let trialDescription = trialDescription {
+                        HStack(spacing: 4) {
+                            Text(trialDescription)
+                                .font(.caption.bold())
+                                .foregroundStyle(.green)
+                            if let monthlyPrice = monthlyPrice {
+                                Text("•")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("\(monthlyPrice)/mo")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else if let monthlyPrice = monthlyPrice {
                         Text("\(monthlyPrice)/month")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -390,8 +431,15 @@ private struct PricingCard: View {
 
                 Spacer()
 
-                Text(product.displayPrice)
-                    .font(.title3.bold())
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(product.displayPrice)
+                        .font(.title3.bold())
+                    if trialDescription != nil {
+                        Text("after trial")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding()
             .background(

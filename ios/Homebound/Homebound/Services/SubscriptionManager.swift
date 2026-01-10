@@ -321,6 +321,25 @@ final class SubscriptionManager: ObservableObject {
         formatter.locale = product.priceFormatStyle.locale
         return formatter.string(from: monthlyPrice as NSNumber)
     }
+
+    /// Get the current subscription's display price (for showing what user will be charged)
+    var currentSubscriptionPrice: String? {
+        guard let productId = purchasedProductIDs.first,
+              let product = products.first(where: { $0.id == productId }) else {
+            return nil
+        }
+        return product.displayPrice
+    }
+
+    /// Get the current subscription's billing period description
+    var currentSubscriptionPeriod: String? {
+        guard let productId = purchasedProductIDs.first else { return nil }
+        if productId == SubscriptionProduct.yearlyPlus.rawValue {
+            return "year"
+        } else {
+            return "month"
+        }
+    }
 }
 
 // MARK: - Session Extension
