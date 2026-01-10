@@ -139,13 +139,45 @@ def get_limits(user_id: int) -> FeatureLimits:
 
 
 def get_limits_dict(user_id: int) -> dict[str, Any]:
-    """Get feature limits as a dictionary for API response."""
+    """Get feature limits as a dictionary for API response.
+
+    Note: family_sharing_enabled is only true for yearly subscriptions.
+    """
     limits = get_limits(user_id)
     tier = get_user_tier(user_id)
     result = limits.to_dict()
     result["tier"] = tier
     result["is_premium"] = tier == "plus"
+
+    # Family sharing is only available for yearly subscriptions
+    if tier == "plus":
+        result["family_sharing_enabled"] = _has_yearly_subscription(user_id)
+    else:
+        result["family_sharing_enabled"] = False
+
     return result
+
+
+def _has_yearly_subscription(user_id: int) -> bool:
+    """Check if user has a yearly subscription (required for family sharing)."""
+    with db.engine.begin() as conn:
+        result = conn.execute(
+            sqlalchemy.text(
+                """
+                SELECT product_id FROM subscriptions
+                WHERE user_id = :user_id
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"user_id": user_id}
+        ).fetchone()
+
+        if not result or not result.product_id:
+            return False
+
+        # Yearly product ID contains "yearly"
+        return "yearly" in result.product_id.lower()
 
 
 async def require_premium(user_id: int = Depends(auth.get_current_user_id)) -> bool:

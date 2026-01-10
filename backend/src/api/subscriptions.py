@@ -195,6 +195,12 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
         if body.expires_date:
             expires_date = datetime.fromisoformat(body.expires_date.replace("Z", "+00:00"))
 
+        # Family sharing is only available for yearly subscriptions
+        is_yearly = "yearly" in body.product_id.lower()
+        is_family_shared = body.is_family_shared and is_yearly
+        if body.is_family_shared and not is_yearly:
+            logger.warning(f"Family sharing flag ignored for non-yearly product: {body.product_id}")
+
         # Check if this transaction already exists
         existing = conn.execute(
             sqlalchemy.text(
@@ -230,7 +236,7 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
                     "expires_date": expires_date,
                     "status": subscription_status,
                     "auto_renew_status": body.auto_renew,
-                    "is_family_shared": body.is_family_shared,
+                    "is_family_shared": is_family_shared,
                     "is_trial": body.is_trial,
                     "product_id": body.product_id,
                     "updated_at": datetime.now(UTC)
@@ -260,7 +266,7 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
                     "expires_date": expires_date,
                     "status": subscription_status,
                     "auto_renew_status": body.auto_renew,
-                    "is_family_shared": body.is_family_shared,
+                    "is_family_shared": is_family_shared,
                     "is_trial": body.is_trial,
                     "environment": body.environment
                 }
