@@ -67,7 +67,11 @@ struct PaywallView: View {
             } message: {
                 Text(subscriptionManager.purchaseError ?? "")
             }
-            .onAppear {
+            .task {
+                // Load products when paywall appears
+                if subscriptionManager.products.isEmpty {
+                    await subscriptionManager.loadProducts()
+                }
                 // Pre-select yearly (better value)
                 if selectedProduct == nil {
                     selectedProduct = subscriptionManager.yearlyProduct ?? subscriptionManager.monthlyProduct
@@ -192,16 +196,57 @@ struct PaywallView: View {
 
     private var pricingOptions: some View {
         VStack(spacing: 12) {
-            ForEach(subscriptionManager.products, id: \.id) { product in
-                PricingCard(
-                    product: product,
-                    isSelected: selectedProduct?.id == product.id,
-                    savingsPercentage: product.id == SubscriptionProduct.yearlyPlus.rawValue
-                        ? subscriptionManager.yearlySavingsPercentage
-                        : nil,
-                    monthlyPrice: subscriptionManager.formattedMonthlyPrice(for: product)
-                ) {
-                    selectedProduct = product
+            if subscriptionManager.products.isEmpty && !subscriptionManager.isLoading {
+                // No products loaded - show error state with debug info
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.title)
+                        .foregroundStyle(.orange)
+                    Text("Unable to load subscription options")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    // Debug info - remove after fixing
+                    Text("Requested: \(SubscriptionProduct.allCases.map { $0.rawValue }.joined(separator: ", "))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+
+                    if let error = subscriptionManager.purchaseError {
+                        Text("Error: \(error)")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    Button("Retry") {
+                        Task {
+                            await subscriptionManager.loadProducts()
+                        }
+                    }
+                    .font(.subheadline.bold())
+                    .foregroundStyle(Color.hbBrand)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.hbCardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            } else if subscriptionManager.isLoading {
+                ProgressView("Loading options...")
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            } else {
+                ForEach(subscriptionManager.products, id: \.id) { product in
+                    PricingCard(
+                        product: product,
+                        isSelected: selectedProduct?.id == product.id,
+                        savingsPercentage: product.id == SubscriptionProduct.yearlyPlus.rawValue
+                            ? subscriptionManager.yearlySavingsPercentage
+                            : nil,
+                        monthlyPrice: subscriptionManager.formattedMonthlyPrice(for: product)
+                    ) {
+                        selectedProduct = product
+                    }
                 }
             }
         }

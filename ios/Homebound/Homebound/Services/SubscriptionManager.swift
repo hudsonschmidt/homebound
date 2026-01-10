@@ -88,11 +88,17 @@ final class SubscriptionManager: ObservableObject {
 
         do {
             let productIDs = SubscriptionProduct.allCases.map { $0.rawValue }
+            debugLog("[SubscriptionManager] Requesting products: \(productIDs)")
             products = try await Product.products(for: Set(productIDs))
             products.sort { $0.price < $1.price }  // Sort by price (monthly first)
-            debugLog("[SubscriptionManager] Loaded \(products.count) products")
+            debugLog("[SubscriptionManager] Loaded \(products.count) products: \(products.map { $0.id })")
+
+            if products.isEmpty {
+                debugLog("[SubscriptionManager] ⚠️ No products returned - check App Store Connect configuration")
+            }
         } catch {
             debugLog("[SubscriptionManager] Failed to load products: \(error)")
+            purchaseError = "Failed to load subscription options. Please try again later."
         }
     }
 
