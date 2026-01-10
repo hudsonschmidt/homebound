@@ -21,37 +21,31 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 0.5.1",
+        title: "Update 0.6.0",
         features: [
+            WhatsNewFeature(
+                icon: "environments",
+                iconColor: .primary,
+                title: "Homebound+",
+                description: "Subscription to unlock the full app. For testing, you will not be charged if you subscribe."
+            ),
             WhatsNewFeature(
                 icon: "person.3",
                 iconColor: .primary,
-                title: "Group Trips",
-                description: "Create group trips with your friends and family."
+                title: "Contact Groups",
+                description: "Group friends to make it easier to invite them to trips."
             ),
             WhatsNewFeature(
-                icon: "questionmark.circle",
+                icon: "message",
                 iconColor: .primary,
-                title: "About Page",
-                description: "New About page with app info, mission, acknowledgements, and community info."
-            ),
-            WhatsNewFeature(
-                icon: "flag",
-                iconColor: .primary,
-                title: "Getting Started",
-                description: "New onboarding flow to help new users get started with Homebound. Always accessible from Settings."
-            ),
-            WhatsNewFeature(
-                icon: "figure.walk",
-                iconColor: .primary,
-                title: "New Activities",
-                description: "Walks, canyoneering, and river rafting."
+                title: "Custom Messages",
+                description: "Add custom messages that get sent to contacts during start and overdue."
             ),
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .primary,
                 title: "Bug Fixes",
-                description: "Check in coords are properly saved and displayed. Privacy improvements. Location search fixes. App performance fixes. Trip history fix. And more!"
+                description: "Can't friend self."
             )
         ]
     )
