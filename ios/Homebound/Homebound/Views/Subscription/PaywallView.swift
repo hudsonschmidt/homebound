@@ -235,6 +235,7 @@ struct PaywallView: View {
                     PricingCard(
                         product: product,
                         isSelected: selectedProduct?.id == product.id,
+                        isTrialEligible: selectedProduct?.id == product.id ? isEligibleForTrial : false,
                         savingsPercentage: product.id == SubscriptionProduct.yearlyPlus.rawValue
                             ? subscriptionManager.yearlySavingsPercentage
                             : nil,
@@ -275,6 +276,33 @@ struct PaywallView: View {
         isEligibleForTrial
     }
 
+    /// Get the trial duration string for the selected product (e.g., "7-Day")
+    private var trialDurationString: String? {
+        guard isEligibleForTrial,
+              let product = selectedProduct,
+              let subscription = product.subscription,
+              let intro = subscription.introductoryOffer,
+              intro.paymentMode == .freeTrial else {
+            return nil
+        }
+
+        let period = intro.period
+        let value = period.value
+
+        switch period.unit {
+        case .day:
+            return "\(value)-Day"
+        case .week:
+            return value == 1 ? "1-Week" : "\(value)-Week"
+        case .month:
+            return value == 1 ? "1-Month" : "\(value)-Month"
+        case .year:
+            return value == 1 ? "1-Year" : "\(value)-Year"
+        @unknown default:
+            return nil
+        }
+    }
+
     private var subscribeButton: some View {
         Button {
             guard let product = selectedProduct else { return }
@@ -288,7 +316,11 @@ struct PaywallView: View {
         } label: {
             HStack {
                 if selectedProductHasTrial {
-                    Text("Start Free Trial")
+                    if let duration = trialDurationString {
+                        Text("Start \(duration) Free Trial")
+                    } else {
+                        Text("Start Free Trial")
+                    }
                 } else {
                     Text("Subscribe Now")
                     if let product = selectedProduct {
@@ -378,12 +410,18 @@ private struct PaywallFeatureRow: View {
 private struct PricingCard: View {
     let product: Product
     let isSelected: Bool
+    /// Whether the user is eligible for the free trial (hasn't used it before)
+    let isTrialEligible: Bool
     let savingsPercentage: Int?
     let monthlyPrice: String?
     let onSelect: () -> Void
 
     /// Get the trial period description from the product's introductory offer
+    /// Only returns a value if the product has a trial AND user is eligible
     private var trialDescription: String? {
+        // Only show trial info if user is actually eligible
+        guard isTrialEligible else { return nil }
+
         guard let subscription = product.subscription,
               let intro = subscription.introductoryOffer,
               intro.paymentMode == .freeTrial else {
@@ -502,6 +540,32 @@ struct PremiumBadge: View {
             )
         )
         .clipShape(Capsule())
+    }
+}
+
+/// Badge to indicate trial subscription status
+struct TrialBadge: View {
+    var body: some View {
+        Text("TRIAL")
+            .font(.caption2.bold())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.orange)
+            .clipShape(Capsule())
+    }
+}
+
+/// Badge to indicate cancelled subscription (still has access until expiration)
+struct CancelledBadge: View {
+    var body: some View {
+        Text("EXPIRES")
+            .font(.caption2.bold())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.red.opacity(0.8))
+            .clipShape(Capsule())
     }
 }
 

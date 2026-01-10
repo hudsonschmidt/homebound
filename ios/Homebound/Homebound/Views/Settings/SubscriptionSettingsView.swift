@@ -18,18 +18,20 @@ struct SubscriptionSettingsView: View {
 
     var body: some View {
         List {
-            // Current plan section - tappable to show features (premium) or paywall (free)
+            // Current plan section - tappable to show features (premium only)
             Section {
-                Button {
-                    if subscriptionManager.subscriptionStatus.isPremium {
+                if subscriptionManager.subscriptionStatus.isPremium {
+                    // Premium users can tap to see their features
+                    Button {
                         showFeatures = true
-                    } else {
-                        showPaywall = true
+                    } label: {
+                        currentPlanCard
                     }
-                } label: {
+                    .buttonStyle(.plain)
+                } else {
+                    // Free users see static card (upgrade button below handles action)
                     currentPlanCard
                 }
-                .buttonStyle(.plain)
             }
 
             // Upgrade or manage section
@@ -50,23 +52,20 @@ struct SubscriptionSettingsView: View {
                     // Show trial info, cancelled info, or renewal date
                     if subscriptionManager.isTrialing, let expirationDate = subscriptionManager.expirationDate {
                         HStack {
-                            Label("Free trial ends", systemImage: "clock")
+                            Label(isCancelled ? "Access ends" : "Trial ends", systemImage: isCancelled ? "calendar.badge.exclamationmark" : "clock")
                             Spacer()
                             Text(expirationDate, style: .date)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(isCancelled ? .red : .orange)
                         }
 
+                        // Only show charging info if trial is NOT cancelled
                         if !isCancelled {
-                            HStack {
-                                if let price = subscriptionManager.currentSubscriptionPrice,
-                                   let period = subscriptionManager.currentSubscriptionPeriod {
+                            if let price = subscriptionManager.currentSubscriptionPrice,
+                               let period = subscriptionManager.currentSubscriptionPeriod {
+                                HStack {
                                     Label("Then \(price)/\(period)", systemImage: "creditcard")
-                                } else {
-                                    Label("You'll be charged", systemImage: "creditcard")
+                                    Spacer()
                                 }
-                                Spacer()
-                                Text(expirationDate, style: .date)
-                                    .foregroundStyle(.secondary)
                             }
                         }
                     } else if let expirationDate = subscriptionManager.expirationDate {
@@ -182,35 +181,31 @@ struct SubscriptionSettingsView: View {
     // MARK: - Current Plan Card
 
     private var currentPlanCard: some View {
-        VStack(spacing: 16) {
-            // Plan badge
-            HStack {
-                if subscriptionManager.subscriptionStatus.isPremium {
-                    PremiumBadge()
-                } else {
-                    Text("FREE")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.2))
-                        .clipShape(Capsule())
+        HStack(spacing: 16) {
+            // Left side: Text content
+            VStack(alignment: .leading, spacing: 12) {
+                // Plan badge row
+                HStack {
+                    if subscriptionManager.subscriptionStatus.isPremium {
+                        if isCancelled {
+                            CancelledBadge()
+                        } else if subscriptionManager.isTrialing {
+                            TrialBadge()
+                        } else {
+                            PremiumBadge()
+                        }
+                    } else {
+                        Text("FREE")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.secondary.opacity(0.2))
+                            .clipShape(Capsule())
+                    }
                 }
 
-                Spacer()
-
-                if subscriptionManager.isTrialing, let expirationDate = subscriptionManager.expirationDate {
-                    Text("Trial ends \(expirationDate, style: .relative)")
-                        .font(.caption.bold())
-                        .foregroundStyle(.orange)
-                } else if isCancelled {
-                    Text("Cancelled")
-                        .font(.caption.bold())
-                        .foregroundStyle(.red)
-                }
-            }
-
-            HStack {
+                // Title and subtitle
                 VStack(alignment: .leading, spacing: 4) {
                     Text(subscriptionManager.subscriptionStatus.isPremium ? "Homebound+" : "Free Plan")
                         .font(.title2.bold())
@@ -242,25 +237,28 @@ struct SubscriptionSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            }
 
-                Spacer()
+            Spacer()
 
-                HStack(spacing: 8) {
-                    if subscriptionManager.subscriptionStatus.isPremium {
-                        Image("Logo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 44, height: 44)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    } else {
-                        Image(systemName: "person.circle")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.secondary)
-                    }
+            // Right side: Icon (vertically centered)
+            HStack(spacing: 8) {
+                if subscriptionManager.subscriptionStatus.isPremium {
+                    Image("Logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
+                    // Chevron only for premium (card is tappable)
                     Image(systemName: "chevron.right")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "person.circle")
+                        .font(.system(size: 56))
+                        .foregroundStyle(.secondary)
+                    // No chevron for free users (card is not tappable)
                 }
             }
         }

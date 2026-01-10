@@ -276,8 +276,11 @@ def restore_purchases(user_id: int = Depends(auth.get_current_user_id)):
     This endpoint is called when the user requests to restore purchases.
     The iOS app should handle the actual restoration via StoreKit and then
     call verify-purchase for each restored transaction.
+
+    Note: This restores any subscription that hasn't expired yet, including
+    cancelled subscriptions that still have valid access time remaining.
     """
-    # Get the latest active, non-cancelled subscription for this user
+    # Get the latest subscription with valid access (not expired), regardless of status
     with db.engine.begin() as conn:
         subscription = conn.execute(
             sqlalchemy.text(
@@ -285,42 +288,37 @@ def restore_purchases(user_id: int = Depends(auth.get_current_user_id)):
                 SELECT product_id, expires_date, status, auto_renew_status
                 FROM subscriptions
                 WHERE user_id = :user_id
-                  AND status = 'active'
-                  AND auto_renew_status = TRUE
+                  AND expires_date > :now
                 ORDER BY expires_date DESC
                 LIMIT 1
                 """
             ),
-            {"user_id": user_id}
+            {"user_id": user_id, "now": datetime.now(UTC)}
         ).fetchone()
 
         if subscription and subscription.expires_date:
-            # Handle timezone-aware comparison properly
-            expires_date = subscription.expires_date
-            if expires_date.tzinfo is None:
-                expires_date = expires_date.replace(tzinfo=UTC)
-            if expires_date > datetime.now(UTC):
-                # User has an active subscription, update their tier
-                conn.execute(
-                    sqlalchemy.text(
-                        """
-                        UPDATE users
-                        SET subscription_tier = 'plus',
-                            subscription_expires_at = :expires_at
-                        WHERE id = :user_id
-                        """
-                    ),
-                    {
-                        "user_id": user_id,
-                        "expires_at": subscription.expires_date
-                    }
-                )
-                return {
-                    "ok": True,
-                    "restored": True,
-                    "tier": "plus",
-                    "expires_at": subscription.expires_date.isoformat()
+            # User has a valid subscription (active or cancelled but not expired)
+            conn.execute(
+                sqlalchemy.text(
+                    """
+                    UPDATE users
+                    SET subscription_tier = 'plus',
+                        subscription_expires_at = :expires_at
+                    WHERE id = :user_id
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "expires_at": subscription.expires_date
                 }
+            )
+            return {
+                "ok": True,
+                "restored": True,
+                "tier": "plus",
+                "expires_at": subscription.expires_date.isoformat(),
+                "auto_renew": subscription.auto_renew_status
+            }
 
         return {
             "ok": True,

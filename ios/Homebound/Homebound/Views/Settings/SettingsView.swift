@@ -482,6 +482,7 @@ class AppPreferences: ObservableObject {
 struct SettingsView: View {
     @EnvironmentObject var session: Session
     @EnvironmentObject var preferences: AppPreferences
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     @Environment(\.dismiss) var dismiss
     @State private var showingClearCacheAlert = false
     @State private var showingWhatsNew = false
@@ -540,7 +541,15 @@ struct SettingsView: View {
                             Spacer()
 
                             if session.featureLimits.isPremium {
-                                PremiumBadge()
+                                if subscriptionManager.isTrialing {
+                                    // Show trial badge instead of premium badge for trial users
+                                    TrialBadge()
+                                } else if !subscriptionManager.willAutoRenew {
+                                    // Show cancelled indicator
+                                    CancelledBadge()
+                                } else {
+                                    PremiumBadge()
+                                }
                             } else {
                                 Text("Upgrade")
                                     .font(.caption)
