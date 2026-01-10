@@ -51,6 +51,7 @@ class FriendInvitePreview(BaseModel):
     inviter_member_since: str
     expires_at: str | None = None  # None for permanent invites
     is_valid: bool
+    is_own_invite: bool = False  # True if the viewing user is the inviter
 
 
 class PendingInviteResponse(BaseModel):
@@ -537,8 +538,12 @@ def create_invite(
 
 
 @router.get("/invite/{token}", response_model=FriendInvitePreview)
-def get_invite_preview(token: str):
-    """Get invite details for preview before accepting (public endpoint)."""
+def get_invite_preview(token: str, current_user_id: int | None = Depends(auth.get_optional_user_id)):
+    """Get invite details for preview before accepting.
+
+    This endpoint is public but optionally accepts authentication.
+    When authenticated, returns is_own_invite=True if the viewer is the inviter.
+    """
     with db.engine.begin() as connection:
         invite = connection.execute(
             sqlalchemy.text(
@@ -566,12 +571,16 @@ def get_invite_preview(token: str):
         is_used_up = False if is_permanent else (invite.use_count >= invite.max_uses)
         is_valid = not is_expired and not is_used_up
 
+        # Check if the authenticated user is the inviter
+        is_own_invite = current_user_id is not None and invite.inviter_id == current_user_id
+
         return FriendInvitePreview(
             inviter_first_name=invite.first_name or "A user",
             inviter_profile_photo_url=invite.profile_photo_url,
             inviter_member_since=invite.member_since.isoformat() if invite.member_since else "",
             expires_at=invite.expires_at.isoformat() if invite.expires_at else None,
-            is_valid=is_valid
+            is_valid=is_valid,
+            is_own_invite=is_own_invite
         )
 
 

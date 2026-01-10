@@ -30,11 +30,36 @@ struct SmallTripWidgetView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        if let trip = entry.tripData {
+        // Check if widgets are enabled (premium feature)
+        if !LiveActivityConstants.widgetsEnabled {
+            UpgradePremiumSmallView()
+        } else if let trip = entry.tripData {
             ActiveTripSmallView(trip: trip)
         } else {
             NoTripSmallView()
         }
+    }
+}
+
+// MARK: - Upgrade Premium View
+
+private struct UpgradePremiumSmallView: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "star.fill")
+                .font(.title)
+                .foregroundStyle(Color(hex: "#356B3D") ?? .green)
+
+            Text("Homebound+")
+                .font(.headline)
+                .fontWeight(.bold)
+
+            Text("Upgrade to unlock widgets")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

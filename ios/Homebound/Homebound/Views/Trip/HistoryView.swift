@@ -497,11 +497,21 @@ struct InfoRow: View {
 // MARK: - Trip Stats View
 struct TripStatsView: View {
     let plans: [Trip]
+    @EnvironmentObject var session: Session
     @State private var preferences = StatsPreferences.load()
     @State private var showingEditStats = false
+    @State private var showPaywall = false
+
+    /// Stats that are always available for free users
+    private let freeStats: Set<StatType> = [.totalTrips, .adventureTime]
 
     var calculator: TripStatsCalculator {
         TripStatsCalculator(trips: plans)
+    }
+
+    /// Check if a stat is available for the current user
+    private func isStatAvailable(_ statType: StatType) -> Bool {
+        freeStats.contains(statType) || session.canUse(feature: .allStats)
     }
 
     var favoriteActivity: (icon: String, name: String, count: Int)? {
@@ -549,23 +559,34 @@ struct TripStatsView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(Array(preferences.selectedStats.enumerated()), id: \.element) { index, statType in
-                            AnimatedStatCard(
-                                statType: statType,
-                                value: calculator.value(for: statType),
-                                delay: Double(index) * 0.1
-                            )
-                            .frame(width: 140)
+                            if isStatAvailable(statType) {
+                                AnimatedStatCard(
+                                    statType: statType,
+                                    value: calculator.value(for: statType),
+                                    delay: Double(index) * 0.1
+                                )
+                                .frame(width: 140)
+                            } else {
+                                LockedStatCard(statType: statType)
+                                    .frame(width: 140)
+                                    .onTapGesture { showPaywall = true }
+                            }
                         }
                     }
                 }
             } else {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     ForEach(Array(preferences.selectedStats.enumerated()), id: \.element) { index, statType in
-                        AnimatedStatCard(
-                            statType: statType,
-                            value: calculator.value(for: statType),
-                            delay: Double(index) * 0.1
-                        )
+                        if isStatAvailable(statType) {
+                            AnimatedStatCard(
+                                statType: statType,
+                                value: calculator.value(for: statType),
+                                delay: Double(index) * 0.1
+                            )
+                        } else {
+                            LockedStatCard(statType: statType)
+                                .onTapGesture { showPaywall = true }
+                        }
                     }
                 }
             }
@@ -608,7 +629,58 @@ struct TripStatsView: View {
             }
         }
         .sheet(isPresented: $showingEditStats) {
-            EditStatsView(preferences: $preferences)
+            EditStatsView(preferences: $preferences, session: session)
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(feature: .allStats)
+        }
+    }
+}
+
+// MARK: - Locked Stat Card
+struct LockedStatCard: View {
+    let statType: StatType
+
+    var body: some View {
+        ZStack {
+            // Blurred background showing the stat structure
+            VStack(spacing: 8) {
+                Image(systemName: statType.icon)
+                    .font(.title2)
+                    .foregroundStyle(statType.color)
+
+                Text("--")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
+
+                Text(statType.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                LinearGradient(
+                    colors: [
+                        statType.color.opacity(0.1),
+                        statType.color.opacity(0.05)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .cornerRadius(12)
+            .blur(radius: 6)
+
+            // Lock overlay
+            VStack(spacing: 6) {
+                Image(systemName: "lock.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                PremiumBadge()
+            }
         }
     }
 }
@@ -741,11 +813,22 @@ struct AchievementsGridView: View {
 struct EditStatsView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var preferences: StatsPreferences
+    let session: Session
     @State private var selectedStats: [StatType]
+    @State private var showPaywall = false
 
-    init(preferences: Binding<StatsPreferences>) {
+    /// Stats that are always available for free users
+    private let freeStats: Set<StatType> = [.totalTrips, .adventureTime]
+
+    init(preferences: Binding<StatsPreferences>, session: Session) {
         self._preferences = preferences
+        self.session = session
         self._selectedStats = State(initialValue: preferences.wrappedValue.selectedStats)
+    }
+
+    /// Check if a stat is available for the current user
+    private func isStatAvailable(_ statType: StatType) -> Bool {
+        freeStats.contains(statType) || session.canUse(feature: .allStats)
     }
 
     var body: some View {
@@ -763,12 +846,17 @@ struct EditStatsView: View {
                     ForEach(StatType.allCases, id: \.self) { statType in
                         HStack {
                             Image(systemName: statType.icon)
-                                .foregroundStyle(statType.color)
+                                .foregroundStyle(isStatAvailable(statType) ? statType.color : .gray)
                                 .frame(width: 24)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(statType.displayName)
-                                    .font(.subheadline)
+                                HStack(spacing: 6) {
+                                    Text(statType.displayName)
+                                        .font(.subheadline)
+                                    if !isStatAvailable(statType) {
+                                        PremiumBadge()
+                                    }
+                                }
 
                                 Text(getStatDescription(statType))
                                     .font(.caption)
@@ -783,8 +871,13 @@ struct EditStatsView: View {
                             }
                         }
                         .contentShape(Rectangle())
+                        .opacity(isStatAvailable(statType) ? 1 : 0.6)
                         .onTapGesture {
-                            toggleStat(statType)
+                            if isStatAvailable(statType) {
+                                toggleStat(statType)
+                            } else {
+                                showPaywall = true
+                            }
                         }
                     }
                 } header: {
@@ -815,6 +908,9 @@ struct EditStatsView: View {
                     .fontWeight(.semibold)
                     .disabled(selectedStats.isEmpty)
                 }
+            }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView(feature: .allStats)
             }
         }
     }

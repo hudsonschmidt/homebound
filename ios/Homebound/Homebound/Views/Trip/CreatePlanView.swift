@@ -59,6 +59,9 @@ struct CreatePlanView: View {
     @State private var savedContacts: [Contact] = []  // Persisted contacts from server
     @State private var selectedFriends: [Friend] = []  // Friends as safety contacts (push notifications)
     @State private var shareLiveLocation = false  // Share live location with friends
+    // Custom messages (Premium feature)
+    @State private var customStartMessage = ""  // Custom message for trip start notification
+    @State private var customOverdueMessage = ""  // Custom message for overdue notification
 
     // Group trip settings (isGroupTrip is passed as a parameter from TripStartView)
     @State private var groupParticipants: [Friend] = []  // Friends to invite as participants
@@ -155,6 +158,8 @@ struct CreatePlanView: View {
                             } else {
                                 Step4AdditionalNotes(
                                     notes: $notes,
+                                    customStartMessage: $customStartMessage,
+                                    customOverdueMessage: $customOverdueMessage,
                                     shareLiveLocation: $shareLiveLocation,
                                     isCreating: $isCreating,
                                     isEditMode: isEditMode,
@@ -169,6 +174,8 @@ struct CreatePlanView: View {
                             // Only for group trips - final step
                             Step5FinalNotes(
                                 notes: $notes,
+                                customStartMessage: $customStartMessage,
+                                customOverdueMessage: $customOverdueMessage,
                                 shareLiveLocation: $shareLiveLocation,
                                 isCreating: $isCreating,
                                 isEditMode: isEditMode,
@@ -629,7 +636,9 @@ struct CreatePlanView: View {
                     share_live_location: shareLiveLocation,
                     is_group_trip: isGroupTrip,
                     group_settings: groupSettingsData,
-                    participant_ids: participantIds
+                    participant_ids: participantIds,
+                    custom_start_message: customStartMessage.isEmpty ? nil : customStartMessage,
+                    custom_overdue_message: customOverdueMessage.isEmpty ? nil : customOverdueMessage
                 )
 
                 let createdPlan = await session.createPlan(plan)
@@ -924,6 +933,7 @@ struct Step1TripDetails: View {
 
 // MARK: - Step 2: Time Settings
 struct Step2TimeSettings: View {
+    @EnvironmentObject var session: Session
     @Binding var startTime: Date
     @Binding var etaTime: Date
     @Binding var isManualETA: Bool
@@ -946,6 +956,7 @@ struct Step2TimeSettings: View {
 
     @State private var selectedStartDate = Date()
     @State private var selectedEndDate = Date()
+    @State private var showCustomIntervalPaywall = false
     @State private var showingTimeSelection = false
     @State private var isStartingNow = true // New: toggle for starting now vs later
     @State private var departureHour = 9
@@ -1520,16 +1531,38 @@ struct Step2TimeSettings: View {
                         }
                     }
 
-                    // Custom button on separate row
-                    Button(action: { showCustomInterval = true }) {
-                        Text("Custom")
-                            .font(.subheadline)
-                            .fontWeight(showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? .semibold : .regular)
-                            .foregroundStyle(showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? .white : .primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? Color.hbBrand : Color(.tertiarySystemFill))
-                            .cornerRadius(8)
+                    // Custom button on separate row (Premium feature)
+                    let canUseCustom = session.canUse(feature: .customIntervals)
+                    Button(action: {
+                        if canUseCustom {
+                            showCustomInterval = true
+                        } else {
+                            showCustomIntervalPaywall = true
+                        }
+                    }) {
+                        ZStack {
+                            Text("Custom")
+                                .font(.subheadline)
+                                .fontWeight(showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? .semibold : .regular)
+                                .foregroundStyle(canUseCustom
+                                    ? (showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? .white : .primary)
+                                    : .secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(canUseCustom
+                                    ? (showCustomInterval || ![15, 30, 60, 120].contains(checkinIntervalMinutes) ? Color.hbBrand : Color(.tertiarySystemFill))
+                                    : Color(.tertiarySystemFill))
+                                .cornerRadius(8)
+                                .opacity(canUseCustom ? 1 : 0.7)
+
+                            if !canUseCustom {
+                                HStack {
+                                    Spacer()
+                                    PremiumBadge()
+                                        .padding(.trailing, 8)
+                                }
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
 
@@ -1721,6 +1754,9 @@ struct Step2TimeSettings: View {
                 // When transitioning to time selection, ensure dates are properly set
                 updateDates()
             }
+        }
+        .sheet(isPresented: $showCustomIntervalPaywall) {
+            PaywallView(feature: .customIntervals)
         }
         .sheet(isPresented: $showCalendarHelp) {
             HelpSheet(
@@ -2129,17 +2165,71 @@ struct Step3EmergencyContacts: View {
 
     @Binding var savedContacts: [Contact]
     @State private var isLoadingSaved = false
+    @State private var showPaywall = false
 
     // Group trip mode - shows disclaimer when true
     var isGroupTrip: Bool = false
 
-    // Total selected count (contacts + friends, max 3)
+    /// Friends grouped by their assigned group (for premium users)
+    var groupedFriends: [(group: String?, friends: [Friend])] {
+        guard session.canUse(feature: .contactGroups) else {
+            // Free users see flat list
+            return [(group: nil, friends: session.friends)]
+        }
+
+        // Get friend groups from UserDefaults (multi-group support)
+        let friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        let customGroups = UserDefaults.standard.stringArray(forKey: "customFriendGroups") ?? []
+
+        // For display, show each friend under their first group only
+        // Friends with no groups go to "ungrouped"
+        var grouped: [String: [Friend]] = [:]
+        var ungrouped: [Friend] = []
+
+        for friend in session.friends {
+            let groups = friendGroupsData[String(friend.user_id)] ?? []
+            if let firstGroup = groups.first, customGroups.contains(firstGroup) {
+                grouped[firstGroup, default: []].append(friend)
+            } else {
+                ungrouped.append(friend)
+            }
+        }
+
+        // Build result with custom groups in order, then ungrouped
+        var result: [(group: String?, friends: [Friend])] = []
+        for groupName in customGroups {
+            if let friendsInGroup = grouped[groupName], !friendsInGroup.isEmpty {
+                result.append((group: groupName, friends: friendsInGroup))
+            }
+        }
+        if !ungrouped.isEmpty {
+            result.append((group: nil, friends: ungrouped))
+        }
+
+        return result
+    }
+
+    /// Check if any friends have assigned groups
+    var hasFriendGroups: Bool {
+        let friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        return session.friends.contains { friend in
+            let groups = friendGroupsData[String(friend.user_id)] ?? []
+            return !groups.isEmpty
+        }
+    }
+
+    /// Maximum contacts allowed based on subscription tier
+    var maxContacts: Int {
+        session.featureLimits.contactsPerTrip
+    }
+
+    // Total selected count (contacts + friends)
     var totalSelectedCount: Int {
         contacts.count + selectedFriends.count
     }
 
     var canSelectMore: Bool {
-        totalSelectedCount < 3
+        totalSelectedCount < maxContacts
     }
 
     var body: some View {
@@ -2147,10 +2237,20 @@ struct Step3EmergencyContacts: View {
             VStack(alignment: .leading, spacing: 24) {
                 // Header
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(isGroupTrip ? "Your Safety Contacts" : "Emergency Contacts")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    Text("Who should we notify if needed?")
+                    HStack {
+                        Text(isGroupTrip ? "Your Safety Contacts" : "Emergency Contacts")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+
+                        Spacer()
+
+                        // Contact count indicator
+                        Text("\(totalSelectedCount)/\(maxContacts)")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(canSelectMore ? .secondary : Color.hbBrand)
+                    }
+                    Text("Select up to \(maxContacts) contacts to notify")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -2223,28 +2323,20 @@ struct Step3EmergencyContacts: View {
 
                 // Friends Section (Push Notifications)
                 if !session.friends.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "bell.badge.fill")
-                                .foregroundStyle(.green)
-                            Text("Friends")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                            Text("• Push Notifications")
-                                .font(.caption)
-                                .foregroundStyle(.green)
+                    FriendsSelectionSection(
+                        friends: session.friends,
+                        selectedFriends: selectedFriends,
+                        canSelectMore: canSelectMore,
+                        hasFriendGroups: hasFriendGroups,
+                        groupedFriends: groupedFriends,
+                        onToggle: { friend, selected in
+                            toggleFriend(friend, selected: selected)
+                        },
+                        onSelectGroup: { groupFriends in
+                            selectAllInGroup(groupFriends)
                         }
-
-                        ForEach(session.friends) { friend in
-                            FriendSelectionRow(
-                                friend: friend,
-                                isSelected: isFriendSelected(friend),
-                                canSelect: canSelectMore || isFriendSelected(friend)
-                            ) { selected in
-                                toggleFriend(friend, selected: selected)
-                            }
-                        }
-                    }
+                    )
+                    .environmentObject(session)
                 }
 
                 // Email Contacts Section
@@ -2280,12 +2372,13 @@ struct Step3EmergencyContacts: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 20)
                     } else {
-                        // Inline contact list with toggle selection
+                        // Contact list - flat display with group badges
                         ForEach(savedContacts) { contact in
                             ContactSelectionRow(
                                 contact: contact,
                                 isSelected: isContactSelected(contact),
-                                canSelect: canSelectMore || isContactSelected(contact)
+                                canSelect: canSelectMore || isContactSelected(contact),
+                                showGroup: true  // Always show group badge if contact has a group
                             ) { selected in
                                 toggleContact(contact, selected: selected)
                             }
@@ -2306,6 +2399,34 @@ struct Step3EmergencyContacts: View {
                         .foregroundStyle(.white)
                         .cornerRadius(12)
                     }
+
+                    // Upgrade prompt when at limit (for free users only)
+                    if !canSelectMore && maxContacts < 5 {
+                        Button(action: { showPaywall = true }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "person.badge.plus")
+                                    .font(.title3)
+                                    .foregroundStyle(Color.hbBrand)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Need more contacts?")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                    Text("Upgrade to add up to 5 contacts per trip")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                PremiumBadge()
+                            }
+                            .padding()
+                            .background(Color.hbBrand.opacity(0.1))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 Spacer(minLength: 100)
             }
@@ -2319,6 +2440,9 @@ struct Step3EmergencyContacts: View {
         .task {
             isLoadingSaved = true
             await loadData()
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(feature: .moreContacts)
         }
     }
 
@@ -2364,6 +2488,166 @@ struct Step3EmergencyContacts: View {
             }
         } else {
             selectedFriends.removeAll { $0.user_id == friend.user_id }
+        }
+    }
+
+    private func selectAllInGroup(_ groupFriends: [Friend]) {
+        // Check if all are already selected
+        let allSelected = groupFriends.allSatisfy { friend in
+            selectedFriends.contains { $0.user_id == friend.user_id }
+        }
+
+        if allSelected {
+            // Deselect all
+            let groupIds = Set(groupFriends.map { $0.user_id })
+            selectedFriends.removeAll { groupIds.contains($0.user_id) }
+        } else {
+            // Select all that aren't already selected (respecting limit)
+            for friend in groupFriends {
+                if !isFriendSelected(friend) && canSelectMore {
+                    selectedFriends.append(friend)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Friends Selection Section
+
+struct FriendsSelectionSection: View {
+    @EnvironmentObject var session: Session
+    let friends: [Friend]
+    let selectedFriends: [Friend]
+    let canSelectMore: Bool
+    let hasFriendGroups: Bool
+    let groupedFriends: [(group: String?, friends: [Friend])]
+    let onToggle: (Friend, Bool) -> Void
+    let onSelectGroup: ([Friend]) -> Void
+
+    @State private var isGroupsExpanded = false
+
+    /// Get available friend groups with their friends
+    private var availableGroups: [(groupName: String, friends: [Friend])] {
+        groupedFriends.compactMap { item in
+            if let groupName = item.group {
+                return (groupName: groupName, friends: item.friends)
+            }
+            return nil
+        }
+    }
+
+    private func isFriendSelected(_ friend: Friend) -> Bool {
+        selectedFriends.contains { $0.user_id == friend.user_id }
+    }
+
+    private func isGroupFullySelected(_ groupFriends: [Friend]) -> Bool {
+        groupFriends.allSatisfy { friend in
+            selectedFriends.contains { $0.user_id == friend.user_id }
+        }
+    }
+
+    private func selectedCountInGroup(_ groupFriends: [Friend]) -> Int {
+        groupFriends.filter { friend in
+            selectedFriends.contains { $0.user_id == friend.user_id }
+        }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "bell.badge.fill")
+                    .foregroundStyle(.green)
+                Text("Friends")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text("• Push Notifications")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
+            // Expandable groups section (only if premium and groups exist)
+            if session.canUse(feature: .contactGroups) && hasFriendGroups && !availableGroups.isEmpty {
+                VStack(spacing: 0) {
+                    // Groups disclosure header
+                    Button(action: { isGroupsExpanded.toggle() }) {
+                        HStack {
+                            Image(systemName: "folder.fill")
+                                .foregroundStyle(Color.hbBrand)
+                            Text("Select by Group")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Spacer()
+                            Text("\(availableGroups.count) group\(availableGroups.count == 1 ? "" : "s")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: isGroupsExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.tertiarySystemFill))
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+
+                    // Expanded groups
+                    if isGroupsExpanded {
+                        VStack(spacing: 8) {
+                            ForEach(availableGroups, id: \.groupName) { item in
+                                Button(action: { onSelectGroup(item.friends) }) {
+                                    HStack {
+                                        Image(systemName: "folder.fill")
+                                            .foregroundStyle(Color.hbBrand)
+                                            .frame(width: 24)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.groupName)
+                                                .font(.subheadline)
+                                            Text("\(item.friends.count) friend\(item.friends.count == 1 ? "" : "s")")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+
+                                        Spacer()
+
+                                        // Selection state
+                                        let selectedCount = selectedCountInGroup(item.friends)
+                                        if isGroupFullySelected(item.friends) {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(Color.hbBrand)
+                                        } else if selectedCount > 0 {
+                                            Text("\(selectedCount)/\(item.friends.count)")
+                                                .font(.caption2)
+                                                .foregroundStyle(Color.hbBrand)
+                                        } else {
+                                            Image(systemName: "circle")
+                                                .foregroundStyle(Color.gray.opacity(0.3))
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(Color(.secondarySystemFill))
+                                    .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+
+            // All friends list
+            ForEach(friends) { friend in
+                FriendSelectionRow(
+                    friend: friend,
+                    isSelected: isFriendSelected(friend),
+                    canSelect: canSelectMore || isFriendSelected(friend)
+                ) { selected in
+                    onToggle(friend, selected)
+                }
+            }
         }
     }
 }
@@ -2452,6 +2736,8 @@ struct FriendSelectionRow: View {
 struct Step4AdditionalNotes: View {
     @EnvironmentObject var session: Session
     @Binding var notes: String
+    @Binding var customStartMessage: String
+    @Binding var customOverdueMessage: String
     @Binding var shareLiveLocation: Bool
     @Binding var isCreating: Bool
     var isEditMode: Bool = false
@@ -2462,6 +2748,9 @@ struct Step4AdditionalNotes: View {
     @State private var showNotesHelp = false
     @State private var showLiveLocationInfo = false
     @State private var showLocationPermissionAlert = false
+    @State private var showPaywall = false
+    @State private var showCustomMessages = false
+    @State private var showCustomMessagesPaywall = false
 
     var body: some View {
         ScrollView {
@@ -2502,6 +2791,9 @@ struct Step4AdditionalNotes: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+
+                // Custom Messages Section (Optional, Premium feature)
+                customMessagesSection
 
                 // Live Location Sharing Toggle (only if friend contacts are selected)
                 if hasFriendContacts {
@@ -2623,16 +2915,34 @@ struct Step4AdditionalNotes: View {
 
                 // Save as Template Button (only show in create mode, not edit mode)
                 if !isEditMode, let onSaveAsTemplate = onSaveAsTemplate {
-                    Button(action: onSaveAsTemplate) {
-                        HStack {
-                            Image(systemName: "bookmark.fill")
-                            Text("Save as Template")
+                    let canSaveTemplates = session.canUse(feature: .savedTrips)
+                    Button(action: {
+                        if canSaveTemplates {
+                            onSaveAsTemplate()
+                        } else {
+                            showPaywall = true
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(Color(.tertiarySystemFill))
-                        .foregroundStyle(.primary)
-                        .cornerRadius(12)
+                    }) {
+                        ZStack {
+                            HStack {
+                                Image(systemName: "bookmark.fill")
+                                Text("Save as Template")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(.tertiarySystemFill))
+                            .foregroundStyle(canSaveTemplates ? .primary : .secondary)
+                            .cornerRadius(12)
+                            .opacity(canSaveTemplates ? 1 : 0.7)
+
+                            if !canSaveTemplates {
+                                HStack {
+                                    Spacer()
+                                    PremiumBadge()
+                                        .padding(.trailing, 12)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -2655,6 +2965,110 @@ struct Step4AdditionalNotes: View {
                 message: "Add any extra details your contacts might need to find you if needed, like your planned route, who you're with, what you're wearing, or specific locations you'll visit."
             )
         }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(feature: .savedTrips)
+        }
+        .sheet(isPresented: $showCustomMessagesPaywall) {
+            PaywallView(feature: .customMessages)
+        }
+    }
+
+    // MARK: - Custom Messages Section
+    @ViewBuilder
+    private var customMessagesSection: some View {
+        let canUseCustomMessages = session.canUse(feature: .customMessages)
+
+        VStack(alignment: .leading, spacing: 12) {
+            // Header with expand/collapse toggle
+            Button(action: {
+                if canUseCustomMessages {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCustomMessages.toggle()
+                    }
+                } else {
+                    showCustomMessagesPaywall = true
+                }
+            }) {
+                HStack {
+                    Image(systemName: "text.bubble.fill")
+                        .foregroundStyle(canUseCustomMessages ? Color.hbBrand : .secondary)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("Custom Messages")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text("Optional")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            if !canUseCustomMessages {
+                                PremiumBadge()
+                            }
+                        }
+                        Text("Personalize notifications to friends and contacts")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if canUseCustomMessages {
+                        Image(systemName: showCustomMessages ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+
+            // Expanded content (only if premium and expanded)
+            if showCustomMessages && canUseCustomMessages {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Trip Start Message
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Trip Start Message", systemImage: "play.circle.fill")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.green)
+
+                        TextField("Optional: Add a personal note when your trip starts...", text: $customStartMessage, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+
+                        Text("This message will be included in notifications to your friends and email contacts when your trip begins.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    // Overdue Message
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Emergency Alert Message", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.orange)
+
+                        TextField("Optional: Add important info for emergencies...", text: $customOverdueMessage, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+
+                        Text("Include helpful details like medical info, vehicle description, or specific instructions for your contacts.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
     }
 }
 
@@ -2870,6 +3284,8 @@ struct Step4GroupSettings: View {
 struct Step5FinalNotes: View {
     @EnvironmentObject var session: Session
     @Binding var notes: String
+    @Binding var customStartMessage: String
+    @Binding var customOverdueMessage: String
     @Binding var shareLiveLocation: Bool
     @Binding var isCreating: Bool
     var isEditMode: Bool = false
@@ -2879,6 +3295,9 @@ struct Step5FinalNotes: View {
     @State private var showNotesHelp = false
     @State private var showLiveLocationInfo = false
     @State private var showLocationPermissionAlert = false
+    @State private var showPaywall = false
+    @State private var showCustomMessages = false
+    @State private var showCustomMessagesPaywall = false
 
     var body: some View {
         ScrollView {
@@ -2919,6 +3338,9 @@ struct Step5FinalNotes: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+
+                // Custom Messages Section (Optional, Premium feature)
+                customMessagesSection
 
                 // Live Location Sharing Toggle (only if friend contacts are selected)
                 if hasFriendContacts {
@@ -3033,6 +3455,110 @@ struct Step5FinalNotes: View {
                 message: "Add any extra details your contacts might need to find you if needed, like your planned route, specific locations you'll visit, or special instructions."
             )
         }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(feature: .savedTrips)
+        }
+        .sheet(isPresented: $showCustomMessagesPaywall) {
+            PaywallView(feature: .customMessages)
+        }
+    }
+
+    // MARK: - Custom Messages Section
+    @ViewBuilder
+    private var customMessagesSection: some View {
+        let canUseCustomMessages = session.canUse(feature: .customMessages)
+
+        VStack(alignment: .leading, spacing: 12) {
+            // Header with expand/collapse toggle
+            Button(action: {
+                if canUseCustomMessages {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCustomMessages.toggle()
+                    }
+                } else {
+                    showCustomMessagesPaywall = true
+                }
+            }) {
+                HStack {
+                    Image(systemName: "text.bubble.fill")
+                        .foregroundStyle(canUseCustomMessages ? Color.hbBrand : .secondary)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("Custom Messages")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text("Optional")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            if !canUseCustomMessages {
+                                PremiumBadge()
+                            }
+                        }
+                        Text("Personalize notifications to friends and contacts")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if canUseCustomMessages {
+                        Image(systemName: showCustomMessages ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+
+            // Expanded content (only if premium and expanded)
+            if showCustomMessages && canUseCustomMessages {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Trip Start Message
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Trip Start Message", systemImage: "play.circle.fill")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.green)
+
+                        TextField("Optional: Add a personal note when your trip starts...", text: $customStartMessage, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+
+                        Text("This message will be included in notifications to your friends and email contacts when your trip begins.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    // Overdue Message
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Emergency Alert Message", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.orange)
+
+                        TextField("Optional: Add important info for emergencies...", text: $customOverdueMessage, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+
+                        Text("Include helpful details like medical info, vehicle description, or specific instructions for your contacts.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
     }
 }
 
@@ -3167,6 +3693,7 @@ struct ContactsSelectionSheet: View {
     let savedContacts: [Contact]
     @Binding var selectedContacts: [EmergencyContact]
     @Binding var isPresented: Bool
+    let maxContacts: Int
     @State private var tempSelection: Set<Int> = []
 
     var body: some View {
@@ -3252,9 +3779,9 @@ struct ContactsSelectionSheet: View {
                                 )
                             }
 
-                        // Add to selected contacts (up to 3 total)
+                        // Add to selected contacts (up to limit)
                         for contact in newContacts {
-                            if selectedContacts.count < 3 {
+                            if selectedContacts.count < maxContacts {
                                 selectedContacts.append(contact)
                             }
                         }
@@ -3281,6 +3808,7 @@ struct ContactSelectionRow: View {
     let contact: Contact
     let isSelected: Bool
     let canSelect: Bool
+    var showGroup: Bool = false  // Show group badge next to name
     let onToggle: (Bool) -> Void
 
     var body: some View {
@@ -3301,10 +3829,27 @@ struct ContactSelectionRow: View {
                     )
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(contact.name)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(contact.name)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.primary)
+
+                        // Group badge
+                        if showGroup, let groupName = contact.group, !groupName.isEmpty {
+                            HStack(spacing: 2) {
+                                Image(systemName: "folder.fill")
+                                    .font(.system(size: 8))
+                                Text(groupName)
+                                    .font(.system(size: 9))
+                            }
+                            .foregroundStyle(Color.hbBrand)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.hbBrand.opacity(0.15))
+                            .cornerRadius(4)
+                        }
+                    }
 
                     if !contact.email.isEmpty {
                         Text(contact.email)
@@ -3679,10 +4224,12 @@ struct SaveTemplateSheet: View {
 
 // MARK: - Group Participant Picker
 struct GroupParticipantPicker: View {
+    @EnvironmentObject var session: Session
     @Environment(\.dismiss) var dismiss
     @Binding var selectedParticipants: [Friend]
     let friends: [Friend]
     @State private var searchText = ""
+    @State private var isGroupsExpanded = false
 
     var filteredFriends: [Friend] {
         if searchText.isEmpty {
@@ -3691,6 +4238,48 @@ struct GroupParticipantPicker: View {
         return friends.filter { friend in
             friend.fullName.localizedCaseInsensitiveContains(searchText)
         }
+    }
+
+    /// Get available friend groups (groups that have at least one friend)
+    private var availableGroups: [(groupName: String, friends: [Friend])] {
+        let friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        let customGroups = UserDefaults.standard.stringArray(forKey: "customFriendGroups") ?? []
+
+        var result: [(groupName: String, friends: [Friend])] = []
+
+        for groupName in customGroups {
+            let friendsInGroup = friends.filter { friend in
+                let groups = friendGroupsData[String(friend.user_id)] ?? []
+                return groups.contains(groupName)
+            }
+            if !friendsInGroup.isEmpty {
+                result.append((groupName: groupName, friends: friendsInGroup))
+            }
+        }
+
+        return result
+    }
+
+    /// Check if all friends in a group are selected
+    private func isGroupFullySelected(_ groupFriends: [Friend]) -> Bool {
+        groupFriends.allSatisfy { friend in
+            selectedParticipants.contains { $0.user_id == friend.user_id }
+        }
+    }
+
+    /// Check if some (but not all) friends in a group are selected
+    private func isGroupPartiallySelected(_ groupFriends: [Friend]) -> Bool {
+        let selectedCount = groupFriends.filter { friend in
+            selectedParticipants.contains { $0.user_id == friend.user_id }
+        }.count
+        return selectedCount > 0 && selectedCount < groupFriends.count
+    }
+
+    /// Count of selected friends in a group
+    private func selectedCountInGroup(_ groupFriends: [Friend]) -> Int {
+        groupFriends.filter { friend in
+            selectedParticipants.contains { $0.user_id == friend.user_id }
+        }.count
     }
 
     var body: some View {
@@ -3703,44 +4292,126 @@ struct GroupParticipantPicker: View {
                         description: Text("Add friends first to invite them to group trips")
                     )
                 } else {
-                    ForEach(filteredFriends, id: \.user_id) { friend in
-                        Button(action: { toggleSelection(friend) }) {
-                            HStack {
-                                // Profile photo or initials
-                                if let photoUrl = friend.profile_photo_url,
-                                   let url = URL(string: photoUrl) {
-                                    AsyncImage(url: url) { image in
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                    } placeholder: {
-                                        initialsCircle(for: friend)
+                    // Friend Groups section (Premium feature) - Expandable
+                    if session.canUse(feature: .contactGroups) && !availableGroups.isEmpty && searchText.isEmpty {
+                        Section {
+                            DisclosureGroup(isExpanded: $isGroupsExpanded) {
+                                ForEach(availableGroups, id: \.groupName) { item in
+                                    Button(action: { toggleGroup(item.friends) }) {
+                                        HStack {
+                                            Image(systemName: "folder.fill")
+                                                .foregroundStyle(Color.hbBrand)
+                                                .frame(width: 24)
+
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(item.groupName)
+                                                    .font(.body)
+                                                Text("\(item.friends.count) friend\(item.friends.count == 1 ? "" : "s")")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+
+                                            Spacer()
+
+                                            // Selection state
+                                            if isGroupFullySelected(item.friends) {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(Color.hbBrand)
+                                                    .font(.title2)
+                                            } else if isGroupPartiallySelected(item.friends) {
+                                                ZStack {
+                                                    Circle()
+                                                        .stroke(Color.hbBrand, lineWidth: 2)
+                                                        .frame(width: 24, height: 24)
+                                                    Text("\(selectedCountInGroup(item.friends))")
+                                                        .font(.caption2)
+                                                        .fontWeight(.bold)
+                                                        .foregroundStyle(Color.hbBrand)
+                                                }
+                                            } else {
+                                                Image(systemName: "circle")
+                                                    .foregroundStyle(Color.gray.opacity(0.3))
+                                                    .font(.title2)
+                                            }
+                                        }
                                     }
-                                    .frame(width: 40, height: 40)
-                                    .clipShape(Circle())
-                                } else {
-                                    initialsCircle(for: friend)
+                                    .foregroundStyle(.primary)
                                 }
-
-                                VStack(alignment: .leading) {
-                                    Text(friend.fullName)
-                                        .font(.body)
-                                }
-
-                                Spacer()
-
-                                if isSelected(friend) {
-                                    Image(systemName: "checkmark.circle.fill")
+                            } label: {
+                                HStack {
+                                    Image(systemName: "folder.fill")
                                         .foregroundStyle(Color.hbBrand)
-                                        .font(.title2)
-                                } else {
-                                    Image(systemName: "circle")
-                                        .foregroundStyle(.tertiary)
-                                        .font(.title2)
+                                    Text("Select by Group")
+                                        .fontWeight(.medium)
+                                    Spacer()
+                                    Text("\(availableGroups.count) group\(availableGroups.count == 1 ? "" : "s")")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
+                        } footer: {
+                            if isGroupsExpanded {
+                                Text("Tap a group to select all friends in it")
+                            }
                         }
-                        .foregroundStyle(.primary)
+                    }
+
+                    // Individual friends section
+                    Section {
+                        ForEach(filteredFriends, id: \.user_id) { friend in
+                            Button(action: { toggleSelection(friend) }) {
+                                HStack {
+                                    // Profile photo or initials
+                                    if let photoUrl = friend.profile_photo_url,
+                                       let url = URL(string: photoUrl) {
+                                        AsyncImage(url: url) { image in
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                        } placeholder: {
+                                            initialsCircle(for: friend)
+                                        }
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                    } else {
+                                        initialsCircle(for: friend)
+                                    }
+
+                                    VStack(alignment: .leading) {
+                                        Text(friend.fullName)
+                                            .font(.body)
+
+                                        // Show group badges if friend has any
+                                        let groups = getFriendGroups(friend)
+                                        if !groups.isEmpty {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "folder.fill")
+                                                    .font(.caption2)
+                                                Text(groups.joined(separator: ", "))
+                                                    .font(.caption2)
+                                                    .lineLimit(1)
+                                            }
+                                            .foregroundStyle(Color.hbBrand)
+                                        }
+                                    }
+
+                                    Spacer()
+
+                                    if isSelected(friend) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(Color.hbBrand)
+                                            .font(.title2)
+                                    } else {
+                                        Image(systemName: "circle")
+                                            .foregroundStyle(Color.gray.opacity(0.3))
+                                            .font(.title2)
+                                    }
+                                }
+                            }
+                            .foregroundStyle(.primary)
+                        }
+                    } header: {
+                        Text("All Friends")
                     }
                 }
             }
@@ -3763,6 +4434,11 @@ struct GroupParticipantPicker: View {
         }
     }
 
+    private func getFriendGroups(_ friend: Friend) -> [String] {
+        let friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        return friendGroupsData[String(friend.user_id)] ?? []
+    }
+
     private func isSelected(_ friend: Friend) -> Bool {
         selectedParticipants.contains { $0.user_id == friend.user_id }
     }
@@ -3772,6 +4448,21 @@ struct GroupParticipantPicker: View {
             selectedParticipants.removeAll { $0.user_id == friend.user_id }
         } else {
             selectedParticipants.append(friend)
+        }
+    }
+
+    private func toggleGroup(_ groupFriends: [Friend]) {
+        if isGroupFullySelected(groupFriends) {
+            // Deselect all friends in this group
+            let groupIds = Set(groupFriends.map { $0.user_id })
+            selectedParticipants.removeAll { groupIds.contains($0.user_id) }
+        } else {
+            // Select all friends in this group that aren't already selected
+            for friend in groupFriends {
+                if !isSelected(friend) {
+                    selectedParticipants.append(friend)
+                }
+            }
         }
     }
 

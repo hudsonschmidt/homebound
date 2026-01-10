@@ -28,10 +28,26 @@ struct LockScreenCircularView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        if let trip = entry.tripData {
+        // Check if widgets are enabled (premium feature)
+        if !LiveActivityConstants.widgetsEnabled {
+            UpgradePremiumCircularView()
+        } else if let trip = entry.tripData {
             ActiveCircularView(trip: trip)
         } else {
             NoTripCircularView()
+        }
+    }
+}
+
+private struct UpgradePremiumCircularView: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(lineWidth: 4)
+                .opacity(0.3)
+
+            Image(systemName: "star.fill")
+                .font(.title2)
         }
     }
 }
@@ -116,7 +132,10 @@ struct LockScreenInlineView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        if let trip = entry.tripData {
+        // Check if widgets are enabled (premium feature)
+        if !LiveActivityConstants.widgetsEnabled {
+            Label("Upgrade to Plus", systemImage: "star.fill")
+        } else if let trip = entry.tripData {
             HStack(spacing: 4) {
                 Text(trip.activityIcon)
                 Text(trip.formattedTimeRemaining)
@@ -147,11 +166,38 @@ struct LockScreenRectangularView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        if let trip = entry.tripData {
+        // Check if widgets are enabled (premium feature)
+        if !LiveActivityConstants.widgetsEnabled {
+            UpgradePremiumRectangularView()
+        } else if let trip = entry.tripData {
             ActiveRectangularView(trip: trip)
         } else {
             NoTripRectangularView()
         }
+    }
+}
+
+private struct UpgradePremiumRectangularView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "star.fill")
+                    .font(.caption2)
+                Text("Homebound+")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+            }
+            .opacity(0.8)
+
+            Text("Upgrade to Plus")
+                .font(.headline)
+                .fontWeight(.semibold)
+
+            Text("Unlock widgets")
+                .font(.caption2)
+                .opacity(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

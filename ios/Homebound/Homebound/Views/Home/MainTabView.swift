@@ -531,19 +531,26 @@ struct ActivePlanCardCompact: View {
     @State private var pulseAnimation = false
     @State private var showingError = false
     @State private var errorMessage = ""
+    @State private var showPaywall = false
     // Checkout voting state (for group trips)
     @State private var showingVoteConfirmation = false
     @State private var voteResponse: CheckoutVoteResponse? = nil
     // Group trip checkout confirmation
     @State private var showingGroupCheckoutConfirmation = false
 
-    let extendOptions = [
+    /// All available extension options
+    let allExtendOptions = [
         (15, "15 min"),
         (30, "30 min"),
         (60, "1 hr"),
         (120, "2 hrs"),
         (180, "3 hrs")
     ]
+
+    /// Check if an extension time is available for the user
+    func isExtensionAvailable(_ minutes: Int) -> Bool {
+        session.featureLimits.extensions.contains(minutes)
+    }
 
     /// Returns the current trip from session (live updates) or falls back to the initial plan parameter.
     /// This ensures the timer always uses the latest ETA even after extensions.
@@ -1165,6 +1172,9 @@ struct ActivePlanCardCompact: View {
         } message: {
             Text("This will end the trip for all \(plan.participant_count) participants. Are you sure?")
         }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(feature: .allExtensions)
+        }
     }
 
     @ViewBuilder
@@ -1177,27 +1187,39 @@ struct ActivePlanCardCompact: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(extendOptions, id: \.0) { minutes, label in
+                        ForEach(allExtendOptions, id: \.0) { minutes, label in
+                            let isAvailable = isExtensionAvailable(minutes)
                             Button(action: {
-                                if preferences.hapticFeedbackEnabled {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                }
-                                Task {
-                                    isPerformingAction = true
-                                    _ = await session.extendPlan(minutes: minutes)
-                                    await MainActor.run {
-                                        showingExtendOptions = false
-                                        isPerformingAction = false
+                                if isAvailable {
+                                    if preferences.hapticFeedbackEnabled {
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     }
+                                    Task {
+                                        isPerformingAction = true
+                                        _ = await session.extendPlan(minutes: minutes)
+                                        await MainActor.run {
+                                            showingExtendOptions = false
+                                            isPerformingAction = false
+                                        }
+                                    }
+                                } else {
+                                    showPaywall = true
                                 }
                             }) {
-                                Text(label)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.primary)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .glassmorphicButton(cornerRadius: 8)
+                                HStack(spacing: 4) {
+                                    Text(label)
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                    if !isAvailable {
+                                        Image(systemName: "lock.fill")
+                                            .font(.caption2)
+                                    }
+                                }
+                                .foregroundStyle(isAvailable ? .primary : .secondary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .glassmorphicButton(cornerRadius: 8)
+                                .opacity(isAvailable ? 1 : 0.6)
                             }
                         }
                     }

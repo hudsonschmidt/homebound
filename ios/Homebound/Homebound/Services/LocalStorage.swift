@@ -1388,7 +1388,8 @@ final class LocalStorage {
                         return nil
                     }
 
-                    return Contact(id: id, user_id: userId, name: name, email: email)
+                    let group = row["group"] as? String
+                    return Contact(id: id, user_id: userId, name: name, email: email, group: group)
                 }
             }
         } catch {

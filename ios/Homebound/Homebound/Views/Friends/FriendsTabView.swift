@@ -15,6 +15,11 @@ struct FriendsTabView: View {
     @State private var selectedFriend: Friend? = nil
     @State private var isLoading = false
 
+    // Group management
+    @State private var showingManageGroups = false
+    @State private var showingGroupsPaywall = false
+    @State private var groupsRefreshTrigger = UUID()  // Force refresh when groups change
+
     // Auto-refresh polling
     @State private var pollingTask: Task<Void, Never>? = nil
     @State private var lastTabRefresh: Date? = nil
@@ -71,6 +76,16 @@ struct FriendsTabView: View {
             .sheet(isPresented: $showingTripInvitations) {
                 TripInvitationsView()
                     .environmentObject(session)
+            }
+            .sheet(isPresented: $showingManageGroups) {
+                ManageGroupsView(
+                    friends: session.friends,
+                    onGroupsChanged: { groupsRefreshTrigger = UUID() }
+                )
+                .environmentObject(session)
+            }
+            .sheet(isPresented: $showingGroupsPaywall) {
+                PaywallView(feature: .contactGroups)
             }
             .task {
                 await loadData()
@@ -247,6 +262,44 @@ struct FriendsTabView: View {
                         trips: tripsForFriend(friend),
                         onTap: { selectedFriend = friend }
                     )
+                    .id("\(friend.user_id)-\(groupsRefreshTrigger)")  // Force refresh when groups change
+                }
+
+                // Manage Groups button
+                if session.canUse(feature: .contactGroups) {
+                    Button(action: { showingManageGroups = true }) {
+                        HStack {
+                            Image(systemName: "folder.badge.gearshape")
+                            Text("Manage Groups")
+                        }
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color.hbBrand)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color(.tertiarySystemFill))
+                        .cornerRadius(12)
+                    }
+                    .padding(.top, 8)
+                } else {
+                    // Show upgrade prompt for free users
+                    Button(action: { showingGroupsPaywall = true }) {
+                        HStack {
+                            Image(systemName: "folder.badge.gearshape")
+                            Text("Manage Groups")
+                            Spacer()
+                            PremiumBadge()
+                        }
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .padding(.horizontal)
+                        .background(Color(.tertiarySystemFill))
+                        .cornerRadius(12)
+                    }
+                    .padding(.top, 8)
                 }
             }
         }
@@ -343,10 +396,12 @@ struct FriendRowView: View {
                 Text(friend.fullName)
                     .font(.headline)
 
-                if let friendshipDate = friend.friendshipSinceDate {
-                    Text("Friends since \(friendshipDate.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    if let friendshipDate = friend.friendshipSinceDate {
+                        Text("Friends since \(friendshipDate.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -839,6 +894,657 @@ struct FriendActiveTripCardExpanded: View {
         } else {
             return "\(seconds)s"
         }
+    }
+}
+
+// MARK: - Manage Groups View
+
+struct ManageGroupsView: View {
+    @EnvironmentObject var session: Session
+    let friends: [Friend]
+    let onGroupsChanged: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingCreateGroup = false
+    @State private var groupToEdit: String? = nil
+    @State private var groupToRename: String? = nil
+    @State private var renameText = ""
+    @State private var groupToDelete: String? = nil
+    @State private var refreshTrigger = UUID()
+
+    /// Get all existing group names
+    private var existingGroups: [String] {
+        UserDefaults.standard.stringArray(forKey: "customFriendGroups") ?? []
+    }
+
+    /// Get friends in a specific group
+    private func friendsInGroup(_ groupName: String) -> [Friend] {
+        let friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        return friends.filter { friend in
+            let groups = friendGroupsData[String(friend.user_id)] ?? []
+            return groups.contains(groupName)
+        }
+    }
+
+    /// Get groups for a friend
+    private func groupsForFriend(_ friend: Friend) -> [String] {
+        let friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        return friendGroupsData[String(friend.user_id)] ?? []
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Create new group button
+                    Button(action: { showingCreateGroup = true }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                            Text("Create New Group")
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.hbBrand)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+
+                    if existingGroups.isEmpty {
+                        // Empty state
+                        VStack(spacing: 16) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 56))
+                                .foregroundStyle(.secondary)
+                            Text("No Groups Yet")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            Text("Create groups to organize your friends.\nFriends can be in multiple groups.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 60)
+                    } else {
+                        // Groups list
+                        VStack(spacing: 12) {
+                            ForEach(existingGroups, id: \.self) { groupName in
+                                GroupCard(
+                                    groupName: groupName,
+                                    friends: friendsInGroup(groupName),
+                                    allFriends: friends,
+                                    onEdit: { groupToEdit = groupName },
+                                    onRename: {
+                                        renameText = groupName
+                                        groupToRename = groupName
+                                    },
+                                    onDelete: { groupToDelete = groupName }
+                                )
+                            }
+                        }
+                        .padding(.horizontal)
+                        .id(refreshTrigger)
+                    }
+                }
+                .padding(.vertical)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Manage Groups")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+            .sheet(isPresented: $showingCreateGroup) {
+                CreateGroupSheet(
+                    friends: friends,
+                    onComplete: { name, selectedFriends in
+                        createGroup(name: name, withFriends: selectedFriends)
+                    }
+                )
+            }
+            .sheet(isPresented: .init(
+                get: { groupToEdit != nil },
+                set: { if !$0 { groupToEdit = nil } }
+            )) {
+                if let groupName = groupToEdit {
+                    EditGroupSheet(
+                        groupName: groupName,
+                        friends: friends,
+                        onComplete: { onGroupsChanged(); refreshTrigger = UUID() }
+                    )
+                }
+            }
+            .alert("Rename Group", isPresented: .init(
+                get: { groupToRename != nil },
+                set: { if !$0 { groupToRename = nil; renameText = "" } }
+            )) {
+                TextField("Group name", text: $renameText)
+                Button("Cancel", role: .cancel) {
+                    groupToRename = nil
+                    renameText = ""
+                }
+                Button("Rename") {
+                    if let oldName = groupToRename {
+                        renameGroup(from: oldName, to: renameText)
+                    }
+                }
+                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } message: {
+                Text("Enter a new name for this group")
+            }
+            .alert("Delete Group?", isPresented: .init(
+                get: { groupToDelete != nil },
+                set: { if !$0 { groupToDelete = nil } }
+            )) {
+                Button("Cancel", role: .cancel) {
+                    groupToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    if let groupName = groupToDelete {
+                        deleteGroup(groupName)
+                    }
+                }
+            } message: {
+                Text("This will remove the group. Friends will remain in their other groups.")
+            }
+        }
+    }
+
+    private func createGroup(name: String, withFriends selectedFriends: [Friend]) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+
+        // Add to custom groups list
+        var customGroups = UserDefaults.standard.stringArray(forKey: "customFriendGroups") ?? []
+        if !customGroups.contains(trimmedName) {
+            customGroups.append(trimmedName)
+            UserDefaults.standard.set(customGroups, forKey: "customFriendGroups")
+        }
+
+        // Add selected friends to this group
+        var friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        for friend in selectedFriends {
+            let key = String(friend.user_id)
+            var groups = friendGroupsData[key] ?? []
+            if !groups.contains(trimmedName) {
+                groups.append(trimmedName)
+                friendGroupsData[key] = groups
+            }
+        }
+        UserDefaults.standard.set(friendGroupsData, forKey: "friendGroupsMulti")
+
+        refreshTrigger = UUID()
+        onGroupsChanged()
+    }
+
+    private func renameGroup(from oldName: String, to newName: String) {
+        let trimmedNew = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNew.isEmpty, oldName != trimmedNew else { return }
+
+        // Update custom groups list
+        var customGroups = UserDefaults.standard.stringArray(forKey: "customFriendGroups") ?? []
+        if let index = customGroups.firstIndex(of: oldName) {
+            customGroups[index] = trimmedNew
+        }
+        UserDefaults.standard.set(customGroups, forKey: "customFriendGroups")
+
+        // Update all friend assignments
+        var friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        for (key, groups) in friendGroupsData {
+            if groups.contains(oldName) {
+                var newGroups = groups.filter { $0 != oldName }
+                newGroups.append(trimmedNew)
+                friendGroupsData[key] = newGroups
+            }
+        }
+        UserDefaults.standard.set(friendGroupsData, forKey: "friendGroupsMulti")
+
+        groupToRename = nil
+        renameText = ""
+        refreshTrigger = UUID()
+        onGroupsChanged()
+    }
+
+    private func deleteGroup(_ groupName: String) {
+        // Remove from custom groups list
+        var customGroups = UserDefaults.standard.stringArray(forKey: "customFriendGroups") ?? []
+        customGroups.removeAll { $0 == groupName }
+        UserDefaults.standard.set(customGroups, forKey: "customFriendGroups")
+
+        // Remove this group from all friend assignments
+        var friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        for (key, groups) in friendGroupsData {
+            if groups.contains(groupName) {
+                let newGroups = groups.filter { $0 != groupName }
+                if newGroups.isEmpty {
+                    friendGroupsData.removeValue(forKey: key)
+                } else {
+                    friendGroupsData[key] = newGroups
+                }
+            }
+        }
+        UserDefaults.standard.set(friendGroupsData, forKey: "friendGroupsMulti")
+
+        groupToDelete = nil
+        refreshTrigger = UUID()
+        onGroupsChanged()
+    }
+}
+
+// MARK: - Group Card
+
+struct GroupCard: View {
+    let groupName: String
+    let friends: [Friend]
+    let allFriends: [Friend]
+    let onEdit: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(Color.hbBrand)
+                Text(groupName)
+                    .font(.headline)
+                Spacer()
+                Menu {
+                    Button(action: onEdit) {
+                        Label("Edit Members", systemImage: "person.2")
+                    }
+                    Button(action: onRename) {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Divider()
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete Group", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if friends.isEmpty {
+                Text("No members yet")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            } else {
+                // Friend avatars in a flow layout
+                FlowLayout(spacing: 8) {
+                    ForEach(friends) { friend in
+                        FriendChip(friend: friend)
+                    }
+                }
+            }
+
+            // Add members button
+            Button(action: onEdit) {
+                HStack {
+                    Image(systemName: "plus")
+                    Text(friends.isEmpty ? "Add Members" : "Edit Members")
+                }
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(Color.hbBrand)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Friend Chip
+
+struct FriendChip: View {
+    let friend: Friend
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let photoUrl = friend.profile_photo_url, let url = URL(string: photoUrl) {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    initialCircle
+                }
+                .frame(width: 24, height: 24)
+                .clipShape(Circle())
+            } else {
+                initialCircle
+            }
+            Text(friend.first_name)
+                .font(.subheadline)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(.tertiarySystemFill))
+        .cornerRadius(20)
+    }
+
+    private var initialCircle: some View {
+        Circle()
+            .fill(
+                LinearGradient(
+                    colors: [Color.hbBrand, Color.hbTeal],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: 24, height: 24)
+            .overlay(
+                Text(friend.initial)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+            )
+    }
+}
+
+// MARK: - Flow Layout
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = computeLayout(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = computeLayout(proposal: proposal, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func computeLayout(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        var positions: [CGPoint] = []
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var maxWidth: CGFloat = 0
+
+        let maxX = proposal.width ?? .infinity
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+
+            if currentX + size.width > maxX && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            positions.append(CGPoint(x: currentX, y: currentY))
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+            maxWidth = max(maxWidth, currentX)
+        }
+
+        return (CGSize(width: maxWidth, height: currentY + lineHeight), positions)
+    }
+}
+
+// MARK: - Create Group Sheet
+
+struct CreateGroupSheet: View {
+    let friends: [Friend]
+    let onComplete: (String, [Friend]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var groupName = ""
+    @State private var selectedFriends: Set<Int> = []
+    @State private var searchText = ""
+
+    private var filteredFriends: [Friend] {
+        if searchText.isEmpty {
+            return friends
+        }
+        return friends.filter { $0.fullName.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var canCreate: Bool {
+        !groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Group name input
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Group Name")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                    TextField("e.g., Family, Coworkers, Hiking Buddies", text: $groupName)
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding()
+                .background(Color(.secondarySystemGroupedBackground))
+
+                // Friends selection
+                List {
+                    Section {
+                        if friends.isEmpty {
+                            Text("No friends to add")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(filteredFriends) { friend in
+                                GroupMemberSelectionRow(
+                                    friend: friend,
+                                    isSelected: selectedFriends.contains(friend.user_id),
+                                    onToggle: {
+                                        if selectedFriends.contains(friend.user_id) {
+                                            selectedFriends.remove(friend.user_id)
+                                        } else {
+                                            selectedFriends.insert(friend.user_id)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    } header: {
+                        HStack {
+                            Text("Select Friends")
+                            Spacer()
+                            if !selectedFriends.isEmpty {
+                                Text("\(selectedFriends.count) selected")
+                                    .foregroundStyle(Color.hbBrand)
+                            }
+                        }
+                    } footer: {
+                        if !friends.isEmpty {
+                            Text("You can add more friends later")
+                        }
+                    }
+                }
+                .searchable(text: $searchText, prompt: "Search friends")
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("New Group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Create") {
+                        let selected = friends.filter { selectedFriends.contains($0.user_id) }
+                        onComplete(groupName, selected)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!canCreate)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Edit Group Sheet
+
+struct EditGroupSheet: View {
+    let groupName: String
+    let friends: [Friend]
+    let onComplete: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedFriends: Set<Int> = []
+    @State private var searchText = ""
+
+    private var filteredFriends: [Friend] {
+        if searchText.isEmpty {
+            return friends
+        }
+        return friends.filter { $0.fullName.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(filteredFriends) { friend in
+                        GroupMemberSelectionRow(
+                            friend: friend,
+                            isSelected: selectedFriends.contains(friend.user_id),
+                            onToggle: {
+                                toggleFriend(friend)
+                            }
+                        )
+                    }
+                } header: {
+                    HStack {
+                        Text("Members")
+                        Spacer()
+                        Text("\(selectedFriends.count) selected")
+                            .foregroundStyle(Color.hbBrand)
+                    }
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search friends")
+            .navigationTitle(groupName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        onComplete()
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+            .onAppear {
+                loadCurrentMembers()
+            }
+        }
+    }
+
+    private func loadCurrentMembers() {
+        let friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        selectedFriends = Set(friends.filter { friend in
+            let groups = friendGroupsData[String(friend.user_id)] ?? []
+            return groups.contains(groupName)
+        }.map { $0.user_id })
+    }
+
+    private func toggleFriend(_ friend: Friend) {
+        var friendGroupsData = UserDefaults.standard.dictionary(forKey: "friendGroupsMulti") as? [String: [String]] ?? [:]
+        let key = String(friend.user_id)
+        var groups = friendGroupsData[key] ?? []
+
+        if selectedFriends.contains(friend.user_id) {
+            // Remove from group
+            selectedFriends.remove(friend.user_id)
+            groups.removeAll { $0 == groupName }
+        } else {
+            // Add to group
+            selectedFriends.insert(friend.user_id)
+            if !groups.contains(groupName) {
+                groups.append(groupName)
+            }
+        }
+
+        if groups.isEmpty {
+            friendGroupsData.removeValue(forKey: key)
+        } else {
+            friendGroupsData[key] = groups
+        }
+
+        UserDefaults.standard.set(friendGroupsData, forKey: "friendGroupsMulti")
+    }
+}
+
+// MARK: - Friend Selection Row
+
+struct GroupMemberSelectionRow: View {
+    let friend: Friend
+    let isSelected: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 12) {
+                // Profile photo or initial
+                if let photoUrl = friend.profile_photo_url, let url = URL(string: photoUrl) {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } placeholder: {
+                        initialCircle
+                    }
+                    .frame(width: 40, height: 40)
+                    .clipShape(Circle())
+                } else {
+                    initialCircle
+                }
+
+                Text(friend.fullName)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isSelected ? Color.hbBrand : Color.gray.opacity(0.3))
+            }
+        }
+    }
+
+    private var initialCircle: some View {
+        Circle()
+            .fill(
+                LinearGradient(
+                    colors: [Color.hbBrand, Color.hbTeal],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: 40, height: 40)
+            .overlay(
+                Text(friend.initial)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+            )
     }
 }
 

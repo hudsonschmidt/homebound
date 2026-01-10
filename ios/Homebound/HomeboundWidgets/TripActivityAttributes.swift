@@ -120,6 +120,9 @@ struct LiveActivityConstants {
     // Widget data sharing
     static let widgetTripDataKey = "widgetTripData"
 
+    // Subscription / Premium features
+    static let widgetsEnabledKey = "widgetsEnabled"
+
     // Server environment URLs
     private static let productionURL = "https://api.homeboundapp.com"
     private static let devRenderURL = "https://homebound-21l1.onrender.com"
@@ -172,5 +175,17 @@ struct LiveActivityConstants {
             return true
         }
         return defaults.bool(forKey: enabledKey)
+    }
+
+    /// Check if widgets are enabled (subscription feature)
+    static var widgetsEnabled: Bool {
+        guard let defaults = sharedDefaults else { return false }
+        // Default to false if not set (premium feature)
+        return defaults.bool(forKey: widgetsEnabledKey)
+    }
+
+    /// Set widgets enabled status (called by main app when subscription status changes)
+    static func setWidgetsEnabled(_ enabled: Bool) {
+        sharedDefaults?.set(enabled, forKey: widgetsEnabledKey)
     }
 }

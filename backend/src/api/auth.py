@@ -73,3 +73,43 @@ async def get_current_user_id(request: Request) -> int:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
         )
+
+
+async def get_optional_user_id(request: Request) -> int | None:
+    """
+    Extract and validate JWT token from Authorization or X-Auth-Token header.
+    Returns the user ID if valid, or None if no token/invalid token.
+
+    Use this for endpoints that work both authenticated and unauthenticated.
+    """
+    # Try X-Auth-Token first (Cloudflare-safe), then fall back to Authorization
+    auth = (request.headers.get("x-auth-token") or
+            request.headers.get("X-Auth-Token") or
+            request.headers.get("authorization") or
+            request.headers.get("Authorization"))
+
+    if not auth or not auth.lower().startswith("bearer "):
+        return None
+
+    token = auth.split(" ", 1)[1].strip()
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            options={"verify_iat": False}
+        )
+
+        # Verify it's an access token
+        if payload.get("typ") != "access":
+            return None
+
+        sub = payload.get("sub")
+        if sub is None:
+            return None
+
+        return int(sub)
+
+    except (ExpiredSignatureError, JWTError, ValueError):
+        return None

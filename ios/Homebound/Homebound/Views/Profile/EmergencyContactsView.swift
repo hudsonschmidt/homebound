@@ -187,7 +187,7 @@ struct EmergencyContactsView: View {
         if success {
             await MainActor.run {
                 if let index = savedContacts.firstIndex(where: { $0.id == contact.id }) {
-                    savedContacts[index] = Contact(id: contact.id, user_id: contact.user_id, name: trimmedName, email: trimmedEmail)
+                    savedContacts[index] = Contact(id: contact.id, user_id: contact.user_id, name: trimmedName, email: trimmedEmail, group: contact.group)
                 }
                 contactToEdit = nil
             }

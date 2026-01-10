@@ -8,11 +8,53 @@ struct Contact: Identifiable, Codable, Hashable {
     let user_id: Int
     let name: String
     let email: String
+    let group: String?  // Optional group name for organizing contacts (Premium feature)
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, email, group
+        case user_id = "user_id"
+    }
 }
 
 struct ContactCreateRequest: Codable {
     var name: String
     var email: String
+    var group: String?  // Optional group name (Premium feature)
+}
+
+struct ContactUpdateRequest: Codable {
+    var name: String?
+    var email: String?
+    var group: String?  // Optional group name (Premium feature)
+}
+
+/// Predefined contact group options
+enum ContactGroup: String, CaseIterable {
+    case family = "Family"
+    case friends = "Friends"
+    case work = "Work"
+    case neighbors = "Neighbors"
+    case other = "Other"
+
+    var icon: String {
+        switch self {
+        case .family: return "house.fill"
+        case .friends: return "person.2.fill"
+        case .work: return "briefcase.fill"
+        case .neighbors: return "building.2.fill"
+        case .other: return "tag.fill"
+        }
+    }
+
+    var color: String {
+        switch self {
+        case .family: return "#E91E63"  // Pink
+        case .friends: return "#2196F3"  // Blue
+        case .work: return "#FF9800"     // Orange
+        case .neighbors: return "#4CAF50" // Green
+        case .other: return "#9E9E9E"    // Gray
+        }
+    }
 }
 
 // MARK: - Friend Models
@@ -105,6 +147,18 @@ struct FriendInvitePreview: Codable {
     let inviter_member_since: String
     let expires_at: String?  // nil for permanent invites
     let is_valid: Bool
+    let is_own_invite: Bool  // true if viewer is the inviter
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        inviter_first_name = try container.decode(String.self, forKey: .inviter_first_name)
+        inviter_profile_photo_url = try container.decodeIfPresent(String.self, forKey: .inviter_profile_photo_url)
+        inviter_member_since = try container.decode(String.self, forKey: .inviter_member_since)
+        expires_at = try container.decodeIfPresent(String.self, forKey: .expires_at)
+        is_valid = try container.decode(Bool.self, forKey: .is_valid)
+        // Default to false if not present (backwards compatibility)
+        is_own_invite = try container.decodeIfPresent(Bool.self, forKey: .is_own_invite) ?? false
+    }
 
     var inviterMemberSinceDate: Date? {
         DateUtils.parseISO8601(inviter_member_since)
@@ -432,6 +486,9 @@ struct TripCreateRequest: Codable {
     var is_group_trip: Bool = false  // Is this a group trip?
     var group_settings: GroupSettings? = nil  // Settings for group trip behavior
     var participant_ids: [Int]? = nil  // Friend user IDs to invite as participants
+    // Custom messages (Premium feature)
+    var custom_start_message: String? = nil  // Custom message for trip start notification
+    var custom_overdue_message: String? = nil  // Custom message for overdue notification
 }
 
 struct TripUpdateRequest: Codable {

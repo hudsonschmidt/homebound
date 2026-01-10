@@ -38,6 +38,7 @@ struct TripStartView: View {
     @State private var createTripMode: CreateTripMode? = nil
     @State private var templateToDelete: SavedTripTemplate? = nil
     @State private var showDeleteConfirmation = false
+    @State private var showPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -72,14 +73,28 @@ struct TripStartView: View {
 
                         // Group Trip Button
                         Button(action: {
-                            createTripMode = .group
+                            if session.canUse(feature: .groupTrips) {
+                                createTripMode = .group
+                            } else {
+                                showPaywall = true
+                            }
                         }) {
-                            TripTypeCard(
-                                icon: "person.3.fill",
-                                title: "Group Trip",
-                                subtitle: "With friends",
-                                gradient: [Color.hbAccent, Color.orange]
-                            )
+                            ZStack(alignment: .topTrailing) {
+                                TripTypeCard(
+                                    icon: "person.3.fill",
+                                    title: "Group Trip",
+                                    subtitle: "With friends",
+                                    gradient: session.canUse(feature: .groupTrips)
+                                        ? [Color.hbAccent, Color.orange]
+                                        : [Color.gray.opacity(0.5), Color.gray.opacity(0.3)]
+                                )
+                                .opacity(session.canUse(feature: .groupTrips) ? 1 : 0.7)
+
+                                if !session.canUse(feature: .groupTrips) {
+                                    PremiumBadge()
+                                        .offset(x: -8, y: 8)
+                                }
+                            }
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
@@ -151,6 +166,9 @@ struct TripStartView: View {
             // Dismiss when a trip is created from CreatePlanView
             .onReceive(NotificationCenter.default.publisher(for: .tripCreated)) { _ in
                 dismiss()
+            }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView(feature: .groupTrips)
             }
         }
     }

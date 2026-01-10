@@ -470,7 +470,7 @@ final class Session: ObservableObject {
 
         // Create mock contacts
         contacts = [
-            Contact(id: 1, user_id: 99999, name: "Emergency Contact", email: "emergency@example.com")
+            Contact(id: 1, user_id: 99999, name: "Emergency Contact", email: "emergency@example.com", group: nil)
         ]
 
         // Create mock friends
@@ -1414,7 +1414,8 @@ final class Session: ObservableObject {
             async let contactsTask: [Contact] = loadContacts()
             async let tripsTask: [Trip] = loadAllTrips()  // Cache all trips for offline access
             async let friendsTask: [Friend] = loadFriends()  // Load friends for offline access
-            _ = await (activitiesTask, activePlanTask, profileTask, contactsTask, tripsTask, friendsTask)
+            async let featureLimitsTask: Void = loadFeatureLimits()  // Load subscription feature limits
+            _ = await (activitiesTask, activePlanTask, profileTask, contactsTask, tripsTask, friendsTask, featureLimitsTask)
 
             // Sync pending actions after data loads
             await syncPendingActions()
@@ -2969,7 +2970,7 @@ final class Session: ObservableObject {
             // Create a temporary contact with a negative ID for local use
             // Use UUID hash to guarantee uniqueness (timestamp could collide if multiple contacts created in same second)
             let tempId = -abs(UUID().hashValue)
-            let tempContact = Contact(id: tempId, user_id: 0, name: name, email: email)
+            let tempContact = Contact(id: tempId, user_id: 0, name: name, email: email, group: nil)
 
             // Queue for later sync when offline (include temp_id for cleanup after sync)
             LocalStorage.shared.queuePendingAction(
@@ -3026,7 +3027,7 @@ final class Session: ObservableObject {
             // Update in-memory contacts list
             await MainActor.run {
                 if let index = self.contacts.firstIndex(where: { $0.id == contactId }) {
-                    self.contacts[index] = Contact(id: contactId, user_id: self.contacts[index].user_id, name: name, email: email)
+                    self.contacts[index] = Contact(id: contactId, user_id: self.contacts[index].user_id, name: name, email: email, group: self.contacts[index].group)
                 }
                 self.notice = "Contact updated (will sync when online)"
                 self.pendingActionsCount = LocalStorage.shared.getPendingActionsCount()
@@ -3887,10 +3888,29 @@ final class Session: ObservableObject {
             let limits: FeatureLimits = try await api.get(url, bearer: token)
             self.featureLimits = limits
             self.subscriptionTier = limits.tier
+            // Sync widgets enabled status to shared defaults for widget access
+            LiveActivityConstants.setWidgetsEnabled(limits.widgetsEnabled)
+            // Apply premium feature restrictions for free tier
+            applyTierRestrictions(isPremium: limits.isPremium)
             debugLog("[Session] Feature limits loaded: tier=\(limits.tier), premium=\(limits.isPremium)")
         } catch {
             debugLog("[Session] Failed to load feature limits: \(error)")
             // Keep existing limits (defaults to free)
+        }
+    }
+
+    /// Apply tier-based restrictions for premium features
+    private func applyTierRestrictions(isPremium: Bool) {
+        let groupDefaults = UserDefaults(suiteName: "group.com.homeboundapp.Homebound")
+
+        if !isPremium {
+            // Free tier: disable Live Activity if currently enabled
+            if groupDefaults?.bool(forKey: "liveActivityEnabled") == true {
+                groupDefaults?.set(false, forKey: "liveActivityEnabled")
+            }
+            // Free tier: clear pinned activities (both UserDefaults and in-memory)
+            UserDefaults.standard.removeObject(forKey: "pinnedActivityIds")
+            AppPreferences.shared.clearPinnedActivities()
         }
     }
 
@@ -3938,9 +3958,16 @@ final class Session: ObservableObject {
         } else if tier == "free" {
             featureLimits = .free
             subscriptionTier = "free"
+            // Sync to shared defaults for widget access
+            LiveActivityConstants.setWidgetsEnabled(false)
+            // Apply tier restrictions
+            applyTierRestrictions(isPremium: false)
         } else if tier == "plus" {
             featureLimits = .plus
             subscriptionTier = "plus"
+            // Sync to shared defaults for widget access
+            LiveActivityConstants.setWidgetsEnabled(true)
+            // No restrictions for premium
         }
     }
 

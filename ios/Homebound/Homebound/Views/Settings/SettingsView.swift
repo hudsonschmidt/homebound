@@ -434,6 +434,10 @@ class AppPreferences: ObservableObject {
         pinnedActivityIds.removeAll { $0 == activityId }
     }
 
+    func clearPinnedActivities() {
+        pinnedActivityIds = []
+    }
+
     func isActivityPinned(_ activityId: Int) -> Bool {
         pinnedActivityIds.contains(activityId)
     }
@@ -1177,6 +1181,7 @@ struct CustomizationView: View {
     @EnvironmentObject var preferences: AppPreferences
     @State private var selectedActivityToPin: Int? = nil
     @State private var showPaywall = false
+    @State private var showLiveActivityPaywall = false
     @State private var isLoadingPinnedActivities = false
 
     let graceOptions = [15, 30, 45, 60, 90]
@@ -1335,29 +1340,54 @@ struct CustomizationView: View {
 
             // MARK: - Live Activity
             Section {
-                Toggle(isOn: $preferences.liveActivityEnabled) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Live Activity")
-                        Text("Show trip status on Lock Screen")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if preferences.liveActivityEnabled {
-                    Picker("Display Mode", selection: $preferences.liveActivityDisplayMode) {
-                        ForEach(LiveActivityDisplayMode.allCases, id: \.self) { mode in
-                            Text(mode.displayName).tag(mode)
+                if session.canUse(feature: .liveActivity) {
+                    Toggle(isOn: $preferences.liveActivityEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Live Activity")
+                            Text("Show trip status on Lock Screen")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
+
+                    if preferences.liveActivityEnabled {
+                        Picker("Display Mode", selection: $preferences.liveActivityDisplayMode) {
+                            ForEach(LiveActivityDisplayMode.allCases, id: \.self) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                    }
+                } else {
+                    // Locked state for non-premium users
+                    Button(action: { showLiveActivityPaywall = true }) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    Text("Live Activity")
+                                    PremiumBadge()
+                                }
+                                Text("Show trip status on Lock Screen")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "lock.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .foregroundStyle(.primary)
                 }
             } header: {
                 Text("Live Activity")
             } footer: {
-                if preferences.liveActivityEnabled {
-                    Text(preferences.liveActivityDisplayMode.description)
+                if session.canUse(feature: .liveActivity) {
+                    if preferences.liveActivityEnabled {
+                        Text(preferences.liveActivityDisplayMode.description)
+                    } else {
+                        Text("Live Activities show your trip countdown on the Lock Screen and Dynamic Island during active trips.")
+                    }
                 } else {
-                    Text("Live Activities show your trip countdown on the Lock Screen and Dynamic Island during active trips.")
+                    Text("Upgrade to Homebound+ to enable Live Activities on your Lock Screen and Dynamic Island.")
                 }
             }
 
@@ -1416,6 +1446,10 @@ struct CustomizationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showPaywall) {
             PaywallView()
+                .environmentObject(session)
+        }
+        .sheet(isPresented: $showLiveActivityPaywall) {
+            PaywallView(feature: .liveActivity)
                 .environmentObject(session)
         }
         .task {

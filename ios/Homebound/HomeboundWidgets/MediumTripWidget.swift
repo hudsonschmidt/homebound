@@ -30,11 +30,39 @@ struct MediumTripWidgetView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        if let trip = entry.tripData {
+        // Check if widgets are enabled (premium feature)
+        if !LiveActivityConstants.widgetsEnabled {
+            UpgradePremiumMediumView()
+        } else if let trip = entry.tripData {
             ActiveTripMediumView(trip: trip)
         } else {
             NoTripMediumView()
         }
+    }
+}
+
+// MARK: - Upgrade Premium View
+
+private struct UpgradePremiumMediumView: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "star.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(Color(hex: "#356B3D") ?? .green)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Homebound+")
+                    .font(.headline)
+                    .fontWeight(.bold)
+
+                Text("Upgrade to unlock widgets")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

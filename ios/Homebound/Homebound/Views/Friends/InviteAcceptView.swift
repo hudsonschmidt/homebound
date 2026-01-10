@@ -27,7 +27,9 @@ struct InviteAcceptView: View {
                 } else if let friend = acceptedFriend {
                     successView(friend: friend)
                 } else if let preview = preview {
-                    if preview.is_valid {
+                    if preview.is_own_invite {
+                        ownInviteView
+                    } else if preview.is_valid {
                         invitePreviewView(preview: preview)
                     } else {
                         expiredView
@@ -248,6 +250,45 @@ struct InviteAcceptView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
                     .background(Color(.systemGray))
+                    .cornerRadius(14)
+            }
+        }
+        .padding()
+    }
+
+    // MARK: - Own Invite View
+
+    var ownInviteView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            VStack(spacing: 8) {
+                Text("This is Your Invite")
+                    .font(.title2)
+                    .fontWeight(.bold)
+
+                Text("You can't add yourself as a friend. Share this link with others to connect with them on Homebound!")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Spacer()
+
+            Button(action: {
+                dismiss()
+                onComplete()
+            }) {
+                Text("Got It")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color.hbBrand)
                     .cornerRadius(14)
             }
         }
