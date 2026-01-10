@@ -97,6 +97,7 @@ async def check_overdue_trips():
                 sqlalchemy.text("""
                     SELECT t.id, t.user_id, t.title, t.eta, t.grace_min, t.location_text, t.status, t.timezone,
                            t.start, t.notes, t.start_location_text, t.has_separate_locations, t.checkout_token,
+                           t.custom_overdue_message,
                            a.name as activity_name
                     FROM trips t
                     JOIN activities a ON t.activity = a.id
@@ -360,7 +361,11 @@ async def _process_overdue_trip(trip, now: datetime):
             log.info(f"[Scheduler] Sending overdue notifications for trip {trip_id} to {len(contacts)} contacts")
             user_timezone = trip.timezone if hasattr(trip, 'timezone') else None
             start_location = trip.start_location_text if trip.has_separate_locations else None
-            await send_overdue_notifications(trip, list(contacts), user_name, user_timezone, start_location)
+            custom_overdue_message = getattr(trip, 'custom_overdue_message', None)
+            await send_overdue_notifications(
+                trip, list(contacts), user_name, user_timezone, start_location,
+                custom_message=custom_overdue_message
+            )
             log.info(f"[Scheduler] Overdue notifications sent for trip {trip_id}")
 
         if friend_contacts:
@@ -451,7 +456,7 @@ async def check_push_notifications():
                 sqlalchemy.text("""
                     SELECT t.id, t.user_id, t.title, t.is_group_trip, t.location_text, t.eta,
                            t.timezone, t.has_separate_locations, t.start_location_text, t.notify_self,
-                           t.contact1, t.contact2, t.contact3,
+                           t.contact1, t.contact2, t.contact3, t.custom_start_message,
                            a.name as activity_name
                     FROM trips t
                     JOIN activities a ON t.activity = a.id
@@ -562,6 +567,7 @@ async def check_push_notifications():
                     if contacts_for_email or owner_email:
                         trip_data = {"title": trip.title, "location_text": trip.location_text, "eta": trip.eta}
                         start_location = trip.start_location_text if trip.has_separate_locations else None
+                        custom_start_message = getattr(trip, 'custom_start_message', None)
                         await send_trip_starting_now_emails(
                             trip=trip_data,
                             contacts=contacts_for_email,
@@ -569,7 +575,8 @@ async def check_push_notifications():
                             activity_name=trip.activity_name,
                             user_timezone=trip.timezone,
                             start_location=start_location,
-                            owner_email=owner_email
+                            owner_email=owner_email,
+                            custom_message=custom_start_message
                         )
                         log.info(f"[Push] Sent trip starting emails to {len(contacts_for_email)} contacts for trip {trip.id}")
 

@@ -191,6 +191,30 @@ def build_start_location_section(start_location: str | None, destination: str | 
         return f"""<p><strong>Location:</strong> {destination_html}</p>"""
 
 
+def build_custom_message_section(custom_message: str | None, message_type: str = "overdue") -> str:
+    """Build HTML for custom message section if provided.
+
+    Args:
+        custom_message: The custom message from the trip owner
+        message_type: "overdue" for emergency alert style, "start" for info style
+    """
+    if not custom_message or not custom_message.strip():
+        return ""
+
+    if message_type == "overdue":
+        return f"""
+        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 15px; margin: 20px 0;">
+            <p style="margin: 0 0 8px 0;"><strong>Message from {"{user_name}"}:</strong></p>
+            <p style="margin: 0; font-style: italic;">{custom_message}</p>
+        </div>"""
+    else:  # start
+        return f"""
+        <div style="background: #e8f4fd; border-left: 4px solid #6C63FF; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0;">
+            <p style="margin: 0 0 8px 0;"><strong>Personal note:</strong></p>
+            <p style="margin: 0; font-style: italic;">{custom_message}</p>
+        </div>"""
+
+
 def create_overdue_notification_email_html(
     user_name: str,
     plan_title: str,
@@ -199,11 +223,16 @@ def create_overdue_notification_email_html(
     expected_time: str,
     location: str | None = None,
     notes: str | None = None,
-    start_location: str | None = None
+    start_location: str | None = None,
+    custom_message: str | None = None
 ) -> str:
-    """Create HTML email template for overdue notifications."""
+    """Create HTML email template for overdue notifications.
+
+    If custom_message is provided, it will be prominently displayed.
+    """
     notes_text = notes if notes else "None"
     start_location_section = build_start_location_section(start_location, location)
+    custom_message_section = build_custom_message_section(custom_message, "overdue").replace("{user_name}", user_name)
 
     return render_template(
         "overdue",
@@ -213,7 +242,8 @@ def create_overdue_notification_email_html(
         start_time=start_time,
         expected_time=expected_time,
         start_location_section=start_location_section,
-        notes=notes_text
+        notes=notes_text,
+        custom_message_section=custom_message_section
     )
 
 
@@ -246,10 +276,15 @@ def create_trip_starting_now_email_html(
     activity: str,
     expected_time: str,
     location: str | None = None,
-    start_location: str | None = None
+    start_location: str | None = None,
+    custom_message: str | None = None
 ) -> str:
-    """Create HTML email template for trip starting immediately notifications."""
+    """Create HTML email template for trip starting immediately notifications.
+
+    If custom_message is provided, it will be included in the email.
+    """
     start_location_section = build_start_location_section(start_location, location)
+    custom_message_section = build_custom_message_section(custom_message, "start")
 
     return render_template(
         "new_trip_now",
@@ -257,7 +292,8 @@ def create_trip_starting_now_email_html(
         plan_title=plan_title,
         activity=activity,
         expected_time=expected_time,
-        start_location_section=start_location_section
+        start_location_section=start_location_section,
+        custom_message_section=custom_message_section
     )
 
 

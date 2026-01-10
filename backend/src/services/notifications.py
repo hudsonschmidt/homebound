@@ -1008,11 +1008,13 @@ async def send_overdue_notifications(
     user_name: str = "Someone",
     user_timezone: str | None = None,
     start_location: str | None = None,
-    owner_email: str | None = None
+    owner_email: str | None = None,
+    custom_message: str | None = None
 ):
     """Send overdue notifications to contacts via email and push.
 
     If owner_email is provided, also sends a copy to the trip owner.
+    If custom_message is provided, it will be included in the email.
     """
     from ..messaging.resend_backend import create_overdue_notification_email_html
 
@@ -1055,7 +1057,8 @@ async def send_overdue_notifications(
             expected_time=eta_formatted,
             location=display_location,
             notes=trip_notes,
-            start_location=display_start_location
+            start_location=display_start_location,
+            custom_message=custom_message
         )
         plain_body = html_to_text(html_body)
 
@@ -1159,11 +1162,13 @@ async def send_trip_starting_now_emails(
     activity_name: str,
     user_timezone: str | None = None,
     start_location: str | None = None,
-    owner_email: str | None = None
+    owner_email: str | None = None,
+    custom_message: str | None = None
 ):
     """Send notification emails to contacts when a trip starts immediately.
 
     If owner_email is provided, also sends a copy to the trip owner.
+    If custom_message is provided, it will be included in the email.
     """
     from ..messaging.resend_backend import create_trip_starting_now_email_html
 
@@ -1199,7 +1204,8 @@ async def send_trip_starting_now_emails(
             activity=activity_name,
             expected_time=eta_formatted,
             location=trip_location_text,
-            start_location=display_start_location
+            start_location=display_start_location,
+            custom_message=custom_message
         )
         plain_body = html_to_text(html_body)
 

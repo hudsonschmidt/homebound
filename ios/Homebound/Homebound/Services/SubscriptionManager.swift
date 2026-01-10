@@ -56,10 +56,10 @@ final class SubscriptionManager: ObservableObject {
     private var pendingVerifications: [VerifyPurchaseRequest] = []
 
     /// Maximum retry attempts for backend verification
-    private static let maxRetryAttempts = 3
+    static let maxRetryAttempts = 3
 
     /// Base delay for exponential backoff (in seconds)
-    private static let baseRetryDelay: Double = 2.0
+    static let baseRetryDelay: Double = 2.0
 
     private var transactionListener: Task<Void, Error>?
 
