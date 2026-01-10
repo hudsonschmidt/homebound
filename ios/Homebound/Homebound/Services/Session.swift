@@ -90,26 +90,12 @@ final class Session: ObservableObject {
 
     // MARK: API & Base URL
 
-    static let productionURL: URL = {
-        guard let url = URL(string: "https://api.homeboundapp.com") else {
-            fatalError("Invalid production URL configuration")
-        }
-        return url
-    }()
-
-    static let devRenderURL: URL = {
-        guard let url = URL(string: "https://homebound-21l1.onrender.com") else {
-            fatalError("Invalid dev Render URL configuration")
-        }
-        return url
-    }()
-
-    static let localURL: URL = {
-        guard let url = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001") else {
-            fatalError("Invalid local URL configuration")
-        }
-        return url
-    }()
+    // These URLs are compile-time constants that are guaranteed valid
+    // swiftlint:disable force_unwrapping
+    static let productionURL = URL(string: "https://api.homeboundapp.com")!
+    static let devRenderURL = URL(string: "https://homebound-21l1.onrender.com")!
+    static let localURL = URL(string: "http://localhost:3001")!
+    // swiftlint:enable force_unwrapping
 
     @Published var serverEnvironment: ServerEnvironment = {
         let savedValue = UserDefaults.standard.string(forKey: "serverEnvironment") ?? "production"

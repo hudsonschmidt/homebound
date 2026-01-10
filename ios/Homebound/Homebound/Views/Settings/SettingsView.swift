@@ -619,7 +619,8 @@ struct SettingsView: View {
                     }
                 }
 
-                // Developer Section
+                #if DEBUG
+                // Developer Section - only visible in debug builds
                 if session.userEmail == "hudsonschmidt08@gmail.com" || session.userEmail == "parkcityht@gmail.com" {
                     Section("Developer") {
                         VStack(alignment: .leading, spacing: 8) {
@@ -689,6 +690,7 @@ struct SettingsView: View {
                         .foregroundStyle(.red)
                     }
                 }
+                #endif
 
                 // Support Section
                 Section("Support") {
@@ -1806,7 +1808,7 @@ struct PrivacyView: View {
             try data.write(to: fileURL)
             return fileURL
         } catch {
-            print("Failed to write export file: \(error)")
+            debugLog("Failed to write export file: \(error)")
             return nil
         }
     }

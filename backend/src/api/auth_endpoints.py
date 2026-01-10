@@ -1,3 +1,5 @@
+import logging
+import os
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -12,6 +14,8 @@ from src import database as db
 from src.api.apple_auth import validate_apple_identity_token
 from src.services.notifications import send_magic_link_email
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/api/v1/auth",
     tags=["auth"]
@@ -19,9 +23,9 @@ router = APIRouter(
 
 settings = config.get_settings()
 
-# Apple App Store Review test account
-APPLE_REVIEW_EMAIL = "apple-review@homeboundapp.com"
-APPLE_REVIEW_CODE = "123456"
+# Apple App Store Review test account - configurable via environment variables
+APPLE_REVIEW_EMAIL = os.getenv("APPLE_REVIEW_EMAIL", "apple-review@homeboundapp.com")
+APPLE_REVIEW_CODE = os.getenv("APPLE_REVIEW_CODE", "123456")
 
 
 class MagicLinkRequest(BaseModel):
@@ -67,10 +71,6 @@ def create_jwt_pair(user_id: int, email: str) -> tuple[str, str]:
 
     access = jwt.encode(access_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     refresh = jwt.encode(refresh_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-
-    print(f"[Auth] ✅ Created JWT pair for user_id={user_id}, email={email}")
-    print(f"[Auth] Access token expires in {settings.ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
-    print(f"[Auth] Using SECRET_KEY: {settings.SECRET_KEY[:5]}...{settings.SECRET_KEY[-5:]}")
 
     return access, refresh
 
@@ -131,9 +131,9 @@ async def request_magic_link(body: MagicLinkRequest):
             }
         )
 
-        # In dev mode, print the code
+        # In dev mode, log the code for testing
         if settings.DEV_MODE:
-            print(f"[DEV MAGIC CODE] email={body.email} code={code}")
+            logger.info("[DEV] Magic code for %s: %s", body.email, code)
 
         # Send email with magic link code
         await send_magic_link_email(body.email, code)
@@ -408,8 +408,6 @@ def apple_sign_in(body: AppleSignInRequest):
         expected_user_id=body.user_id
     )
 
-    print(f"[AppleAuth] ✅ Token validated for user: {token_payload.get('sub')}")
-
     with db.engine.begin() as connection:
         # Check if Apple user ID already exists
         existing_user = connection.execute(
@@ -425,8 +423,6 @@ def apple_sign_in(body: AppleSignInRequest):
 
         if existing_user:
             # User exists with this Apple ID - sign them in and update last_login_at
-            print(f"[AppleAuth] ✅ Existing Apple user found: user_id={existing_user.id}")
-
             # Update last_login_at
             existing_user = connection.execute(
                 sqlalchemy.text(
@@ -478,7 +474,6 @@ def apple_sign_in(body: AppleSignInRequest):
 
             if email_match:
                 # Account exists with this email - prompt user to link
-                print(f"[AppleAuth] ⚠️  Email {body.email} exists - requiring confirmation")
                 return AppleSignInResponse(
                     account_exists=True,
                     email=body.email,
@@ -488,8 +483,6 @@ def apple_sign_in(body: AppleSignInRequest):
                 )
 
         # No existing account - create new user
-        print(f"[AppleAuth] 🆕 Creating new account for Apple user_id={body.user_id}")
-
         result = connection.execute(
             sqlalchemy.text(
                 """
@@ -551,8 +544,6 @@ def link_apple_account(body: AppleLinkRequest):
         expected_user_id=body.user_id
     )
 
-    print(f"[AppleAuth] ✅ Linking validated token for user: {token_payload.get('sub')}")
-
     with db.engine.begin() as connection:
         # Find user by email (they should have authenticated via magic link first)
         user = connection.execute(
@@ -590,8 +581,6 @@ def link_apple_account(body: AppleLinkRequest):
             ),
             {"apple_user_id": body.user_id, "user_id": user.id}
         ).fetchone()
-
-        print(f"[AppleAuth] 🔗 Linked Apple ID to user_id={user.id}, email={user.email}")
 
         # Generate new tokens
         access, refresh = create_jwt_pair(user.id, user.email)

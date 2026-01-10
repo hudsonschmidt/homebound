@@ -759,7 +759,7 @@ def handle_notification(notification_type: str, subtype: str | None, data: dict)
 
     # Decode the transaction info (nested JWS)
     try:
-        transaction_info = decode_jws_payload(signed_transaction_info, verify=False)
+        transaction_info = decode_jws_payload(signed_transaction_info, verify=True)
     except Exception as e:
         logger.error(f"Failed to decode transaction info: {e}")
         return {"processed": False, "reason": str(e)}
@@ -816,7 +816,7 @@ def handle_notification(notification_type: str, subtype: str | None, data: dict)
             signed_renewal_info = data.get("signedRenewalInfo")
             if signed_renewal_info:
                 try:
-                    renewal_info = decode_jws_payload(signed_renewal_info, verify=False)
+                    renewal_info = decode_jws_payload(signed_renewal_info, verify=True)
                     auto_renew = renewal_info.get("autoRenewStatus", 1) == 1
                     logger.info(f"User {user_id} auto-renew changed to: {auto_renew}")
                 except Exception as e:
@@ -840,7 +840,7 @@ def handle_notification(notification_type: str, subtype: str | None, data: dict)
                 signed_renewal_info = data.get("signedRenewalInfo")
                 if signed_renewal_info:
                     try:
-                        renewal_info = decode_jws_payload(signed_renewal_info, verify=False)
+                        renewal_info = decode_jws_payload(signed_renewal_info, verify=True)
                         grace_period_expires_ms = renewal_info.get("gracePeriodExpiresDate")
                         if grace_period_expires_ms:
                             grace_expires = datetime.fromtimestamp(grace_period_expires_ms / 1000, tz=UTC)

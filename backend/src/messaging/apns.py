@@ -24,11 +24,11 @@ class PushResult:
 
 class DummyPush:
     async def send(self, device_token: str, title: str, body: str, data: dict | None = None, category: str | None = None) -> PushResult:
-        print(f"[DUMMY PUSH] token={device_token} title={title!r} body={body!r} data={data} category={category}")
+        log.debug("[DUMMY PUSH] token=%s title=%r body=%r data=%s category=%s", device_token, title, body, data, category)
         return PushResult(ok=True, status=200, detail="dummy")
 
     async def send_background(self, device_token: str, data: dict) -> PushResult:
-        print(f"[DUMMY BACKGROUND PUSH] token={device_token} data={data}")
+        log.debug("[DUMMY BACKGROUND PUSH] token=%s data=%s", device_token, data)
         return PushResult(ok=True, status=200, detail="dummy")
 
 
@@ -247,7 +247,7 @@ class DummyPushWithLiveActivity(DummyPush):
         event: str = "update",
         timestamp: int | None = None
     ) -> PushResult:
-        print(f"[DUMMY LIVE ACTIVITY] token={live_activity_token[:20]}... event={event} state={content_state}")
+        log.debug("[DUMMY LIVE ACTIVITY] token=%s... event=%s state=%s", live_activity_token[:20], event, content_state)
         return PushResult(ok=True, status=200, detail="dummy")
 
 

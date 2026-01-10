@@ -1,10 +1,13 @@
 """Apple Sign In JWT validation utilities."""
+import logging
 import time
 
 import requests
 from fastapi import HTTPException, status
 from jose import jwk, jwt
 from jose.exceptions import ExpiredSignatureError, JWTClaimsError, JWTError
+
+logger = logging.getLogger(__name__)
 
 # Apple's public keys endpoint
 APPLE_PUBLIC_KEYS_URL = "https://appleid.apple.com/auth/keys"
@@ -162,8 +165,6 @@ def validate_apple_identity_token(
                     detail="Token user ID does not match expected user ID"
                 )
 
-        user_id = payload.get('sub')
-        print(f"[AppleAuth] ✅ Validated Apple identity token for user: {user_id}")
         return payload
 
     except HTTPException:
@@ -171,7 +172,7 @@ def validate_apple_identity_token(
         raise
     except Exception as e:
         # Catch any unexpected errors
-        print(f"[AppleAuth] ❌ Unexpected error validating Apple token: {str(e)}")
+        logger.exception("Unexpected error validating Apple token")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to validate Apple identity token"

@@ -55,7 +55,7 @@ struct ProfileView: View {
                             // Age Field
                             EditableField(
                                 label: "Age",
-                                value: session.userAge != nil ? "\(session.userAge!)" : "Not set",
+                                value: session.userAge.map { "\($0)" } ?? "Not set",
                                 icon: "calendar",
                                 isEditing: $editingAge,
                                 editValue: $editAge,

@@ -320,14 +320,14 @@ class QRCodeScannerViewController: UIViewController, AVCaptureMetadataOutputObje
         do {
             videoInput = try AVCaptureDeviceInput(device: videoCaptureDevice)
         } catch {
-            print("QRScanner: Failed to create video input: \(error)")
+            debugLog("QRScanner: Failed to create video input: \(error)")
             return
         }
 
         if captureSession.canAddInput(videoInput) {
             captureSession.addInput(videoInput)
         } else {
-            print("QRScanner: Cannot add video input")
+            debugLog("QRScanner: Cannot add video input")
             return
         }
 
@@ -339,7 +339,7 @@ class QRCodeScannerViewController: UIViewController, AVCaptureMetadataOutputObje
             metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
             metadataOutput.metadataObjectTypes = [.qr]
         } else {
-            print("QRScanner: Cannot add metadata output")
+            debugLog("QRScanner: Cannot add metadata output")
             return
         }
 

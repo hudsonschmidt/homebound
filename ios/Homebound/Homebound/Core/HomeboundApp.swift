@@ -250,7 +250,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             forTaskWithIdentifier: backgroundRefreshTaskIdentifier,
             using: nil
         ) { task in
-            self.handleAppRefresh(task: task as! BGAppRefreshTask)
+            guard let refreshTask = task as? BGAppRefreshTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            self.handleAppRefresh(task: refreshTask)
         }
 
         // Register for processing tasks (longer tasks, when plugged in)
@@ -258,7 +262,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             forTaskWithIdentifier: backgroundProcessingTaskIdentifier,
             using: nil
         ) { task in
-            self.handleProcessingTask(task: task as! BGProcessingTask)
+            guard let processingTask = task as? BGProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            self.handleProcessingTask(task: processingTask)
         }
 
         debugLog("[AppDelegate] ✅ Background tasks registered")

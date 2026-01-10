@@ -126,7 +126,9 @@ struct LiveActivityConstants {
     // Server environment URLs
     private static let productionURL = "https://api.homeboundapp.com"
     private static let devRenderURL = "https://homebound-21l1.onrender.com"
+    #if DEBUG
     private static let localURL = "http://localhost:3001"
+    #endif
 
     /// Base URL for API calls - reads from shared defaults to match main app's environment
     static var baseURL: String {
@@ -140,8 +142,10 @@ struct LiveActivityConstants {
             return productionURL
         case "devRender":
             return devRenderURL
+        #if DEBUG
         case "local":
             return localURL
+        #endif
         default:
             return productionURL
         }

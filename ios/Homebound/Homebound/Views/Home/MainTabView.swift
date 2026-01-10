@@ -982,6 +982,8 @@ struct ActivePlanCardCompact: View {
                         .shadow(color: Color.green.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(plan.checkin_token == nil || isPerformingAction)
+                .accessibilityLabel("Check in")
+                .accessibilityHint("Confirm you are safe and reset your timer")
             }
 
             // I'm Safe / Vote to End button
@@ -1124,6 +1126,8 @@ struct ActivePlanCardCompact: View {
                         .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(plan.checkout_token == nil || isPerformingAction)
+                .accessibilityLabel("I'm safe")
+                .accessibilityHint("End your trip and notify your contacts that you're home safely")
             } else {
                 // Regular solo trip - show I'm Safe button directly
                 Button(action: {
@@ -1152,6 +1156,8 @@ struct ActivePlanCardCompact: View {
                         .shadow(color: Color.hbAccent.opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(plan.checkout_token == nil || isPerformingAction)
+                .accessibilityLabel("I'm safe")
+                .accessibilityHint("End your trip and notify your contacts that you're home safely")
             }
         }
         .disabled(isPerformingAction)

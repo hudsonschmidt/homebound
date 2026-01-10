@@ -28,12 +28,14 @@ struct AuthenticationView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 100, height: 100)
+                            .accessibilityLabel("Homebound logo")
 
                         Text("Homebound")
                             .font(.system(size: 38, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary)
                     }
                     .padding(.bottom, 40)
+                    .accessibilityElement(children: .combine)
 
                     // Auth Card with glowing effect
                     VStack(spacing: 20) {
@@ -58,6 +60,8 @@ struct AuthenticationView: View {
                                 .keyboardType(.emailAddress)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .accessibilityLabel("Email address")
+                                .accessibilityHint("Enter your email address to sign in or create an account")
 
                             // Continue Button
                             Button(action: requestMagicLink) {
@@ -78,6 +82,8 @@ struct AuthenticationView: View {
                                 .cornerRadius(14)
                             }
                             .disabled(!isValidEmail || isLoading)
+                            .accessibilityLabel(isLoading ? "Sending magic link" : "Continue with email")
+                            .accessibilityHint("Sends a sign-in code to your email")
 
                             // Divider
                             HStack {

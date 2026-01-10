@@ -17,6 +17,7 @@ Documentation:
 https://developer.apple.com/documentation/appstoreserverapi
 """
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -25,6 +26,8 @@ import httpx
 import jwt
 
 from src import config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -109,7 +112,7 @@ class AppStoreService:
         """
         if not self.is_configured:
             # Return None to allow development without Apple credentials
-            print("[AppStore] Warning: App Store API not configured, skipping verification")
+            logger.warning("App Store API not configured, skipping verification")
             return None
 
         try:
@@ -132,11 +135,11 @@ class AppStoreService:
                 elif response.status_code == 404:
                     return None
                 else:
-                    print(f"[AppStore] Verification failed: {response.status_code} - {response.text}")
+                    logger.error("Verification failed: %s - %s", response.status_code, response.text)
                     return None
 
         except Exception as e:
-            print(f"[AppStore] Error verifying transaction: {e}")
+            logger.exception("Error verifying transaction")
             return None
 
     async def get_subscription_status(
@@ -154,7 +157,7 @@ class AppStoreService:
             Subscription status dict if found, None otherwise
         """
         if not self.is_configured:
-            print("[AppStore] Warning: App Store API not configured, skipping status check")
+            logger.warning("App Store API not configured, skipping status check")
             return None
 
         try:
@@ -174,11 +177,11 @@ class AppStoreService:
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    print(f"[AppStore] Status check failed: {response.status_code}")
+                    logger.error("Status check failed: %s", response.status_code)
                     return None
 
         except Exception as e:
-            print(f"[AppStore] Error checking subscription status: {e}")
+            logger.exception("Error checking subscription status")
             return None
 
     async def get_transaction_history(
@@ -214,7 +217,7 @@ class AppStoreService:
                     return None
 
         except Exception as e:
-            print(f"[AppStore] Error fetching history: {e}")
+            logger.exception("Error fetching history")
             return None
 
     def _parse_transaction(self, data: dict) -> TransactionInfo:
@@ -247,7 +250,7 @@ class AppStoreService:
                     is_family_shared=payload.get("inAppOwnershipType", "") == "FAMILY_SHARED"
                 )
         except Exception as e:
-            print(f"[AppStore] Error parsing transaction: {e}")
+            logger.exception("Error parsing transaction")
 
         # Fallback - return empty transaction info
         return TransactionInfo(

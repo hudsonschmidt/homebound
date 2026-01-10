@@ -1,6 +1,10 @@
+import logging
+
 from sqlalchemy import create_engine
 
 from src import config
+
+logger = logging.getLogger(__name__)
 
 # Get connection URL from config
 connection_url = config.get_settings().POSTGRES_URI
@@ -13,7 +17,7 @@ if connection_url.startswith("sqlite"):
         connect_args={"check_same_thread": False},  # Required for SQLite with FastAPI
         echo=False
     )
-    print(f"[Database] ✅ Using SQLite database")
+    logger.info("Using SQLite database")
 else:
     # PostgreSQL configuration
     # Convert postgresql+psycopg:// to postgresql+psycopg2:// for compatibility
@@ -24,8 +28,8 @@ else:
     # Transaction mode supports many more concurrent connections and is recommended for web apps
     # Session mode has very low connection limits and causes "MaxClientsInSessionMode" errors
     if "supabase.com" in connection_url and ":5432" in connection_url:
-        print("[Database] ⚠️  Supabase Session Mode (port 5432) detected")
-        print("[Database] Switching to Transaction Mode (port 6543)")
+        logger.warning("Supabase Session Mode (port 5432) detected")
+        logger.info("Switching to Transaction Mode (port 6543)")
         connection_url = connection_url.replace(":5432", ":6543")
 
     # Add SSL mode for Supabase if not already present
@@ -43,4 +47,4 @@ else:
         pool_recycle=300,  # Recycle connections after 5 minutes (Transaction mode preference)
         echo=False  # Set to True for SQL debugging
     )
-    print("[Database] ✅ SQLAlchemy engine created with pool_size=3, max_overflow=7")
+    logger.info("SQLAlchemy engine created with pool_size=3, max_overflow=7")

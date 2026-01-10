@@ -1058,6 +1058,7 @@ final class LocalStorage {
                 return count > 0
             }
         } catch {
+            debugLog("[LocalStorage] Failed to check if has pending actions: \(error)")
             return false
         }
     }

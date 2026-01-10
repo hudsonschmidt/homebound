@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
+from src import config
 from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, participants, profile, stats, subscriptions, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
 
@@ -60,24 +61,30 @@ app = FastAPI(
 )
 
 # Configure CORS for mobile and web
+# Production origins only - localhost/dev origins removed for security
 origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "capacitor://localhost",
-    "ionic://localhost",
+    "capacitor://localhost",  # iOS native WebView
+    "ionic://localhost",  # Ionic WebView
     "https://api.homeboundapp.com",
     "https://homeboundapp.com",
     "https://www.homeboundapp.com",
 ]
 
+# Add localhost origins only in DEV_MODE
+if config.get_settings().DEV_MODE:
+    origins.extend([
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ])
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "X-Auth-Token", "Content-Type", "Accept"],
 )
 
 # Mount static files for Open Graph images and AASA file

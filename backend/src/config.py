@@ -72,7 +72,7 @@ class Settings:
     APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID", "com.hudsonschmidt.Homebound")
 
     # Development settings
-    DEV_MODE: bool = os.getenv("DEV_MODE", "true").lower() == "true"
+    DEV_MODE: bool = os.getenv("DEV_MODE", "false").lower() == "true"
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")
 
     # Notification backend settings
