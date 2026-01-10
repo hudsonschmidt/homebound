@@ -828,6 +828,20 @@ def handle_notification(notification_type: str, subtype: str | None, data: dict)
         }
 
 
+@webhook_router.get("/apple-webhook")
+async def apple_webhook_info():
+    """Health check for Apple webhook endpoint.
+
+    Returns info confirming the webhook is reachable.
+    Apple sends POST requests, so this GET endpoint is just for verification.
+    """
+    return {
+        "status": "ok",
+        "message": "Apple App Store Server Notifications webhook is active",
+        "method": "POST requests only for notifications"
+    }
+
+
 @webhook_router.post("/apple-webhook")
 async def apple_webhook(request: Request):
     """Receive App Store Server Notifications V2 from Apple.
