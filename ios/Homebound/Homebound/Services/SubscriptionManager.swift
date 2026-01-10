@@ -43,6 +43,9 @@ final class SubscriptionManager: ObservableObject {
     /// Whether the user is in a trial period
     @Published private(set) var isTrialing = false
 
+    /// Whether the subscription will auto-renew (false = cancelled)
+    @Published private(set) var willAutoRenew: Bool = true
+
     private var transactionListener: Task<Void, Error>?
 
     enum SubscriptionStatus: Equatable {
@@ -230,6 +233,26 @@ final class SubscriptionManager: ObservableObject {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
+        // Check if this is a trial purchase
+        let isTrial = transaction.offer?.paymentMode == .freeTrial
+
+        // Get auto-renew status from subscription status
+        var autoRenew = true  // Default to true for new purchases
+        if let product = products.first(where: { $0.id == transaction.productID }),
+           let subscription = product.subscription {
+            do {
+                let statuses = try await subscription.status
+                for status in statuses {
+                    if case .verified(let renewalInfo) = status.renewalInfo {
+                        autoRenew = renewalInfo.willAutoRenew
+                        break
+                    }
+                }
+            } catch {
+                debugLog("[SubscriptionManager] Failed to get renewal info for backend: \(error)")
+            }
+        }
+
         let request = VerifyPurchaseRequest(
             transactionId: String(transaction.id),
             originalTransactionId: String(transaction.originalID),
@@ -237,7 +260,9 @@ final class SubscriptionManager: ObservableObject {
             purchaseDate: formatter.string(from: transaction.purchaseDate),
             expiresDate: transaction.expirationDate.map { formatter.string(from: $0) },
             environment: transaction.environment == .sandbox ? "sandbox" : "production",
-            isFamilyShared: transaction.ownershipType == .familyShared
+            isFamilyShared: transaction.ownershipType == .familyShared,
+            autoRenew: autoRenew,
+            isTrial: isTrial
         )
 
         await Session.shared.verifyPurchase(request)
@@ -251,6 +276,12 @@ final class SubscriptionManager: ObservableObject {
         for await result in Transaction.currentEntitlements {
             do {
                 let transaction = try checkVerified(result)
+
+                // Check if transaction was revoked (refunded)
+                if transaction.revocationDate != nil {
+                    debugLog("[SubscriptionManager] Transaction revoked: \(transaction.productID)")
+                    continue  // Skip revoked transactions
+                }
 
                 if transaction.productType == .autoRenewable {
                     if let expDate = transaction.expirationDate {
@@ -266,7 +297,10 @@ final class SubscriptionManager: ObservableObject {
                             self.isTrialing = isTrial
                             self.purchasedProductIDs.insert(transaction.productID)
 
-                            debugLog("[SubscriptionManager] Active subscription: \(transaction.productID), expires: \(expDate)")
+                            // Get renewal info to check if subscription will auto-renew
+                            await updateRenewalStatus(for: transaction.productID)
+
+                            debugLog("[SubscriptionManager] Active subscription: \(transaction.productID), expires: \(expDate), willAutoRenew: \(willAutoRenew)")
                             return
                         }
                     }
@@ -280,8 +314,52 @@ final class SubscriptionManager: ObservableObject {
         self.subscriptionStatus = .free
         self.expirationDate = nil
         self.isTrialing = false
+        self.willAutoRenew = true  // Reset to default
         self.purchasedProductIDs.removeAll()
         debugLog("[SubscriptionManager] No active subscription")
+    }
+
+    /// Update the auto-renew status from StoreKit's subscription status
+    private func updateRenewalStatus(for productID: String) async {
+        guard let product = products.first(where: { $0.id == productID }),
+              let subscription = product.subscription else {
+            debugLog("[SubscriptionManager] Could not find product for renewal status: \(productID)")
+            // If products haven't loaded, try to load them and retry
+            if products.isEmpty {
+                await loadProducts()
+                if let product = products.first(where: { $0.id == productID }),
+                   let subscription = product.subscription {
+                    await fetchRenewalInfo(from: subscription)
+                    return
+                }
+            }
+            // Default to true (assume active) when we can't determine status
+            self.willAutoRenew = true
+            return
+        }
+
+        await fetchRenewalInfo(from: subscription)
+    }
+
+    /// Helper to fetch renewal info from a subscription
+    private func fetchRenewalInfo(from subscription: Product.SubscriptionInfo) async {
+        do {
+            let statuses = try await subscription.status
+            for status in statuses {
+                // Check renewal info for auto-renew status
+                if case .verified(let renewalInfo) = status.renewalInfo {
+                    self.willAutoRenew = renewalInfo.willAutoRenew
+                    debugLog("[SubscriptionManager] Renewal status - willAutoRenew: \(renewalInfo.willAutoRenew)")
+                    return
+                }
+            }
+            // No verified renewal info found - assume active
+            self.willAutoRenew = true
+        } catch {
+            debugLog("[SubscriptionManager] Failed to get renewal status: \(error)")
+            // On error, assume active to avoid falsely showing cancelled
+            self.willAutoRenew = true
+        }
     }
 
     // MARK: - Helpers

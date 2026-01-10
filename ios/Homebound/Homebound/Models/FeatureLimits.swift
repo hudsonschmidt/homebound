@@ -93,6 +93,7 @@ struct SubscriptionStatusResponse: Codable {
     let expiresAt: String?
     let autoRenew: Bool
     let isFamilyShared: Bool
+    let isTrial: Bool
     let productId: String?
 
     enum CodingKeys: String, CodingKey {
@@ -101,6 +102,7 @@ struct SubscriptionStatusResponse: Codable {
         case expiresAt = "expires_at"
         case autoRenew = "auto_renew"
         case isFamilyShared = "is_family_shared"
+        case isTrial = "is_trial"
         case productId = "product_id"
     }
 }
@@ -114,6 +116,8 @@ struct VerifyPurchaseRequest: Encodable {
     let expiresDate: String?
     let environment: String
     let isFamilyShared: Bool
+    let autoRenew: Bool
+    let isTrial: Bool
 
     enum CodingKeys: String, CodingKey {
         case transactionId = "transaction_id"
@@ -123,6 +127,8 @@ struct VerifyPurchaseRequest: Encodable {
         case expiresDate = "expires_date"
         case environment
         case isFamilyShared = "is_family_shared"
+        case autoRenew = "auto_renew"
+        case isTrial = "is_trial"
     }
 }
 

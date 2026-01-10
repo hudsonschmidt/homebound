@@ -5,14 +5,15 @@ import StoreKit
 struct SubscriptionSettingsView: View {
     @EnvironmentObject var session: Session
     @StateObject private var subscriptionManager = SubscriptionManager.shared
-    @State private var subscriptionStatus: SubscriptionStatusResponse?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showPaywall = false
     @State private var showFeatures = false
     @State private var isLoading = true
 
     /// Whether the subscription is cancelled (not auto-renewing)
+    /// Only applies to premium users - must have a subscription to be "cancelled"
     private var isCancelled: Bool {
-        subscriptionStatus?.autoRenew == false
+        subscriptionManager.subscriptionStatus.isPremium && !subscriptionManager.willAutoRenew
     }
 
     var body: some View {
@@ -169,6 +170,13 @@ struct SubscriptionSettingsView: View {
         .refreshable {
             await loadData()
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                // Refresh subscription status when returning to foreground
+                // This catches cases where user cancels in Apple Settings app
+                refreshOnForeground()
+            }
+        }
     }
 
     // MARK: - Current Plan Card
@@ -280,14 +288,19 @@ struct SubscriptionSettingsView: View {
         isLoading = true
         defer { isLoading = false }
 
-        // Load subscription status from backend
-        subscriptionStatus = await session.loadSubscriptionStatus()
-
-        // Also update from StoreKit
+        // Update from StoreKit (source of truth for subscription status)
         await subscriptionManager.updateSubscriptionStatus()
 
-        // Refresh feature limits
+        // Refresh feature limits from backend
         await session.loadFeatureLimits()
+    }
+
+    /// Refresh subscription status when returning from background
+    /// (e.g., after user cancels subscription in Apple Settings)
+    private func refreshOnForeground() {
+        Task {
+            await subscriptionManager.updateSubscriptionStatus()
+        }
     }
 
     private func openSubscriptionManagement() {

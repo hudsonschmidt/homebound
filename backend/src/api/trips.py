@@ -380,6 +380,9 @@ class TripCreate(BaseModel):
     is_group_trip: bool = False  # Is this a group trip?
     group_settings: GroupSettings | None = None  # Settings for group trip behavior
     participant_ids: list[int] | None = None  # Friend user IDs to invite as participants
+    # Custom messages (Premium feature)
+    custom_start_message: str | None = None  # Custom message for trip start notification
+    custom_overdue_message: str | None = None  # Custom message for overdue notification
 
 
 class TripUpdate(BaseModel):
@@ -411,6 +414,9 @@ class TripUpdate(BaseModel):
     notify_end_hour: int | None = None
     notify_self: bool | None = None  # Send copy of all emails to trip owner
     share_live_location: bool | None = None  # Share live location with friends during trip
+    # Custom messages (Premium feature)
+    custom_start_message: str | None = None
+    custom_overdue_message: str | None = None
 
 
 class TripResponse(BaseModel):
@@ -449,6 +455,9 @@ class TripResponse(BaseModel):
     eta_timezone: str | None
     notify_self: bool
     share_live_location: bool
+    # Custom messages (Premium feature)
+    custom_start_message: str | None = None
+    custom_overdue_message: str | None = None
     # Group trip fields
     is_group_trip: bool = False
     group_settings: GroupSettings | None = None
@@ -492,6 +501,26 @@ def create_trip(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one emergency contact (contact1 or friend_contact1) is required"
         )
+
+    # Count total contacts and check against subscription limit
+    contact_count = sum(1 for c in [
+        body.contact1, body.contact2, body.contact3,
+        body.friend_contact1, body.friend_contact2, body.friend_contact3
+    ] if c is not None)
+
+    from src.services.subscription_check import (
+        check_contact_limit,
+        check_custom_intervals_allowed,
+        check_custom_messages_allowed
+    )
+    check_contact_limit(user_id, contact_count)
+
+    # Check if user can set custom check-in intervals (premium feature)
+    check_custom_intervals_allowed(user_id, body.checkin_interval_min)
+
+    # Check if user can set custom messages (premium feature)
+    if body.custom_start_message or body.custom_overdue_message:
+        check_custom_messages_allowed(user_id)
 
     with db.engine.begin() as connection:
         # Verify activity exists and get its ID
@@ -666,7 +695,8 @@ def create_trip(
                     contact1, contact2, contact3, created_at,
                     checkin_token, checkout_token, timezone, start_timezone, eta_timezone,
                     checkin_interval_min, notify_start_hour, notify_end_hour, notify_self,
-                    share_live_location, is_group_trip, group_settings, notified_trip_started
+                    share_live_location, is_group_trip, group_settings, notified_trip_started,
+                    custom_start_message, custom_overdue_message
                 ) VALUES (
                     :user_id, :title, :activity, :start, :eta, :grace_min,
                     :location_text, :gen_lat, :gen_lon,
@@ -675,7 +705,8 @@ def create_trip(
                     :contact1, :contact2, :contact3, :created_at,
                     :checkin_token, :checkout_token, :timezone, :start_timezone, :eta_timezone,
                     :checkin_interval_min, :notify_start_hour, :notify_end_hour, :notify_self,
-                    :share_live_location, :is_group_trip, :group_settings, :notified_trip_started
+                    :share_live_location, :is_group_trip, :group_settings, :notified_trip_started,
+                    :custom_start_message, :custom_overdue_message
                 )
                 RETURNING id
                 """
@@ -712,7 +743,9 @@ def create_trip(
                 "share_live_location": body.share_live_location,
                 "is_group_trip": body.is_group_trip,
                 "group_settings": group_settings_json,
-                "notified_trip_started": is_starting_now  # Prevent duplicate scheduler notifications
+                "notified_trip_started": is_starting_now,  # Prevent duplicate scheduler notifications
+                "custom_start_message": body.custom_start_message,
+                "custom_overdue_message": body.custom_overdue_message
             }
         )
         row = result.fetchone()
@@ -774,6 +807,7 @@ def create_trip(
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        t.is_group_trip, t.group_settings,
+                       t.custom_start_message, t.custom_overdue_message,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -948,6 +982,8 @@ def create_trip(
             eta_timezone=trip["eta_timezone"],
             notify_self=trip["notify_self"],
             share_live_location=trip.get("share_live_location", False),
+            custom_start_message=trip.get("custom_start_message"),
+            custom_overdue_message=trip.get("custom_overdue_message"),
             is_group_trip=trip.get("is_group_trip", False),
             group_settings=trip_group_settings,
             participant_count=participant_count
@@ -975,6 +1011,7 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        t.is_group_trip, t.group_settings,
+                       t.custom_start_message, t.custom_overdue_message,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order,
@@ -1049,6 +1086,8 @@ def get_trips(user_id: int = Depends(auth.get_current_user_id)):
                     eta_timezone=trip["eta_timezone"],
                     notify_self=trip["notify_self"],
                     share_live_location=trip.get("share_live_location", False),
+                    custom_start_message=trip.get("custom_start_message"),
+                    custom_overdue_message=trip.get("custom_overdue_message"),
                     is_group_trip=trip.get("is_group_trip", False),
                     group_settings=parse_group_settings(trip.get("group_settings")),
                     participant_count=trip.get("participant_count", 0)
@@ -1078,6 +1117,7 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        t.is_group_trip, t.group_settings,
+                       t.custom_start_message, t.custom_overdue_message,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order,
@@ -1148,6 +1188,8 @@ def get_active_trip(user_id: int = Depends(auth.get_current_user_id)):
             eta_timezone=trip["eta_timezone"],
             notify_self=trip["notify_self"],
             share_live_location=trip.get("share_live_location", False),
+            custom_start_message=trip.get("custom_start_message"),
+            custom_overdue_message=trip.get("custom_overdue_message"),
             is_group_trip=trip.get("is_group_trip", False),
             group_settings=parse_group_settings(trip.get("group_settings")),
             participant_count=trip.get("participant_count", 0)
@@ -1170,6 +1212,7 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
                        t.is_group_trip, t.group_settings,
+                       t.custom_start_message, t.custom_overdue_message,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order,
@@ -1239,6 +1282,8 @@ def get_trip(trip_id: int, user_id: int = Depends(auth.get_current_user_id)):
             eta_timezone=trip["eta_timezone"],
             notify_self=trip["notify_self"],
             share_live_location=trip.get("share_live_location", False),
+            custom_start_message=trip.get("custom_start_message"),
+            custom_overdue_message=trip.get("custom_overdue_message"),
             is_group_trip=trip.get("is_group_trip", False),
             group_settings=parse_group_settings(trip.get("group_settings")),
             participant_count=trip.get("participant_count", 0)
@@ -1255,11 +1300,13 @@ def update_trip(
     log.info(f"[Trips] Updating trip {trip_id} for user_id={user_id}")
 
     with db.engine.begin() as connection:
-        # Verify trip ownership and status
+        # Verify trip ownership and status, also get current contacts for limit check
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, status, activity
+                SELECT id, status, activity,
+                       contact1, contact2, contact3,
+                       friend_contact1, friend_contact2, friend_contact3
                 FROM trips
                 WHERE id = :trip_id AND user_id = :user_id
                 """
@@ -1278,6 +1325,32 @@ def update_trip(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only planned trips can be edited"
             )
+
+        # Check contact limit: merge current contacts with updates and count
+        # Use body value if provided, otherwise keep existing
+        final_contacts = [
+            body.contact1 if body.contact1 is not None else trip.contact1,
+            body.contact2 if body.contact2 is not None else trip.contact2,
+            body.contact3 if body.contact3 is not None else trip.contact3,
+            body.friend_contact1 if body.friend_contact1 is not None else trip.friend_contact1,
+            body.friend_contact2 if body.friend_contact2 is not None else trip.friend_contact2,
+            body.friend_contact3 if body.friend_contact3 is not None else trip.friend_contact3,
+        ]
+        contact_count = sum(1 for c in final_contacts if c is not None)
+        from src.services.subscription_check import (
+            check_contact_limit,
+            check_custom_intervals_allowed,
+            check_custom_messages_allowed
+        )
+        check_contact_limit(user_id, contact_count)
+
+        # Check custom intervals if being updated (premium feature)
+        if body.checkin_interval_min is not None:
+            check_custom_intervals_allowed(user_id, body.checkin_interval_min)
+
+        # Check custom messages if being updated (premium feature)
+        if body.custom_start_message is not None or body.custom_overdue_message is not None:
+            check_custom_messages_allowed(user_id)
 
         # Build update fields dynamically based on what's provided
         update_fields = []
@@ -1357,6 +1430,8 @@ def update_trip(
             "notify_end_hour": body.notify_end_hour,
             "notify_self": body.notify_self,
             "share_live_location": body.share_live_location,
+            "custom_start_message": body.custom_start_message,
+            "custom_overdue_message": body.custom_overdue_message,
         }
 
         for field, value in simple_fields.items():
@@ -1430,6 +1505,7 @@ def update_trip(
                        t.checkin_token, t.checkout_token,
                        t.checkin_interval_min, t.notify_start_hour, t.notify_end_hour,
                        t.timezone, t.start_timezone, t.eta_timezone, t.notify_self, t.share_live_location,
+                       t.custom_start_message, t.custom_overdue_message,
                        a.id as activity_id, a.name as activity_name, a.icon as activity_icon,
                        a.default_grace_minutes, a.colors as activity_colors,
                        a.messages as activity_messages, a.safety_tips, a."order" as activity_order
@@ -1492,7 +1568,9 @@ def update_trip(
             start_timezone=updated_trip["start_timezone"],
             eta_timezone=updated_trip["eta_timezone"],
             notify_self=updated_trip["notify_self"],
-            share_live_location=updated_trip.get("share_live_location", False)
+            share_live_location=updated_trip.get("share_live_location", False),
+            custom_start_message=updated_trip.get("custom_start_message"),
+            custom_overdue_message=updated_trip.get("custom_overdue_message")
         )
 
 
@@ -1833,6 +1911,10 @@ def extend_trip(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Can only extend active or overdue trips"
             )
+
+        # Check if extension duration is allowed for user's subscription tier
+        from src.services.subscription_check import check_extension_allowed
+        check_extension_allowed(user_id, minutes)
 
         # Parse current ETA and add minutes
         from datetime import timedelta

@@ -11,6 +11,7 @@ struct PaywallView: View {
     var feature: PremiumFeature? = nil
 
     @State private var selectedProduct: Product?
+    @State private var isEligibleForTrial: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -75,6 +76,13 @@ struct PaywallView: View {
                 // Pre-select yearly (better value)
                 if selectedProduct == nil {
                     selectedProduct = subscriptionManager.yearlyProduct ?? subscriptionManager.monthlyProduct
+                }
+                // Check trial eligibility for selected product
+                await checkTrialEligibility()
+            }
+            .onChange(of: selectedProduct) { _, _ in
+                Task {
+                    await checkTrialEligibility()
                 }
             }
         }
@@ -239,17 +247,32 @@ struct PaywallView: View {
         }
     }
 
+    // MARK: - Trial Eligibility
+
+    /// Check if user is eligible for the free trial on the selected product
+    private func checkTrialEligibility() async {
+        guard let product = selectedProduct,
+              let subscription = product.subscription else {
+            isEligibleForTrial = false
+            return
+        }
+
+        // Check if product has a trial offer
+        guard let intro = subscription.introductoryOffer,
+              intro.paymentMode == .freeTrial else {
+            isEligibleForTrial = false
+            return
+        }
+
+        // Check if user is actually eligible (hasn't used trial before)
+        isEligibleForTrial = await subscription.isEligibleForIntroOffer
+    }
+
     // MARK: - Subscribe Button
 
-    /// Check if selected product has a free trial
+    /// Whether to show the trial button (product has trial AND user is eligible)
     private var selectedProductHasTrial: Bool {
-        guard let product = selectedProduct,
-              let subscription = product.subscription,
-              let intro = subscription.introductoryOffer,
-              intro.paymentMode == .freeTrial else {
-            return false
-        }
-        return true
+        isEligibleForTrial
     }
 
     private var subscribeButton: some View {

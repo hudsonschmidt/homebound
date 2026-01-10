@@ -193,6 +193,15 @@ def patch_profile(body: ProfileUpdate, user_id: int = Depends(auth.get_current_u
 @router.get("/export")
 def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
     """Export all user data (profile, trips, contacts) for GDPR compliance"""
+    # Check if user's subscription allows data export
+    from src.services.subscription_check import get_limits
+    limits = get_limits(user_id)
+    if not limits.export:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Data export requires Homebound+"
+        )
+
     with db.engine.begin() as connection:
         # Get user profile
         user = connection.execute(

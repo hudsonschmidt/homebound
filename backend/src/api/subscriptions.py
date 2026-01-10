@@ -29,6 +29,7 @@ class SubscriptionStatusResponse(BaseModel):
     expires_at: str | None
     auto_renew: bool
     is_family_shared: bool
+    is_trial: bool
     product_id: str | None
 
 
@@ -62,6 +63,8 @@ class VerifyPurchaseRequest(BaseModel):
     expires_date: str | None  # ISO8601, None for lifetime purchases
     environment: str = "production"  # "production" or "sandbox"
     is_family_shared: bool = False
+    auto_renew: bool = True  # Whether subscription will auto-renew
+    is_trial: bool = False  # Whether this is a free trial period
 
 
 class VerifyPurchaseResponse(BaseModel):
@@ -118,7 +121,7 @@ def get_subscription_status(user_id: int = Depends(auth.get_current_user_id)):
         subscription = conn.execute(
             sqlalchemy.text(
                 """
-                SELECT product_id, auto_renew_status, is_family_shared, expires_date
+                SELECT product_id, auto_renew_status, is_family_shared, is_trial, expires_date
                 FROM subscriptions
                 WHERE user_id = :user_id
                 ORDER BY created_at DESC
@@ -134,6 +137,7 @@ def get_subscription_status(user_id: int = Depends(auth.get_current_user_id)):
             expires_at=user.subscription_expires_at.isoformat() if user.subscription_expires_at else None,
             auto_renew=subscription.auto_renew_status if subscription else False,
             is_family_shared=subscription.is_family_shared if subscription else False,
+            is_trial=subscription.is_trial if subscription and hasattr(subscription, 'is_trial') else False,
             product_id=subscription.product_id if subscription else None
         )
 
@@ -173,14 +177,21 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
             {"original_transaction_id": body.original_transaction_id}
         ).fetchone()
 
+        # Determine status based on auto_renew
+        subscription_status = "active" if body.auto_renew else "cancelled"
+
         if existing:
-            # Update existing subscription
+            # Update existing subscription with all fields from StoreKit
             conn.execute(
                 sqlalchemy.text(
                     """
                     UPDATE subscriptions
                     SET expires_date = :expires_date,
                         status = :status,
+                        auto_renew_status = :auto_renew_status,
+                        is_family_shared = :is_family_shared,
+                        is_trial = :is_trial,
+                        product_id = :product_id,
                         updated_at = :updated_at
                     WHERE original_transaction_id = :original_transaction_id
                     """
@@ -188,7 +199,11 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
                 {
                     "original_transaction_id": body.original_transaction_id,
                     "expires_date": expires_date,
-                    "status": "active",
+                    "status": subscription_status,
+                    "auto_renew_status": body.auto_renew,
+                    "is_family_shared": body.is_family_shared,
+                    "is_trial": body.is_trial,
+                    "product_id": body.product_id,
                     "updated_at": datetime.now(UTC)
                 }
             )
@@ -200,11 +215,11 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
                     INSERT INTO subscriptions (
                         user_id, original_transaction_id, product_id,
                         purchase_date, expires_date, status,
-                        auto_renew_status, is_family_shared, environment
+                        auto_renew_status, is_family_shared, is_trial, environment
                     ) VALUES (
                         :user_id, :original_transaction_id, :product_id,
                         :purchase_date, :expires_date, :status,
-                        :auto_renew_status, :is_family_shared, :environment
+                        :auto_renew_status, :is_family_shared, :is_trial, :environment
                     )
                     """
                 ),
@@ -214,34 +229,43 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
                     "product_id": body.product_id,
                     "purchase_date": purchase_date,
                     "expires_date": expires_date,
-                    "status": "active",
-                    "auto_renew_status": True,
+                    "status": subscription_status,
+                    "auto_renew_status": body.auto_renew,
                     "is_family_shared": body.is_family_shared,
+                    "is_trial": body.is_trial,
                     "environment": body.environment
                 }
             )
 
-        # Update user's subscription tier and expiration
+        # Only set tier to 'plus' if subscription is not expired
+        # For expired or null expires_date, keep as free
+        is_subscription_active = (
+            expires_date is not None and
+            expires_date > datetime.now(UTC)
+        )
+        new_tier = "plus" if is_subscription_active else "free"
+
         conn.execute(
             sqlalchemy.text(
                 """
                 UPDATE users
-                SET subscription_tier = 'plus',
+                SET subscription_tier = :tier,
                     subscription_expires_at = :expires_at
                 WHERE id = :user_id
                 """
             ),
             {
                 "user_id": user_id,
+                "tier": new_tier,
                 "expires_at": expires_date
             }
         )
 
         return VerifyPurchaseResponse(
             ok=True,
-            tier="plus",
+            tier=new_tier,
             expires_at=expires_date.isoformat() if expires_date else None,
-            message="Subscription activated successfully"
+            message="Subscription activated successfully" if is_subscription_active else "Subscription expired"
         )
 
 
@@ -253,15 +277,16 @@ def restore_purchases(user_id: int = Depends(auth.get_current_user_id)):
     The iOS app should handle the actual restoration via StoreKit and then
     call verify-purchase for each restored transaction.
     """
-    # Get the latest active subscription for this user
+    # Get the latest active, non-cancelled subscription for this user
     with db.engine.begin() as conn:
         subscription = conn.execute(
             sqlalchemy.text(
                 """
-                SELECT product_id, expires_date, status
+                SELECT product_id, expires_date, status, auto_renew_status
                 FROM subscriptions
                 WHERE user_id = :user_id
                   AND status = 'active'
+                  AND auto_renew_status = TRUE
                 ORDER BY expires_date DESC
                 LIMIT 1
                 """
@@ -270,7 +295,11 @@ def restore_purchases(user_id: int = Depends(auth.get_current_user_id)):
         ).fetchone()
 
         if subscription and subscription.expires_date:
-            if subscription.expires_date.replace(tzinfo=UTC) > datetime.now(UTC):
+            # Handle timezone-aware comparison properly
+            expires_date = subscription.expires_date
+            if expires_date.tzinfo is None:
+                expires_date = expires_date.replace(tzinfo=UTC)
+            if expires_date > datetime.now(UTC):
                 # User has an active subscription, update their tier
                 conn.execute(
                     sqlalchemy.text(

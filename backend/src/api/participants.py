@@ -240,6 +240,10 @@ def invite_participants(
     """
     log.info(f"[Participants] Inviting {len(body.friend_user_ids)} friends to trip {trip_id}")
 
+    # Check if user's subscription allows group trips
+    from src.services.subscription_check import check_group_trips_allowed
+    check_group_trips_allowed(user_id)
+
     with db.engine.begin() as connection:
         # Get trip and verify access
         trip = connection.execute(

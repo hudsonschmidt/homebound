@@ -124,7 +124,9 @@ def get_user_tier(user_id: int) -> str:
 
         # Check if subscription is still valid
         if tier == "plus" and expires_at:
-            if expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+            # Handle timezone-aware comparison properly
+            exp = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
+            if exp < datetime.now(UTC):
                 return "free"
 
         return tier or "free"
@@ -276,6 +278,45 @@ def check_group_trips_allowed(user_id: int) -> None:
         )
 
 
+def check_custom_intervals_allowed(user_id: int, interval_minutes: int) -> None:
+    """Check if user can set a custom check-in interval.
+
+    Free users can only use the default 30-minute interval.
+    Premium users can set any interval.
+
+    Raises HTTPException if not allowed.
+    """
+    DEFAULT_INTERVAL = 30
+
+    # Default interval is always allowed
+    if interval_minutes == DEFAULT_INTERVAL:
+        return
+
+    limits = get_limits(user_id)
+
+    if not limits.custom_intervals:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Custom check-in intervals require Homebound+. Free plan uses {DEFAULT_INTERVAL}-minute intervals."
+        )
+
+
+def check_custom_messages_allowed(user_id: int) -> None:
+    """Check if user can set custom notification messages.
+
+    Custom start and overdue messages are a premium feature.
+
+    Raises HTTPException if not allowed.
+    """
+    limits = get_limits(user_id)
+
+    if not limits.custom_messages:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Custom notification messages require Homebound+"
+        )
+
+
 def filter_history_by_tier(user_id: int, trips: list[dict]) -> list[dict]:
     """Filter trip history based on user's subscription tier.
 
@@ -300,7 +341,9 @@ def filter_history_by_tier(user_id: int, trips: list[dict]) -> list[dict]:
         if trip_date:
             if isinstance(trip_date, str):
                 trip_date = datetime.fromisoformat(trip_date.replace("Z", "+00:00"))
-            if trip_date.replace(tzinfo=UTC) >= cutoff_date:
+            # Handle timezone-aware comparison properly
+            td = trip_date if trip_date.tzinfo else trip_date.replace(tzinfo=UTC)
+            if td >= cutoff_date:
                 filtered.append(trip)
 
     return filtered
