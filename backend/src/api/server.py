@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
-from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, participants, profile, stats, trips
+from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, participants, profile, stats, subscriptions, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
@@ -44,6 +44,7 @@ tags_metadata = [
     {"name": "checkin", "description": "Check-in and check-out functionality"},
     {"name": "profile", "description": "User profile management"},
     {"name": "stats", "description": "Platform statistics"},
+    {"name": "subscriptions", "description": "Subscription management and premium features"},
 ]
 
 app = FastAPI(
@@ -100,6 +101,7 @@ app.include_router(live_activity_tokens.router)
 app.include_router(checkin.router)
 app.include_router(profile.router)
 app.include_router(stats.router)
+app.include_router(subscriptions.router)
 app.include_router(invite_page.router)
 
 

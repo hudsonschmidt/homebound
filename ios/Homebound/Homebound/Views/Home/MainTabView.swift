@@ -1,10 +1,12 @@
 import SwiftUI
 import Combine
+import MapKit
 
 // MARK: - Main Tab View with Dock Navigation
 struct MainTabView: View {
     @EnvironmentObject var session: Session
     @State private var selectedTab = 0
+    @State private var showPaywall = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -30,18 +32,109 @@ struct MainTabView: View {
                 .tag(2)
                 .badge(session.tripInvitations.count)
 
-            // Map Tab
-            TripMapView()
-                .tabItem {
-                    Label("Map", systemImage: "map.fill")
+            // Map Tab (Premium Feature)
+            Group {
+                if session.canUse(feature: .tripMap) {
+                    TripMapView()
+                } else {
+                    LockedTripMapView(showPaywall: $showPaywall)
                 }
-                .tag(3)
+            }
+            .tabItem {
+                Label("Map", systemImage: "map.fill")
+            }
+            .tag(3)
         }
         .accentColor(Color.hbBrand)
         .onChange(of: selectedTab) { oldValue, newValue in
             if newValue == 2 { // Friends tab
                 NotificationCenter.default.post(name: .friendsTabSelected, object: nil)
             }
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+                .environmentObject(session)
+        }
+    }
+}
+
+// MARK: - Locked Trip Map View (Premium Feature)
+struct LockedTripMapView: View {
+    @Binding var showPaywall: Bool
+
+    var body: some View {
+        ZStack {
+            // Blurred map background
+            Map()
+                .blur(radius: 10)
+                .allowsHitTesting(false)
+
+            // Overlay with lock content
+            VStack(spacing: 20) {
+                // Lock icon
+                ZStack {
+                    Circle()
+                        .fill(Color.hbBrand.opacity(0.15))
+                        .frame(width: 80, height: 80)
+
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(Color.hbBrand)
+                }
+
+                VStack(spacing: 8) {
+                    Text("Trip Map")
+                        .font(.title2)
+                        .fontWeight(.bold)
+
+                    Text("See all your adventures on an interactive map")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+
+                // Premium badge
+                HStack(spacing: 4) {
+                    Image("Logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                    Text("PLUS")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                }
+                .foregroundStyle(Color.hbBrand)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.hbBrand.opacity(0.15))
+                .cornerRadius(8)
+
+                // Upgrade button
+                Button(action: { showPaywall = true }) {
+                    Text("Unlock Trip Map")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            LinearGradient(
+                                colors: [Color.hbBrand, Color.hbTeal],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(12)
+                }
+                .padding(.horizontal, 32)
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(.ultraThinMaterial)
+            )
+            .padding(24)
         }
     }
 }

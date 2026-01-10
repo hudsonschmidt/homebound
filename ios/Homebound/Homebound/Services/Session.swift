@@ -244,6 +244,11 @@ final class Session: ObservableObject {
     @Published var friendVisibilitySettings: FriendVisibilitySettings = .defaults
     @Published var tripInvitations: [TripInvitation] = []  // Pending group trip invitations
 
+    // Subscription
+    @Published var featureLimits: FeatureLimits = .free
+    @Published var subscriptionTier: String = "free"
+    @Published var debugSubscriptionTier: String = ""  // For developer testing: "", "free", or "plus"
+
     // Realtime update triggers - views observe these to know when to refresh
     @Published var timelineLastUpdated: Date = Date()
 
@@ -3866,6 +3871,181 @@ final class Session: ObservableObject {
         debugLog("[Session] 📱 Updated widget data for trip: \(trip.title)")
     }
 
+    // MARK: - Subscription Management
+
+    /// Load feature limits from the backend
+    @MainActor
+    func loadFeatureLimits() async {
+        guard let token = accessToken else {
+            debugLog("[Session] No access token, using default feature limits")
+            return
+        }
+
+        let url = baseURL.appendingPathComponent("/api/v1/subscriptions/limits")
+
+        do {
+            let limits: FeatureLimits = try await api.get(url, bearer: token)
+            self.featureLimits = limits
+            self.subscriptionTier = limits.tier
+            debugLog("[Session] Feature limits loaded: tier=\(limits.tier), premium=\(limits.isPremium)")
+        } catch {
+            debugLog("[Session] Failed to load feature limits: \(error)")
+            // Keep existing limits (defaults to free)
+        }
+    }
+
+    /// Check if a premium feature is available
+    func canUse(feature: PremiumFeature) -> Bool {
+        switch feature {
+        case .moreContacts:
+            return true  // Always allow, just enforce limit
+        case .savedTrips:
+            return featureLimits.savedTripsLimit > 0
+        case .unlimitedHistory:
+            return featureLimits.historyDays == nil
+        case .allExtensions:
+            return featureLimits.extensions.count > 1
+        case .allStats:
+            return featureLimits.visibleStats > 2
+        case .widgets:
+            return featureLimits.widgetsEnabled
+        case .liveActivity:
+            return featureLimits.liveActivityEnabled
+        case .customIntervals:
+            return featureLimits.customIntervalsEnabled
+        case .tripMap:
+            return featureLimits.tripMapEnabled
+        case .pinnedActivities:
+            return featureLimits.pinnedActivitiesLimit > 0
+        case .groupTrips:
+            return featureLimits.groupTripsEnabled
+        case .contactGroups:
+            return featureLimits.contactGroupsEnabled
+        case .customMessages:
+            return featureLimits.customMessagesEnabled
+        case .export:
+            return featureLimits.exportEnabled
+        }
+    }
+
+    /// Apply debug subscription tier override (for developer testing)
+    func applyDebugSubscriptionTier(_ tier: String) {
+        if tier.isEmpty {
+            // Reset to real subscription - reload from backend
+            Task {
+                await loadFeatureLimits()
+            }
+        } else if tier == "free" {
+            featureLimits = .free
+            subscriptionTier = "free"
+        } else if tier == "plus" {
+            featureLimits = .plus
+            subscriptionTier = "plus"
+        }
+    }
+
+    /// Check if user has reached contact limit for trips
+    func isContactLimitReached(currentCount: Int) -> Bool {
+        return currentCount >= featureLimits.contactsPerTrip
+    }
+
+    /// Check if an extension duration is allowed
+    func isExtensionAllowed(minutes: Int) -> Bool {
+        return featureLimits.extensions.contains(minutes)
+    }
+
+    /// Get available extension options
+    func availableExtensions() -> [Int] {
+        return featureLimits.extensions
+    }
+
+    /// Check if trip history date is within allowed range
+    func isTripDateVisible(date: Date) -> Bool {
+        guard let historyDays = featureLimits.historyDays else {
+            return true  // Unlimited
+        }
+
+        let cutoff = Calendar.current.date(byAdding: .day, value: -historyDays, to: Date()) ?? Date()
+        return date >= cutoff
+    }
+
+    /// Get subscription status from backend
+    @MainActor
+    func loadSubscriptionStatus() async -> SubscriptionStatusResponse? {
+        guard let token = accessToken else { return nil }
+
+        let url = baseURL.appendingPathComponent("/api/v1/subscriptions/status")
+
+        do {
+            let status: SubscriptionStatusResponse = try await api.get(url, bearer: token)
+            debugLog("[Session] Subscription status: tier=\(status.tier), active=\(status.isActive)")
+            return status
+        } catch {
+            debugLog("[Session] Failed to load subscription status: \(error)")
+            return nil
+        }
+    }
+
+    /// Get pinned activities
+    @MainActor
+    func loadPinnedActivities() async -> [PinnedActivity] {
+        guard let token = accessToken else { return [] }
+
+        let url = baseURL.appendingPathComponent("/api/v1/subscriptions/pinned-activities")
+
+        do {
+            let pinned: [PinnedActivity] = try await api.get(url, bearer: token)
+            debugLog("[Session] Loaded \(pinned.count) pinned activities")
+            return pinned
+        } catch {
+            debugLog("[Session] Failed to load pinned activities: \(error)")
+            return []
+        }
+    }
+
+    /// Pin an activity (premium feature)
+    @MainActor
+    func pinActivity(activityId: Int, position: Int) async -> Bool {
+        guard let token = accessToken else { return false }
+
+        let url = baseURL.appendingPathComponent("/api/v1/subscriptions/pinned-activities")
+
+        struct PinRequest: Encodable {
+            let activity_id: Int
+            let position: Int
+        }
+
+        do {
+            let _: PinnedActivity = try await api.post(
+                url,
+                body: PinRequest(activity_id: activityId, position: position),
+                bearer: token
+            )
+            debugLog("[Session] Pinned activity \(activityId) at position \(position)")
+            return true
+        } catch {
+            debugLog("[Session] Failed to pin activity: \(error)")
+            return false
+        }
+    }
+
+    /// Unpin an activity
+    @MainActor
+    func unpinActivity(activityId: Int) async -> Bool {
+        guard let token = accessToken else { return false }
+
+        let url = baseURL.appendingPathComponent("/api/v1/subscriptions/pinned-activities/\(activityId)")
+
+        do {
+            let _: GenericResponse = try await api.delete(url, bearer: token)
+            debugLog("[Session] Unpinned activity \(activityId)")
+            return true
+        } catch {
+            debugLog("[Session] Failed to unpin activity: \(error)")
+            return false
+        }
+    }
+
     // MARK: - Sign Out
     @MainActor
     func signOut() {
@@ -3907,6 +4087,10 @@ final class Session: ObservableObject {
         friends = []
         pendingInvites = []
         isInitialDataLoaded = false
+
+        // Reset subscription state
+        featureLimits = .free
+        subscriptionTier = "free"
 
         debugLog("[Session] ✅ Sign out complete")
     }

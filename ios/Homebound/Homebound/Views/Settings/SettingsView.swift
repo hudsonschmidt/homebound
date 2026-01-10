@@ -521,6 +521,31 @@ struct SettingsView: View {
                     }
                 }
 
+                // Subscription Section
+                Section {
+                    NavigationLink(destination: SubscriptionSettingsView()) {
+                        HStack(spacing: 12) {
+                            Image("Logo")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 28, height: 28)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                            Text("Homebound+")
+
+                            Spacer()
+
+                            if session.featureLimits.isPremium {
+                                PremiumBadge()
+                            } else {
+                                Text("Upgrade")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 // Safety Section
                 Section("Safety") {
                     NavigationLink(destination: EmergencyContactsView()) {
@@ -609,6 +634,32 @@ struct SettingsView: View {
                                     .foregroundStyle(.orange)
                             }
                         }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label {
+                                Text("Subscription Tier Override")
+                            } icon: {
+                                Image(systemName: "crown.fill")
+                                    .foregroundStyle(session.debugSubscriptionTier == "plus" ? Color.hbBrand : session.debugSubscriptionTier == "free" ? .orange : .secondary)
+                            }
+
+                            Picker("Tier", selection: $session.debugSubscriptionTier) {
+                                Text("None").tag("")
+                                Text("Free").tag("free")
+                                Text("Plus").tag("plus")
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: session.debugSubscriptionTier) { _, newValue in
+                                session.applyDebugSubscriptionTier(newValue)
+                            }
+
+                            if !session.debugSubscriptionTier.isEmpty {
+                                Text("Overriding to \(session.debugSubscriptionTier == "plus" ? "Homebound+" : "Free") tier")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
                     }
                 }
 
@@ -1125,8 +1176,14 @@ struct CustomizationView: View {
     @EnvironmentObject var session: Session
     @EnvironmentObject var preferences: AppPreferences
     @State private var selectedActivityToPin: Int? = nil
+    @State private var showPaywall = false
+    @State private var isLoadingPinnedActivities = false
 
     let graceOptions = [15, 30, 45, 60, 90]
+
+    var canPinActivities: Bool {
+        session.canUse(feature: .pinnedActivities)
+    }
 
     var pinnedActivities: [Activity] {
         preferences.pinnedActivityIds.compactMap { pinnedId in
@@ -1182,7 +1239,27 @@ struct CustomizationView: View {
 
             // MARK: - Favorite Activities
             Section {
-                if preferences.pinnedActivityIds.isEmpty {
+                if !canPinActivities {
+                    // Premium upsell for free users
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(Color.hbBrand)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Favorite Activities")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text("Pin your most-used activities for quick access")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        PremiumBadge()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        showPaywall = true
+                    }
+                } else if preferences.pinnedActivityIds.isEmpty {
                     Text("No favorite activities")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
@@ -1193,7 +1270,12 @@ struct CustomizationView: View {
                             Text(activity.name)
                             Spacer()
                             Button {
-                                preferences.unpinActivity(activity.id)
+                                Task {
+                                    let success = await session.unpinActivity(activityId: activity.id)
+                                    if success {
+                                        preferences.unpinActivity(activity.id)
+                                    }
+                                }
                             } label: {
                                 Image(systemName: "star.slash")
                                     .foregroundStyle(.red)
@@ -1202,7 +1284,7 @@ struct CustomizationView: View {
                     }
                 }
 
-                if preferences.pinnedActivityIds.count < 3 {
+                if canPinActivities && preferences.pinnedActivityIds.count < 3 {
                     Picker("Add Favorite", selection: $selectedActivityToPin) {
                         Text("Select activity...").tag(nil as Int?)
                         ForEach(unpinnedActivities, id: \.id) { activity in
@@ -1211,15 +1293,31 @@ struct CustomizationView: View {
                     }
                     .onChange(of: selectedActivityToPin) { _, newValue in
                         if let activityId = newValue {
-                            preferences.pinActivity(activityId)
+                            let position = preferences.pinnedActivityIds.count
+                            Task {
+                                let success = await session.pinActivity(activityId: activityId, position: position)
+                                if success {
+                                    preferences.pinActivity(activityId)
+                                }
+                            }
                             selectedActivityToPin = nil
                         }
                     }
                 }
             } header: {
-                Text("Favorite Activities")
+                HStack {
+                    Text("Favorite Activities")
+                    if !canPinActivities {
+                        Spacer()
+                        PremiumBadge()
+                    }
+                }
             } footer: {
-                Text("Pin up to 3 activities for quick access when creating trips.")
+                if canPinActivities {
+                    Text("Pin up to 3 activities for quick access when creating trips.")
+                } else {
+                    Text("Upgrade to Homebound+ to pin your favorite activities.")
+                }
             }
 
             // MARK: - Home Screen
@@ -1316,6 +1414,22 @@ struct CustomizationView: View {
         .scrollIndicators(.hidden)
         .navigationTitle("Customization")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+                .environmentObject(session)
+        }
+        .task {
+            // Load pinned activities from backend and sync to local preferences
+            if canPinActivities {
+                let pinnedFromBackend = await session.loadPinnedActivities()
+                // Sync backend pinned activities to local preferences
+                for pinned in pinnedFromBackend {
+                    if !preferences.isActivityPinned(pinned.activityId) {
+                        preferences.pinActivity(pinned.activityId)
+                    }
+                }
+            }
+        }
     }
 }
 
