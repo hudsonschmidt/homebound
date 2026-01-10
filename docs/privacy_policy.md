@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last Updated: November 29, 2025**
+**Last Updated: January 10, 2026**
 
 Hudson Schmidt ("we," "us," or "our") operates the Homebound mobile application (the "App"). This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our App.
 
@@ -16,6 +16,8 @@ When you create an account, we collect:
 - **First and last name** (for personalization and to share with emergency contacts)
 - **Age** (for service customization)
 - **Apple ID identifier** (if you sign in with Apple)
+- **Notification preferences** (trip reminders, check-in alerts)
+- **Friend visibility settings** (controls what friends can see about you, such as your location, trip notes, achievements, and profile stats)
 
 ### 1.2 Trip & Safety Plan Data
 When you create a trip or safety plan, we collect:
@@ -23,38 +25,111 @@ When you create a trip or safety plan, we collect:
 - Start time and estimated time of arrival (ETA)
 - Grace period preferences
 - Location information (address or coordinates)
+    - Starting location
+    - Destination location (optional)
     - Can be as broad or specific as you wish
 - Optional notes about your trip
 - Timezone information
+- Check-in interval preferences (how often you want reminders)
+- Quiet hours settings (when to pause notifications)
+- Live location sharing preference (see Section 1.4)
+- Custom notification messages *(Homebound+ only)*
+
+**Group Trips** *(Homebound+ only)*:
+When you create or join a group trip, we also collect:
+- Participant list and roles (owner, participant)
+- Invitation and join timestamps
+- Group checkout settings (voting preferences)
+- Each participant's check-in status and location
 
 ### 1.3 Emergency Contact Information
 You may add emergency contacts to your account:
 - Contact names
 - Contact email addresses
+- Contact phone numbers (optional)
+- Contact groups for organization *(Homebound+ only)*
+
+You can also add friends (other Homebound users) as safety contacts for your trips.
 
 **Note:** We only store the information you provide. We do not access your device's contact list.
 
 ### 1.4 Location Data
-We collect location data only when:
-- You explicitly set a trip location using the map
-- You choose to use your current location for a trip
 
-**We do NOT:**
-- Continuously track your location
-- Collect location data in the background
-- Share your real-time location with third parties
+#### Trip Locations
+We collect location data when:
+- You explicitly set a trip location (start and/or destination) using the map
+- You choose to use your current location for a trip
+- You check in during a trip (we record your location at that moment)
+
+#### Live Location Sharing (Optional)
+If you enable **Live Location Sharing** for a trip, we collect real-time location data including:
+- Latitude and longitude coordinates
+- Altitude
+- Horizontal accuracy (GPS precision)
+- Speed
+- Timestamps
+
+**Important:** Live Location Sharing is:
+- **Completely optional** - you must explicitly enable it for each trip
+- **User-controlled** - you can disable it at any time in your profile settings or per-trip
+- **Limited sharing** - your live location is only shared with the safety contacts you choose for that specific trip
+- **Not shared with third parties** - we do not sell or share your location data with advertisers or data brokers
+
+You can control live location sharing:
+- **Per-trip**: Toggle "Share Live Location" when creating a trip
+- **Globally**: Disable in Settings > Privacy > "Allow Live Location Sharing with Friends"
+
+#### What We Do NOT Do
+- Sell your location data
+- Share your location with advertisers
+- Track your location when you're not on an active trip with live location enabled
+- Access your location without your explicit permission
 
 ### 1.5 Device Information
 To send push notifications, we collect:
 - Device push notification token
 - Device platform (iOS)
+- App bundle identifier
 - App environment (development/production)
+- Live Activity tokens (for iOS lock screen widgets showing trip status)
+- Last activity timestamp (when your device last connected)
 
 ### 1.6 Automatically Collected Information
 When you use the App, we automatically collect:
 - Timestamps of account creation and last login
 - Trip creation and completion timestamps
 - Check-in and check-out events
+- ETA extension events
+- Notification delivery logs (for troubleshooting)
+
+### 1.7 Subscription Information
+If you subscribe to Homebound+, we collect:
+- App Store transaction identifiers
+- Product/plan purchased
+- Purchase and expiration dates
+- Subscription status (active, expired, grace period)
+- Auto-renewal status
+- Family sharing status (if applicable)
+- Free trial status (if applicable)
+
+This information is processed through Apple's App Store and is used to provide and manage your subscription.
+
+### 1.8 Social & Friend Data
+If you use social features, we collect:
+- Friend connections (who you're friends with)
+- Friend requests (sent and received)
+- Friend invite links you create
+- Your visibility preferences (what friends can see)
+- Achievements and statistics visible to friends
+
+### 1.9 Homebound+ Features
+Homebound+ subscribers have access to additional features that may collect:
+- **Custom Messages**: Personalized notification text you create
+- **Contact Groups**: Organization names for your contacts
+- **Group Trips**: Participant data, voting records, and shared locations
+- **Data Export**: We generate exports of your data upon request
+- **Pinned Activities**: Your favorite activities for quick access
+- **Enhanced Privacy Controls**: Additional friend visibility settings
 
 ---
 
@@ -92,6 +167,7 @@ We use the following third-party services:
 | **Apple Push Notification Service** | Push notifications | Device tokens, notification content |
 | **OpenStreetMap/Nominatim** | Convert coordinates to place names | Location coordinates only |
 | **Apple Sign In** | Authentication (optional) | Apple user ID |
+| **App Store Server API** | Subscription verification | Transaction IDs, product IDs |
 
 ### 3.3 We Do NOT
 - Sell your personal information
@@ -134,9 +210,15 @@ You can delete your account at any time through the App:
 When you delete your account, we permanently delete:
 - Your profile information
 - All your trips and trip history
-- All your emergency contacts
+- All your emergency contacts and contact groups
 - All your devices and push tokens
 - All login tokens
+- All friendships and friend data
+- All live location history
+- All notification logs
+- All subscription records (note: you must cancel your subscription separately through the App Store)
+- All group trip participation data
+- All achievements and statistics
 
 This deletion is immediate and irreversible.
 
@@ -201,4 +283,4 @@ If you have questions about this Privacy Policy or our privacy practices, please
 
 ---
 
-*This Privacy Policy is effective as of November 29, 2025.*
+*This Privacy Policy is effective as of January 10, 2026.*

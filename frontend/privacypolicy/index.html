@@ -22,7 +22,7 @@
 
     <main class="legal-document">
         <h1>Privacy Policy</h1>
-        <p class="last-updated">Last Updated: November 29, 2025</p>
+        <p class="last-updated">Last Updated: January 10, 2026</p>
 
         <p>Hudson Schmidt ("we," "us," or "our") operates the Homebound mobile application (the "App"). This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our App.</p>
 
@@ -39,6 +39,8 @@
             <li><strong>First and last name</strong> (for personalization and to share with emergency contacts)</li>
             <li><strong>Age</strong> (for service customization)</li>
             <li><strong>Apple ID identifier</strong> (if you sign in with Apple)</li>
+            <li><strong>Notification preferences</strong> (trip reminders, check-in alerts)</li>
+            <li><strong>Friend visibility settings</strong> (controls what friends can see about you, such as your location, trip notes, achievements, and profile stats)</li>
         </ul>
 
         <h3>1.2 Trip & Safety Plan Data</h3>
@@ -47,9 +49,28 @@
             <li>Trip title and activity type</li>
             <li>Start time and estimated time of arrival (ETA)</li>
             <li>Grace period preferences</li>
-            <li>Location information (address or coordinates) - can be as broad or specific as you wish</li>
+            <li>Location information (address or coordinates)
+                <ul>
+                    <li>Starting location (optional)</li>
+                    <li>Destination location</li>
+                    <li>Can be as broad or specific as you wish</li>
+                </ul>
+            </li>
             <li>Optional notes about your trip</li>
             <li>Timezone information</li>
+            <li>Check-in interval preferences (how often you want reminders)</li>
+            <li>Quiet hours settings (when to pause notifications)</li>
+            <li>Live location sharing preference (see Section 1.4)</li>
+            <li>Custom notification messages <em>(Homebound+ only)</em></li>
+        </ul>
+
+        <h4>Group Trips <em>(Homebound+ only)</em></h4>
+        <p>When you create or join a group trip, we also collect:</p>
+        <ul>
+            <li>Participant list and roles (owner, participant)</li>
+            <li>Invitation and join timestamps</li>
+            <li>Group checkout settings (voting preferences)</li>
+            <li>Each participant's check-in status and location</li>
         </ul>
 
         <h3>1.3 Emergency Contact Information</h3>
@@ -57,20 +78,52 @@
         <ul>
             <li>Contact names</li>
             <li>Contact email addresses</li>
+            <li>Contact phone numbers (optional)</li>
+            <li>Contact groups for organization <em>(Homebound+ only)</em></li>
         </ul>
+        <p>You can also add friends (other Homebound users) as safety contacts for your trips.</p>
         <p><strong>Note:</strong> We only store the information you provide. We do not access your device's contact list.</p>
 
         <h3>1.4 Location Data</h3>
-        <p>We collect location data only when:</p>
+
+        <h4>Trip Locations</h4>
+        <p>We collect location data when:</p>
         <ul>
-            <li>You explicitly set a trip location using the map</li>
+            <li>You explicitly set a trip location (start and/or destination) using the map</li>
             <li>You choose to use your current location for a trip</li>
+            <li>You check in during a trip (we record your location at that moment)</li>
         </ul>
-        <p><strong>We do NOT:</strong></p>
+
+        <h4>Live Location Sharing (Optional)</h4>
+        <p>If you enable <strong>Live Location Sharing</strong> for a trip, we collect real-time location data including:</p>
         <ul>
-            <li>Continuously track your location</li>
-            <li>Collect location data in the background</li>
-            <li>Share your real-time location with third parties</li>
+            <li>Latitude and longitude coordinates</li>
+            <li>Altitude</li>
+            <li>Horizontal accuracy (GPS precision)</li>
+            <li>Speed</li>
+            <li>Timestamps</li>
+        </ul>
+
+        <p><strong>Important:</strong> Live Location Sharing is:</p>
+        <ul>
+            <li><strong>Completely optional</strong> - you must explicitly enable it for each trip</li>
+            <li><strong>User-controlled</strong> - you can disable it at any time in your profile settings or per-trip</li>
+            <li><strong>Limited sharing</strong> - your live location is only shared with the safety contacts you choose for that specific trip</li>
+            <li><strong>Not shared with third parties</strong> - we do not sell or share your location data with advertisers or data brokers</li>
+        </ul>
+
+        <p>You can control live location sharing:</p>
+        <ul>
+            <li><strong>Per-trip:</strong> Toggle "Share Live Location" when creating a trip</li>
+            <li><strong>Globally:</strong> Disable in Settings > Privacy > "Allow Live Location Sharing with Friends"</li>
+        </ul>
+
+        <h4>What We Do NOT Do</h4>
+        <ul>
+            <li>Sell your location data</li>
+            <li>Share your location with advertisers</li>
+            <li>Track your location when you're not on an active trip with live location enabled</li>
+            <li>Access your location without your explicit permission</li>
         </ul>
 
         <h3>1.5 Device Information</h3>
@@ -78,7 +131,10 @@
         <ul>
             <li>Device push notification token</li>
             <li>Device platform (iOS)</li>
+            <li>App bundle identifier</li>
             <li>App environment (development/production)</li>
+            <li>Live Activity tokens (for iOS lock screen widgets showing trip status)</li>
+            <li>Last activity timestamp (when your device last connected)</li>
         </ul>
 
         <h3>1.6 Automatically Collected Information</h3>
@@ -87,6 +143,42 @@
             <li>Timestamps of account creation and last login</li>
             <li>Trip creation and completion timestamps</li>
             <li>Check-in and check-out events</li>
+            <li>ETA extension events</li>
+            <li>Notification delivery logs (for troubleshooting)</li>
+        </ul>
+
+        <h3>1.7 Subscription Information</h3>
+        <p>If you subscribe to Homebound+, we collect:</p>
+        <ul>
+            <li>App Store transaction identifiers</li>
+            <li>Product/plan purchased</li>
+            <li>Purchase and expiration dates</li>
+            <li>Subscription status (active, expired, grace period)</li>
+            <li>Auto-renewal status</li>
+            <li>Family sharing status (if applicable)</li>
+            <li>Free trial status (if applicable)</li>
+        </ul>
+        <p>This information is processed through Apple's App Store and is used to provide and manage your subscription.</p>
+
+        <h3>1.8 Social & Friend Data</h3>
+        <p>If you use social features, we collect:</p>
+        <ul>
+            <li>Friend connections (who you're friends with)</li>
+            <li>Friend requests (sent and received)</li>
+            <li>Friend invite links you create</li>
+            <li>Your visibility preferences (what friends can see)</li>
+            <li>Achievements and statistics visible to friends</li>
+        </ul>
+
+        <h3>1.9 Homebound+ Features</h3>
+        <p>Homebound+ subscribers have access to additional features that may collect:</p>
+        <ul>
+            <li><strong>Custom Messages:</strong> Personalized notification text you create</li>
+            <li><strong>Contact Groups:</strong> Organization names for your contacts</li>
+            <li><strong>Group Trips:</strong> Participant data, voting records, and shared locations</li>
+            <li><strong>Data Export:</strong> We generate exports of your data upon request</li>
+            <li><strong>Pinned Activities:</strong> Your favorite activities for quick access</li>
+            <li><strong>Enhanced Privacy Controls:</strong> Additional friend visibility settings</li>
         </ul>
 
         <hr>
@@ -145,6 +237,11 @@
                 <td>Authentication (optional)</td>
                 <td>Apple user ID</td>
             </tr>
+            <tr>
+                <td><strong>App Store Server API</strong></td>
+                <td>Subscription verification</td>
+                <td>Transaction IDs, product IDs</td>
+            </tr>
         </table>
 
         <h3>3.3 We Do NOT</h3>
@@ -194,9 +291,15 @@
         <ul>
             <li>Your profile information</li>
             <li>All your trips and trip history</li>
-            <li>All your emergency contacts</li>
+            <li>All your emergency contacts and contact groups</li>
             <li>All your devices and push tokens</li>
             <li>All login tokens</li>
+            <li>All friendships and friend data</li>
+            <li>All live location history</li>
+            <li>All notification logs</li>
+            <li>All subscription records (note: you must cancel your subscription separately through the App Store)</li>
+            <li>All group trip participation data</li>
+            <li>All achievements and statistics</li>
         </ul>
         <p>This deletion is immediate and irreversible.</p>
 
@@ -263,7 +366,7 @@
 
         <hr>
 
-        <p><em>This Privacy Policy is effective as of November 29, 2025.</em></p>
+        <p><em>This Privacy Policy is effective as of January 10, 2026.</em></p>
     </main>
 
     <footer>
@@ -274,7 +377,7 @@
                 <a href="/termsofservice">Terms of Service</a>
                 <a href="mailto:support@homeboundapp.com">Contact</a>
             </div>
-            <p class="copyright">&copy; 2025 Hudson Schmidt. All rights reserved.</p>
+            <p class="copyright">&copy; 2026 Hudson Schmidt. All rights reserved.</p>
         </div>
     </footer>
 </body>
