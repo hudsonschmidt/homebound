@@ -867,7 +867,7 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                        Text("© 2025")
+                        Text("© 2026")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

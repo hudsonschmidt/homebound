@@ -66,6 +66,14 @@
             padding-bottom: 0.5rem;
             border-bottom: 2px solid var(--border-color);
         }
+        .faq-category {
+            margin-bottom: 2.5rem;
+        }
+        .faq-category h3 {
+            font-size: 1.25rem;
+            color: var(--brand-color);
+            margin-bottom: 1rem;
+        }
         .faq-item {
             margin-bottom: 1.5rem;
             padding-bottom: 1.5rem;
@@ -74,7 +82,7 @@
         .faq-item:last-child {
             border-bottom: none;
         }
-        .faq-item h3 {
+        .faq-item h4 {
             color: var(--text-primary);
             font-size: 1.1rem;
             margin-bottom: 0.5rem;
@@ -82,6 +90,12 @@
         .faq-item p {
             color: var(--text-secondary);
             line-height: 1.7;
+        }
+        .faq-item ul {
+            color: var(--text-secondary);
+            line-height: 1.7;
+            margin-top: 0.5rem;
+            padding-left: 1.5rem;
         }
         .quick-links {
             background: var(--bg-secondary);
@@ -168,65 +182,216 @@
         <section class="faq-section">
             <h2>Frequently Asked Questions</h2>
 
-            <div class="faq-item">
-                <h3>What is Homebound?</h3>
-                <p>Homebound is a personal safety app that helps you stay connected with loved ones during outdoor activities. Create trip plans with your expected return time, and if you don't check in on time, your emergency contacts are automatically notified.</p>
+            <!-- Getting Started -->
+            <div class="faq-category">
+                <h3>Getting Started</h3>
+
+                <div class="faq-item">
+                    <h4>What is Homebound?</h4>
+                    <p>Homebound is a personal safety app for outdoor adventurers. Create trip plans with your expected return time, add safety contacts, and if you don't check out on time, your contacts are automatically notified with your trip details and location. It's a simple safety net that gives you freedom to explore while giving loved ones peace of mind.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How do I create a trip?</h4>
+                    <p>Tap the "+" button on the home screen to create a new trip. You'll set your activity type (hiking, climbing, skiing, etc.), add your location, set your start time and expected return time (ETA), choose a grace period, and select up to 3 safety contacts. You can also add notes with important details like your planned route or gear you're carrying.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>What happens if I don't check out on time?</h4>
+                    <p>If you don't check out by your ETA plus your grace period, Homebound automatically sends notifications to your safety contacts. They'll receive your trip details including activity type, location, notes, and your last known position. This ensures someone knows to check on you if something goes wrong.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>What is a grace period?</h4>
+                    <p>The grace period is extra time added after your ETA before alerts are sent. For example, if your ETA is 5:00 PM with a 30-minute grace period, contacts won't be notified until 5:30 PM. This prevents false alarms for minor delays like traffic or taking a longer break. You can customize the grace period for each trip.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Is Homebound a replacement for calling 911?</h4>
+                    <p><strong>No.</strong> Homebound is a supplementary safety tool that notifies your personal contacts. It does not contact emergency services or dispatch help. In an emergency, always call 911 (or your local emergency number) first. Homebound is meant to work alongside proper safety planning, not replace it.</p>
+                </div>
             </div>
 
-            <div class="faq-item">
-                <h3>How do I create a trip?</h3>
-                <p>Tap the "+" button on the home screen, select your activity type, set your destination and expected arrival time, add any emergency contacts you'd like to notify, and you're all set. You can start the trip immediately or schedule it for later.</p>
+            <!-- Safety Contacts -->
+            <div class="faq-category">
+                <h3>Safety Contacts</h3>
+
+                <div class="faq-item">
+                    <h4>How do I add safety contacts?</h4>
+                    <p>Go to the Contacts tab to add people you trust. Enter their name and email address (phone number is optional). Once added, you can select them as safety contacts when creating trips. You can add up to 3 contacts per trip.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Do my contacts need to download the app?</h4>
+                    <p>No. Your safety contacts receive notifications via email. They don't need to download Homebound or create an account. However, if they do have Homebound, you can add them as friends for additional features like seeing each other's active trips.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>What notifications do my contacts receive?</h4>
+                    <p>Your safety contacts receive emails when:</p>
+                    <ul>
+                        <li>You start a trip (with trip details and your location)</li>
+                        <li>You check in during a trip (with your current location if enabled)</li>
+                        <li>You complete a trip safely</li>
+                        <li>You go overdue (haven't checked out by ETA + grace period)</li>
+                        <li>You extend your ETA</li>
+                    </ul>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Can I use friends as safety contacts?</h4>
+                    <p>Yes! If you've connected with other Homebound users as friends, you can add them as safety contacts for your trips. They'll receive the same notifications as regular contacts, plus they can view your trip details and live location (if enabled) directly in their app.</p>
+                </div>
             </div>
 
-            <div class="faq-item">
-                <h3>What happens if I don't check in on time?</h3>
-                <p>If you don't check out by your ETA plus your grace period, Homebound will automatically send notifications to your designated emergency contacts with your trip details and last known location. This helps ensure someone knows to check on you.</p>
+            <!-- Friends & Social -->
+            <div class="faq-category">
+                <h3>Friends & Social</h3>
+
+                <div class="faq-item">
+                    <h4>How do I add friends?</h4>
+                    <p>Go to the Friends tab and tap "Add Friend" to generate an invite link. Share this link with someone you know. When they tap it, they'll be prompted to accept your friend request. You can also accept incoming friend requests from others.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>What can my friends see?</h4>
+                    <p>You control what friends can see through your privacy settings (Settings > Privacy). You can choose to share or hide:</p>
+                    <ul>
+                        <li>Your active trip status</li>
+                        <li>Check-in locations</li>
+                        <li>Live location during trips</li>
+                        <li>Trip notes</li>
+                        <li>Your achievements and statistics</li>
+                        <li>Profile information like age and total trips</li>
+                    </ul>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Can friends request updates from me?</h4>
+                    <p>If you enable "Allow Update Requests" in your privacy settings, friends can send you a request to check in during an active trip. You'll receive a notification and can choose to check in. This is useful if someone is worried and wants confirmation you're okay.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How do I remove a friend?</h4>
+                    <p>Go to the Friends tab, find the friend you want to remove, and tap on their profile. You'll see an option to remove them. Once removed, they won't be able to see your trips or add you as a safety contact.</p>
+                </div>
             </div>
 
-            <div class="faq-item">
-                <h3>How do I add emergency contacts?</h3>
-                <p>Go to Settings > Emergency Contacts to add people you trust. You can add their name and email address. When you create trips, you can choose which contacts to notify for each specific trip.</p>
+            <!-- Live Location -->
+            <div class="faq-category">
+                <h3>Live Location Sharing</h3>
+
+                <div class="faq-item">
+                    <h4>What is live location sharing?</h4>
+                    <p>Live location sharing lets your safety contacts see your real-time position during an active trip. When enabled, your location is updated continuously so contacts can follow your progress on a map. This is completely optional and must be enabled for each trip.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How do I enable live location?</h4>
+                    <p>When creating a trip, toggle "Share Live Location" to enable it for that specific trip. You can also set a default preference in Settings > Privacy > "Allow Live Location Sharing." Live location only activates when you check in to start your trip.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Does live location drain my battery?</h4>
+                    <p>Live location sharing does use more battery than normal since it requires continuous GPS access. We recommend starting your trip with a full battery or bringing a portable charger for longer adventures. You can disable live location at any time to conserve battery.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How accurate is live location?</h4>
+                    <p>Accuracy depends on your device's GPS capabilities and environmental conditions. In open areas with clear sky view, accuracy is typically within a few meters. In canyons, dense forests, or indoors, accuracy may be reduced. Live location should be treated as an approximate guide, not a precise tracking system.</p>
+                </div>
             </div>
 
-            <div class="faq-item">
-                <h3>Does Homebound track my location continuously?</h3>
-                <p>No. Homebound only collects location data when you explicitly set a trip location or choose to share your current location during a check-in. We do not track your location in the background or continuously monitor your movements.</p>
+            <!-- Homebound+ -->
+            <div class="faq-category">
+                <h3>Homebound+ (Premium)</h3>
+
+                <div class="faq-item">
+                    <h4>What is Homebound+?</h4>
+                    <p>Homebound+ is our premium subscription that unlocks additional features including group trips, custom notification messages, contact groups, pinned activities, data export, and enhanced privacy controls. All core safety features remain free.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>What are group trips?</h4>
+                    <p>Group trips let you create a single trip with multiple participants. Perfect for group hikes, ski trips, or dive excursions. All participants can check in, and you can configure how checkout works (anyone can check out, voting required, or owner-only). Each participant's location can be shared with the group.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>What are custom messages?</h4>
+                    <p>Custom messages let you personalize the notifications your contacts receive. Instead of generic text, you can write your own trip start message and overdue alert message. This is useful for adding personal touches or specific instructions for your contacts.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How do I subscribe to Homebound+?</h4>
+                    <p>Go to Settings > Homebound+ to view subscription options. We offer monthly and annual plans. Subscriptions are processed through the App Store and can be managed in your Apple ID account settings.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How do I cancel my subscription?</h4>
+                    <p>To cancel Homebound+, go to your iPhone's Settings > Apple ID > Subscriptions > Homebound and tap "Cancel Subscription." You'll retain access to premium features until the end of your current billing period. We cannot process cancellations directly.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Can I get a refund?</h4>
+                    <p>Refunds are handled by Apple since they process all payments. To request a refund, visit reportaproblem.apple.com or contact Apple Support. We don't have the ability to issue refunds directly.</p>
+                </div>
             </div>
 
-            <div class="faq-item">
-                <h3>Is Homebound a replacement for calling 911?</h3>
-                <p><strong>No.</strong> Homebound is a supplementary safety tool designed to notify your personal contacts. It is not an emergency response service and does not contact emergency services. In an emergency, always call 911 or your local emergency number first.</p>
+            <!-- Privacy & Data -->
+            <div class="faq-category">
+                <h3>Privacy & Data</h3>
+
+                <div class="faq-item">
+                    <h4>Does Homebound track my location continuously?</h4>
+                    <p>No. We only collect location data when you explicitly choose to share it: when setting a trip location, checking in with location enabled, or using live location sharing. We do not track your location in the background when you're not on an active trip with live location enabled.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>What data does Homebound collect?</h4>
+                    <p>We collect only what's necessary: your email, name, age, trip details, safety contacts, and location (when you choose to share it). If you use social features, we store your friend connections and visibility preferences. We don't sell your data or share it with advertisers. See our <a href="/privacypolicy">Privacy Policy</a> for complete details.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How do I delete my account?</h4>
+                    <p>Go to Settings > Account and tap "Delete Account" at the bottom. This permanently deletes all your data including your profile, trips, contacts, friends, location history, and any other information. This action cannot be undone. Note: If you have an active Homebound+ subscription, you must cancel it separately through the App Store.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Can I export my data?</h4>
+                    <p>Yes, Homebound+ subscribers can export all their data. Go to Settings > Account > Export Data to download a copy of your trips, contacts, and profile information.</p>
+                </div>
             </div>
 
-            <div class="faq-item">
-                <h3>What is a grace period?</h3>
-                <p>The grace period is extra time added to your ETA before alerts are sent to your emergency contacts. For example, if your ETA is 5:00 PM and you set a 30-minute grace period, your contacts won't be notified until 5:30 PM if you haven't checked out. This helps avoid false alarms for minor delays.</p>
+            <!-- Troubleshooting -->
+            <div class="faq-category">
+                <h3>Troubleshooting</h3>
+
+                <div class="faq-item">
+                    <h4>I'm not receiving notifications</h4>
+                    <p>Make sure notifications are enabled for Homebound in your iPhone's Settings > Notifications > Homebound. Also check that you haven't enabled Do Not Disturb or Focus modes that might block alerts. If your safety contacts aren't receiving emails, have them check their spam/junk folder.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>My location isn't accurate</h4>
+                    <p>Location accuracy depends on GPS signal strength. Try moving to an area with clear sky view. Make sure Location Services are enabled for Homebound in Settings > Privacy & Security > Location Services. If using live location, note that accuracy may vary in areas with poor GPS coverage like canyons or dense forests.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>Can I use Homebound offline?</h4>
+                    <p>Yes, partially. Your trip details are cached locally so you can view them without cell service. However, you need an internet connection to check in, check out, or send notifications to contacts. If you're going somewhere without service, consider setting your ETA for when you expect to be back in coverage.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>I accidentally triggered an overdue alert</h4>
+                    <p>Check out as soon as possible to stop further notifications. Your contacts will receive an update that you've marked yourself safe. For future trips, consider setting a longer grace period to account for potential delays.</p>
+                </div>
+
+                <div class="faq-item">
+                    <h4>How do I extend my ETA during a trip?</h4>
+                    <p>If your trip is taking longer than expected, open the active trip and tap "Extend ETA." You can add additional time to your expected return. Your safety contacts will be notified of the updated ETA so they know not to worry.</p>
+                </div>
             </div>
 
-            <div class="faq-item">
-                <h3>Can I check in during a trip?</h3>
-                <p>Yes! You can check in at any time during an active trip to let your contacts know you're okay. Check-ins can optionally include your current location, which will be shared with your emergency contacts.</p>
-            </div>
-
-            <div class="faq-item">
-                <h3>How do I delete my account?</h3>
-                <p>Go to Settings > Account and scroll to the bottom. Tap "Delete Account" and follow the confirmation steps. This will permanently delete all your data including trips, contacts, and profile information. This action cannot be undone.</p>
-            </div>
-
-            <div class="faq-item">
-                <h3>What data does Homebound collect?</h3>
-                <p>We collect only what's necessary to provide the service: your email, name, trip details, and emergency contacts. We don't sell your data or share it with advertisers. See our <a href="/privacypolicy">Privacy Policy</a> for complete details.</p>
-            </div>
-
-            <div class="faq-item">
-                <h3>Do my emergency contacts need to have the app?</h3>
-                <p>No. Your emergency contacts receive notifications via email. They don't need to download Homebound or create an account to receive alerts about your trips.</p>
-            </div>
-
-            <div class="faq-item">
-                <h3>Is Homebound free?</h3>
-                <p>Homebound is free to download and use. All core safety features are available at no cost.</p>
-            </div>
         </section>
 
         <!-- Still need help -->
@@ -247,7 +412,7 @@
                 <a href="/termsofservice">Terms of Service</a>
                 <a href="mailto:support@homeboundapp.com">Contact</a>
             </div>
-            <p class="copyright">&copy; 2025 Hudson Schmidt. All rights reserved.</p>
+            <p class="copyright">&copy; 2026 Hudson Schmidt. All rights reserved.</p>
         </div>
     </footer>
 </body>
