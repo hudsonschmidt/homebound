@@ -44,8 +44,7 @@ class FeatureLimitsResponse(BaseModel):
     widgets_enabled: bool
     live_activity_enabled: bool
     custom_intervals_enabled: bool
-    all_map_styles: bool
-    map_styles: list[str]
+    trip_map_enabled: bool
     pinned_activities_limit: int
     group_trips_enabled: bool
     contact_groups_enabled: bool
