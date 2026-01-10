@@ -39,6 +39,8 @@ struct PaywallView: View {
                         Task {
                             await subscriptionManager.restorePurchases()
                             if subscriptionManager.subscriptionStatus.isPremium {
+                                // Reload feature limits after successful restore
+                                await session.loadFeatureLimits()
                                 dismiss()
                             }
                         }

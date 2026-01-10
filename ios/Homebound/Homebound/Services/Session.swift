@@ -3874,11 +3874,15 @@ final class Session: ObservableObject {
 
     // MARK: - Subscription Management
 
-    /// Load feature limits from the backend
+    /// UserDefaults key for cached feature limits
+    private static let featureLimitsCacheKey = "cachedFeatureLimits"
+
+    /// Load feature limits from the backend with offline caching
     @MainActor
     func loadFeatureLimits() async {
         guard let token = accessToken else {
             debugLog("[Session] No access token, using default feature limits")
+            loadCachedFeatureLimits()
             return
         }
 
@@ -3888,6 +3892,10 @@ final class Session: ObservableObject {
             let limits: FeatureLimits = try await api.get(url, bearer: token)
             self.featureLimits = limits
             self.subscriptionTier = limits.tier
+
+            // Cache feature limits for offline use
+            cacheFeatureLimits(limits)
+
             // Sync widgets enabled status to shared defaults for widget access
             LiveActivityConstants.setWidgetsEnabled(limits.widgetsEnabled)
             // Apply premium feature restrictions for free tier
@@ -3895,7 +3903,48 @@ final class Session: ObservableObject {
             debugLog("[Session] Feature limits loaded: tier=\(limits.tier), premium=\(limits.isPremium)")
         } catch {
             debugLog("[Session] Failed to load feature limits: \(error)")
-            // Keep existing limits (defaults to free)
+            // Try to load from cache for offline support
+            loadCachedFeatureLimits()
+        }
+    }
+
+    /// Cache feature limits to UserDefaults for offline access
+    private func cacheFeatureLimits(_ limits: FeatureLimits) {
+        do {
+            let data = try JSONEncoder().encode(limits)
+            UserDefaults.standard.set(data, forKey: Session.featureLimitsCacheKey)
+            debugLog("[Session] Feature limits cached for offline use")
+        } catch {
+            debugLog("[Session] Failed to cache feature limits: \(error)")
+        }
+    }
+
+    /// Load cached feature limits from UserDefaults
+    private func loadCachedFeatureLimits() {
+        // First check if we have cached data
+        if let data = UserDefaults.standard.data(forKey: Session.featureLimitsCacheKey) {
+            do {
+                let cachedLimits = try JSONDecoder().decode(FeatureLimits.self, from: data)
+                self.featureLimits = cachedLimits
+                self.subscriptionTier = cachedLimits.tier
+                LiveActivityConstants.setWidgetsEnabled(cachedLimits.widgetsEnabled)
+                debugLog("[Session] Loaded cached feature limits: tier=\(cachedLimits.tier)")
+                return
+            } catch {
+                debugLog("[Session] Failed to decode cached feature limits: \(error)")
+            }
+        }
+
+        // Fallback: Check StoreKit subscription status for offline premium detection
+        if SubscriptionManager.shared.subscriptionStatus.isPremium {
+            // User has local subscription, use premium defaults
+            self.featureLimits = .plus
+            self.subscriptionTier = "plus"
+            LiveActivityConstants.setWidgetsEnabled(true)
+            debugLog("[Session] Using premium defaults based on local subscription status")
+        } else {
+            // Default to free tier
+            debugLog("[Session] No cached limits, using free tier defaults")
         }
     }
 

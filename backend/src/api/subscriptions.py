@@ -65,6 +65,8 @@ class VerifyPurchaseRequest(BaseModel):
     is_family_shared: bool = False
     auto_renew: bool = True  # Whether subscription will auto-renew
     is_trial: bool = False  # Whether this is a free trial period
+    grace_period_expires_date: str | None = None  # ISO8601, billing grace period end date
+    is_in_grace_period: bool = False  # Whether subscription is in billing retry grace period
 
 
 class VerifyPurchaseResponse(BaseModel):
@@ -156,9 +158,20 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
     This endpoint should be called after a successful StoreKit purchase
     to record the transaction and update the user's subscription status.
 
-    In production, this should also validate the transaction with Apple's
-    App Store Server API for security.
+    SECURITY NOTE: In production, transactions should be validated with Apple's
+    App Store Server API. See: https://developer.apple.com/documentation/appstoreserverapi
     """
+    # TODO: Add Apple App Store Server API validation for production security
+    # This would involve:
+    # 1. Calling Apple's /inApps/v1/transactions/{transactionId} endpoint
+    # 2. Verifying the signed transaction matches what the client sent
+    # 3. Checking the transaction hasn't been revoked
+    # For now, we trust the client data but log for auditing
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Purchase verification for user {user_id}: product={body.product_id}, "
+                f"transaction={body.transaction_id}, environment={body.environment}")
+
     with db.engine.begin() as conn:
         # Parse dates
         purchase_date = datetime.fromisoformat(body.purchase_date.replace("Z", "+00:00"))
@@ -237,12 +250,26 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
                 }
             )
 
-        # Only set tier to 'plus' if subscription is not expired
-        # For expired or null expires_date, keep as free
-        is_subscription_active = (
-            expires_date is not None and
-            expires_date > datetime.now(UTC)
-        )
+        # Determine if subscription is active
+        # Active if: not expired OR in grace period (billing retry in progress)
+        now_utc = datetime.now(UTC)
+        is_subscription_active = False
+        effective_expires_at = expires_date
+        status_message = "Subscription expired"
+
+        if expires_date is not None and expires_date > now_utc:
+            # Subscription not expired
+            is_subscription_active = True
+            status_message = "Subscription activated successfully"
+        elif body.is_in_grace_period and body.grace_period_expires_date:
+            # Subscription expired but in grace period - still grant access
+            grace_expires = datetime.fromisoformat(body.grace_period_expires_date.replace("Z", "+00:00"))
+            if grace_expires > now_utc:
+                is_subscription_active = True
+                effective_expires_at = grace_expires
+                status_message = "Subscription in grace period - billing retry in progress"
+                logger.info(f"User {user_id} in grace period until {grace_expires}")
+
         new_tier = "plus" if is_subscription_active else "free"
 
         conn.execute(
@@ -257,15 +284,15 @@ def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get
             {
                 "user_id": user_id,
                 "tier": new_tier,
-                "expires_at": expires_date
+                "expires_at": effective_expires_at
             }
         )
 
         return VerifyPurchaseResponse(
             ok=True,
             tier=new_tier,
-            expires_at=expires_date.isoformat() if expires_date else None,
-            message="Subscription activated successfully" if is_subscription_active else "Subscription expired"
+            expires_at=effective_expires_at.isoformat() if effective_expires_at else None,
+            message=status_message
         )
 
 
@@ -363,20 +390,64 @@ def pin_activity(
     body: PinnedActivityRequest,
     user_id: int = Depends(auth.get_current_user_id)
 ):
-    """Pin an activity (premium feature)."""
-    from src.services.subscription_check import check_pinned_activities_limit
+    """Pin an activity (premium feature).
 
-    # Check if user can pin more activities
-    check_pinned_activities_limit(user_id)
+    Uses row-level locking to prevent race conditions when multiple
+    requests try to pin activities simultaneously.
+    """
+    from src.services.subscription_check import check_pinned_activities_limit, get_limits
 
-    # Validate position (0, 1, or 2)
-    if body.position not in [0, 1, 2]:
+    # Validate position against user's limit (dynamic, not hardcoded)
+    limits = get_limits(user_id)
+    max_positions = limits.pinned_activities
+    if body.position < 0 or body.position >= max_positions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Position must be 0, 1, or 2"
+            detail=f"Position must be between 0 and {max_positions - 1}"
         )
 
     with db.engine.begin() as conn:
+        # Lock user's pinned activities rows to prevent race condition
+        # This ensures atomic check-and-insert
+        conn.execute(
+            sqlalchemy.text(
+                """
+                SELECT id FROM pinned_activities
+                WHERE user_id = :user_id
+                FOR UPDATE
+                """
+            ),
+            {"user_id": user_id}
+        )
+
+        # Now check limit within the transaction (race-condition safe)
+        current_count = conn.execute(
+            sqlalchemy.text(
+                """
+                SELECT COUNT(*) as count FROM pinned_activities
+                WHERE user_id = :user_id
+                """
+            ),
+            {"user_id": user_id}
+        ).fetchone()
+
+        if current_count and current_count.count >= max_positions:
+            # Check if we're replacing an existing position (which is allowed)
+            existing_at_position = conn.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id FROM pinned_activities
+                    WHERE user_id = :user_id AND position = :position
+                    """
+                ),
+                {"user_id": user_id, "position": body.position}
+            ).fetchone()
+
+            if not existing_at_position:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Pinned activities limit reached. Your plan allows {max_positions} pinned activities."
+                )
         # Verify activity exists
         activity = conn.execute(
             sqlalchemy.text("SELECT id, name, icon FROM activities WHERE id = :id"),
@@ -406,16 +477,17 @@ def pin_activity(
                 detail="Activity is already pinned"
             )
 
-        # Check if position is taken and swap if needed
-        existing_at_position = conn.execute(
-            sqlalchemy.text(
-                """
-                SELECT id, activity_id FROM pinned_activities
-                WHERE user_id = :user_id AND position = :position
-                """
-            ),
-            {"user_id": user_id, "position": body.position}
-        ).fetchone()
+        # Check if position is taken and swap if needed (reuse from limit check if available)
+        if 'existing_at_position' not in dir() or existing_at_position is None:
+            existing_at_position = conn.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT id, activity_id FROM pinned_activities
+                    WHERE user_id = :user_id AND position = :position
+                    """
+                ),
+                {"user_id": user_id, "position": body.position}
+            ).fetchone()
 
         if existing_at_position:
             # Remove the existing pin at this position

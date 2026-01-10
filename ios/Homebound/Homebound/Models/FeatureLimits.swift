@@ -118,6 +118,8 @@ struct VerifyPurchaseRequest: Encodable {
     let isFamilyShared: Bool
     let autoRenew: Bool
     let isTrial: Bool
+    let gracePeriodExpiresDate: String?  // ISO8601, billing grace period end date
+    let isInGracePeriod: Bool  // Whether subscription is in billing retry grace period
 
     enum CodingKeys: String, CodingKey {
         case transactionId = "transaction_id"
@@ -129,6 +131,8 @@ struct VerifyPurchaseRequest: Encodable {
         case isFamilyShared = "is_family_shared"
         case autoRenew = "auto_renew"
         case isTrial = "is_trial"
+        case gracePeriodExpiresDate = "grace_period_expires_date"
+        case isInGracePeriod = "is_in_grace_period"
     }
 }
 

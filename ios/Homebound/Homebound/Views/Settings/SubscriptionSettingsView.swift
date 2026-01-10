@@ -132,7 +132,9 @@ struct SubscriptionSettingsView: View {
                 featureLimitRow(
                     icon: "timer",
                     title: "Extensions",
-                    value: session.featureLimits.extensions.map { "\($0)m" }.joined(separator: ", ")
+                    value: session.featureLimits.extensions.isEmpty
+                        ? "30m"  // Fallback for empty array
+                        : session.featureLimits.extensions.map { "\($0)m" }.joined(separator: ", ")
                 )
             }
 
@@ -286,15 +288,14 @@ struct SubscriptionSettingsView: View {
         isLoading = true
         defer { isLoading = false }
 
-        // Sync with App Store to get latest subscription state
-        try? await AppStore.sync()
-
         // Ensure products are loaded (required for renewal status check)
         if subscriptionManager.products.isEmpty {
             await subscriptionManager.loadProducts()
         }
 
         // Update from StoreKit (source of truth for subscription status)
+        // Note: Don't call AppStore.sync() here - it triggers Apple ID sign-in popup
+        // Use Transaction.currentEntitlements instead (no sign-in required)
         await subscriptionManager.updateSubscriptionStatus()
 
         // Refresh feature limits from backend
@@ -305,15 +306,13 @@ struct SubscriptionSettingsView: View {
     /// (e.g., after user cancels subscription in Apple Settings)
     private func refreshOnForeground() {
         Task {
-            // Sync with App Store to get latest subscription state
-            // This is important after user cancels/modifies in iOS Settings
-            try? await AppStore.sync()
-
             // Ensure products are loaded (required for renewal status check)
             if subscriptionManager.products.isEmpty {
                 await subscriptionManager.loadProducts()
             }
             // Update subscription status from StoreKit
+            // Note: Don't call AppStore.sync() here - it triggers Apple ID sign-in popup
+            // Transaction.currentEntitlements will reflect changes made in iOS Settings
             await subscriptionManager.updateSubscriptionStatus()
             // Also refresh feature limits to stay in sync
             await session.loadFeatureLimits()

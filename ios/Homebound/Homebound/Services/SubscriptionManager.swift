@@ -46,22 +46,38 @@ final class SubscriptionManager: ObservableObject {
     /// Whether the subscription will auto-renew (false = cancelled)
     @Published private(set) var willAutoRenew: Bool = true
 
+    /// Whether the subscription is in a billing grace period
+    @Published private(set) var isInGracePeriod = false
+
+    /// Whether the last backend sync succeeded
+    @Published var lastBackendSyncSucceeded = true
+
     private var transactionListener: Task<Void, Error>?
+
+    /// Flag to prevent concurrent status updates (race condition protection)
+    private var isUpdatingStatus = false
+
+    /// Flag to prevent concurrent purchases
+    private var isPurchasing = false
 
     enum SubscriptionStatus: Equatable {
         case free
         case plus(expiresAt: Date?, isTrialing: Bool)
+        case gracePeriod(expiresAt: Date?)  // Billing retry in progress
         case expired
 
         var isPremium: Bool {
-            if case .plus = self { return true }
-            return false
+            switch self {
+            case .plus, .gracePeriod: return true
+            case .free, .expired: return false
+            }
         }
 
         var displayName: String {
             switch self {
             case .free: return "Free"
             case .plus: return "Homebound+"
+            case .gracePeriod: return "Homebound+"
             case .expired: return "Expired"
             }
         }
@@ -111,9 +127,19 @@ final class SubscriptionManager: ObservableObject {
     /// - Parameter product: The product to purchase
     /// - Returns: True if purchase was successful
     func purchase(_ product: Product) async -> Bool {
+        // Prevent concurrent purchases (race condition protection)
+        guard !isPurchasing else {
+            debugLog("[SubscriptionManager] Purchase already in progress, ignoring")
+            return false
+        }
+
+        isPurchasing = true
         isLoading = true
         purchaseError = nil
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            isPurchasing = false
+        }
 
         do {
             let result = try await product.purchase()
@@ -181,13 +207,25 @@ final class SubscriptionManager: ObservableObject {
     /// Listen for transaction updates (renewals, refunds, etc.)
     private func listenForTransactions() -> Task<Void, Error> {
         Task.detached { [weak self] in
+            // Check if task was cancelled before starting
+            guard !Task.isCancelled else { return }
+
             for await result in Transaction.updates {
+                // Check cancellation at each iteration to properly clean up
+                guard !Task.isCancelled else {
+                    break
+                }
+
+                // Verify self still exists (prevent memory leak)
+                guard let self = self else {
+                    break
+                }
+
                 do {
-                    let transaction = try self?.checkVerifiedNonisolated(result)
-                    guard let transaction = transaction else { continue }
+                    let transaction = try self.checkVerifiedNonisolated(result)
 
                     // Verify with backend and update status on main actor
-                    await self?.handleTransactionUpdate(transaction)
+                    await self.handleTransactionUpdate(transaction)
                 } catch {
                     await MainActor.run {
                         debugLog("[SubscriptionManager] Transaction update failed: \(error)")
@@ -236,8 +274,11 @@ final class SubscriptionManager: ObservableObject {
         // Check if this is a trial purchase
         let isTrial = transaction.offer?.paymentMode == .freeTrial
 
-        // Get auto-renew status from subscription status
+        // Get auto-renew status and grace period info from subscription status
         var autoRenew = true  // Default to true for new purchases
+        var gracePeriodExpiresDate: Date?
+        var isInGracePeriod = false
+
         if let product = products.first(where: { $0.id == transaction.productID }),
            let subscription = product.subscription {
             do {
@@ -245,6 +286,12 @@ final class SubscriptionManager: ObservableObject {
                 for status in statuses {
                     if case .verified(let renewalInfo) = status.renewalInfo {
                         autoRenew = renewalInfo.willAutoRenew
+
+                        // Check for grace period (billing retry in progress)
+                        if let gracePeriodExpires = renewalInfo.gracePeriodExpirationDate {
+                            gracePeriodExpiresDate = gracePeriodExpires
+                            isInGracePeriod = gracePeriodExpires > Date()
+                        }
                         break
                     }
                 }
@@ -262,7 +309,9 @@ final class SubscriptionManager: ObservableObject {
             environment: transaction.environment == .sandbox ? "sandbox" : "production",
             isFamilyShared: transaction.ownershipType == .familyShared,
             autoRenew: autoRenew,
-            isTrial: isTrial
+            isTrial: isTrial,
+            gracePeriodExpiresDate: gracePeriodExpiresDate.map { formatter.string(from: $0) },
+            isInGracePeriod: isInGracePeriod
         )
 
         await Session.shared.verifyPurchase(request)
@@ -272,6 +321,15 @@ final class SubscriptionManager: ObservableObject {
 
     /// Update subscription status from current entitlements
     func updateSubscriptionStatus() async {
+        // Prevent concurrent status updates (race condition protection)
+        guard !isUpdatingStatus else {
+            debugLog("[SubscriptionManager] Status update already in progress, skipping")
+            return
+        }
+
+        isUpdatingStatus = true
+        defer { isUpdatingStatus = false }
+
         // Check current entitlements
         for await result in Transaction.currentEntitlements {
             do {
@@ -284,10 +342,48 @@ final class SubscriptionManager: ObservableObject {
                 }
 
                 if transaction.productType == .autoRenewable {
+                    // Check for grace period status first
+                    let gracePeriodInfo = await checkGracePeriodStatus(for: transaction.productID)
+
                     if let expDate = transaction.expirationDate {
-                        if expDate > Date() {
+                        // Use UTC for consistent comparison
+                        let nowUTC = Date()
+
+                        // Check if in grace period (expired but billing retry in progress)
+                        if gracePeriodInfo.isInGracePeriod {
+                            self.subscriptionStatus = .gracePeriod(expiresAt: gracePeriodInfo.gracePeriodExpiresDate)
+                            self.expirationDate = gracePeriodInfo.gracePeriodExpiresDate ?? expDate
+                            self.isTrialing = false
+                            self.isInGracePeriod = true
+                            self.purchasedProductIDs.insert(transaction.productID)
+
+                            debugLog("[SubscriptionManager] Subscription in grace period: \(transaction.productID)")
+                            return
+                        }
+
+                        // Check if subscription is still valid
+                        if expDate > nowUTC {
                             // Check if this is a trial/introductory offer
-                            let isTrial = transaction.offer?.paymentMode == .freeTrial
+                            // Use multiple methods for reliable trial detection:
+                            // 1. Transaction's offer info (primary)
+                            // 2. Subscription status API (fallback)
+                            var isTrial = transaction.offer?.paymentMode == .freeTrial
+
+                            // Also check via subscription status API for more reliability
+                            if !isTrial, let product = products.first(where: { $0.id == transaction.productID }),
+                               let subscription = product.subscription {
+                                if let statuses = try? await subscription.status {
+                                    for status in statuses {
+                                        if case .verified(let renewalInfo) = status.renewalInfo {
+                                            // Check if currently in intro offer period
+                                            if renewalInfo.offer?.type == .introductory {
+                                                isTrial = true
+                                            }
+                                            break
+                                        }
+                                    }
+                                }
+                            }
 
                             self.subscriptionStatus = .plus(
                                 expiresAt: expDate,
@@ -295,6 +391,7 @@ final class SubscriptionManager: ObservableObject {
                             )
                             self.expirationDate = expDate
                             self.isTrialing = isTrial
+                            self.isInGracePeriod = false
                             self.purchasedProductIDs.insert(transaction.productID)
 
                             // Get renewal info to check if subscription will auto-renew
@@ -321,9 +418,35 @@ final class SubscriptionManager: ObservableObject {
         self.subscriptionStatus = .free
         self.expirationDate = nil
         self.isTrialing = false
+        self.isInGracePeriod = false
         self.willAutoRenew = true  // Reset to default
         self.purchasedProductIDs.removeAll()
         debugLog("[SubscriptionManager] No active subscription")
+    }
+
+    /// Check if subscription is in Apple's billing grace period
+    private func checkGracePeriodStatus(for productID: String) async -> (isInGracePeriod: Bool, gracePeriodExpiresDate: Date?) {
+        guard let product = products.first(where: { $0.id == productID }),
+              let subscription = product.subscription else {
+            return (false, nil)
+        }
+
+        do {
+            let statuses = try await subscription.status
+            for status in statuses {
+                // Check if in billing retry/grace period
+                if case .verified(let renewalInfo) = status.renewalInfo {
+                    // Check for grace period - subscription is expired but Apple is retrying billing
+                    if renewalInfo.gracePeriodExpirationDate != nil {
+                        return (true, renewalInfo.gracePeriodExpirationDate)
+                    }
+                }
+            }
+        } catch {
+            debugLog("[SubscriptionManager] Failed to check grace period: \(error)")
+        }
+
+        return (false, nil)
     }
 
     /// Update the auto-renew status from StoreKit's subscription status
@@ -431,10 +554,15 @@ final class SubscriptionManager: ObservableObject {
 
 extension Session {
     /// Verify a purchase with the backend
-    func verifyPurchase(_ request: VerifyPurchaseRequest) async {
+    /// - Returns: True if verification succeeded, false otherwise
+    @discardableResult
+    func verifyPurchase(_ request: VerifyPurchaseRequest) async -> Bool {
         guard let token = accessToken else {
             debugLog("[Session] No access token for purchase verification")
-            return
+            await MainActor.run {
+                SubscriptionManager.shared.lastBackendSyncSucceeded = false
+            }
+            return false
         }
 
         let url = baseURL.appendingPathComponent("/api/v1/subscriptions/verify-purchase")
@@ -445,8 +573,17 @@ extension Session {
 
             // Reload feature limits after verification
             await loadFeatureLimits()
+
+            await MainActor.run {
+                SubscriptionManager.shared.lastBackendSyncSucceeded = true
+            }
+            return true
         } catch {
             debugLog("[Session] Failed to verify purchase: \(error)")
+            await MainActor.run {
+                SubscriptionManager.shared.lastBackendSyncSucceeded = false
+            }
+            return false
         }
     }
 }
