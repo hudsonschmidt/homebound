@@ -10,6 +10,11 @@ struct SubscriptionSettingsView: View {
     @State private var showFeatures = false
     @State private var isLoading = true
 
+    /// Restore purchases result state
+    @State private var showRestoreResult = false
+    @State private var restoreSucceeded = false
+    @State private var restoreMessage = ""
+
     /// Whether the subscription is cancelled (not auto-renewing)
     /// Only applies to premium users - must have a subscription to be "cancelled"
     private var isCancelled: Bool {
@@ -142,8 +147,7 @@ struct SubscriptionSettingsView: View {
             Section {
                 Button {
                     Task {
-                        await subscriptionManager.restorePurchases()
-                        await session.loadFeatureLimits()
+                        await performRestore()
                     }
                 } label: {
                     HStack {
@@ -156,6 +160,31 @@ struct SubscriptionSettingsView: View {
                 }
                 .disabled(subscriptionManager.isLoading)
             }
+
+            // Backend sync warning (if last sync failed)
+            if !subscriptionManager.lastBackendSyncSucceeded || subscriptionManager.hasPendingVerifications {
+                Section {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Sync Issue")
+                                .font(.subheadline.bold())
+                            Text("Your subscription may not be fully synced. Tap to retry.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Retry") {
+                            Task {
+                                await retrySync()
+                            }
+                        }
+                        .font(.subheadline.bold())
+                        .foregroundStyle(Color.hbBrand)
+                    }
+                }
+            }
         }
         .navigationTitle("Subscription")
         .navigationBarTitleDisplayMode(.inline)
@@ -164,6 +193,11 @@ struct SubscriptionSettingsView: View {
         }
         .sheet(isPresented: $showFeatures) {
             FeaturesOnlyView()
+        }
+        .alert(restoreSucceeded ? "Restore Complete" : "Restore Failed", isPresented: $showRestoreResult) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(restoreMessage)
         }
         .task {
             await loadData()
@@ -299,6 +333,32 @@ struct SubscriptionSettingsView: View {
         await subscriptionManager.updateSubscriptionStatus()
 
         // Refresh feature limits from backend
+        await session.loadFeatureLimits()
+    }
+
+    /// Perform restore purchases with result feedback
+    private func performRestore() async {
+        await subscriptionManager.restorePurchases()
+        await session.loadFeatureLimits()
+
+        // Show result to user
+        if subscriptionManager.subscriptionStatus.isPremium {
+            restoreSucceeded = true
+            restoreMessage = "Your Homebound+ subscription has been restored successfully."
+        } else {
+            restoreSucceeded = false
+            if let error = subscriptionManager.purchaseError {
+                restoreMessage = error
+            } else {
+                restoreMessage = "No active subscriptions found to restore. If you believe this is an error, please contact support."
+            }
+        }
+        showRestoreResult = true
+    }
+
+    /// Retry syncing subscription with backend
+    private func retrySync() async {
+        await session.retryPendingVerifications()
         await session.loadFeatureLimits()
     }
 

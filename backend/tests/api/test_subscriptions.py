@@ -18,7 +18,7 @@ from src.api.subscriptions import (
 
 def run_async(coro):
     """Helper to run async functions in sync tests"""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ==================== Purchase Verification Tests ====================
@@ -71,7 +71,7 @@ def test_verify_purchase_new_subscription():
             is_trial=False
         )
 
-        response = verify_purchase(request, user_id=user_id)
+        response = run_async(verify_purchase(request, user_id=user_id))
 
         assert response.ok is True
         assert response.tier == "plus"
@@ -177,7 +177,7 @@ def test_verify_purchase_existing_subscription():
             is_trial=False
         )
 
-        response = verify_purchase(request, user_id=user_id)
+        response = run_async(verify_purchase(request, user_id=user_id))
 
         assert response.ok is True
         assert response.tier == "plus"
@@ -257,7 +257,7 @@ def test_verify_purchase_expired():
             is_trial=False
         )
 
-        response = verify_purchase(request, user_id=user_id)
+        response = run_async(verify_purchase(request, user_id=user_id))
 
         assert response.ok is True
         assert response.tier == "free", "Expired subscription should set tier to 'free'"
@@ -328,7 +328,7 @@ def test_verify_purchase_trial():
             is_trial=True  # This is a trial
         )
 
-        response = verify_purchase(request, user_id=user_id)
+        response = run_async(verify_purchase(request, user_id=user_id))
 
         assert response.ok is True
         assert response.tier == "plus"
@@ -399,7 +399,7 @@ def test_verify_purchase_cancelled():
             is_trial=False
         )
 
-        response = verify_purchase(request, user_id=user_id)
+        response = run_async(verify_purchase(request, user_id=user_id))
 
         assert response.ok is True
         # Still has access until expiration

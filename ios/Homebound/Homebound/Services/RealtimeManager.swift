@@ -18,6 +18,17 @@ final class RealtimeManager: ObservableObject {
     private var currentUserId: Int?
     private var isRunning = false
 
+    /// Whether there's an active connection issue
+    @Published private(set) var hasConnectionIssue = false
+
+    /// Retry configuration
+    private static let maxRetryAttempts = 5
+    private static let baseRetryDelay: Double = 2.0
+    private static let maxRetryDelay: Double = 60.0
+
+    /// Track retry state for each subscription type
+    private var retryTasks: [String: Task<Void, Never>] = [:]
+
     private init() {}
 
     // MARK: - Public API
@@ -51,6 +62,13 @@ final class RealtimeManager: ObservableObject {
 
         debugLog("[Realtime] Stopping all subscriptions")
 
+        // Cancel any pending retry tasks
+        for (name, task) in retryTasks {
+            task.cancel()
+            debugLog("[Realtime] Cancelled retry task for \(name)")
+        }
+        retryTasks.removeAll()
+
         await friendshipsChannel?.unsubscribe()
         await tripsChannel?.unsubscribe()
         await participantsChannel?.unsubscribe()
@@ -66,8 +84,69 @@ final class RealtimeManager: ObservableObject {
         usersChannel = nil
         currentUserId = nil
         isRunning = false
+        hasConnectionIssue = false
 
         debugLog("[Realtime] All subscriptions stopped")
+    }
+
+    /// Attempt to reconnect all subscriptions
+    /// Call this when network becomes available or after a connection failure
+    func reconnect() async {
+        guard let userId = currentUserId, isRunning else {
+            debugLog("[Realtime] Cannot reconnect: not running or no user ID")
+            return
+        }
+
+        debugLog("[Realtime] Attempting to reconnect all subscriptions")
+        hasConnectionIssue = false
+
+        await subscribeToFriendships()
+        await subscribeToTrips()
+        await subscribeToParticipants()
+        await subscribeToEvents()
+        await subscribeToVotes()
+        await subscribeToUserChanges()
+
+        debugLog("[Realtime] Reconnection attempt complete")
+    }
+
+    // MARK: - Retry Logic
+
+    /// Subscribe to a channel with exponential backoff retry
+    private func subscribeWithRetry(
+        channel: RealtimeChannelV2,
+        name: String,
+        attempt: Int = 0
+    ) async -> Bool {
+        do {
+            try await channel.subscribe()
+            hasConnectionIssue = false
+            debugLog("[Realtime] Subscribed to \(name)")
+            return true
+        } catch {
+            debugLog("[Realtime] Failed to subscribe to \(name): \(error)")
+
+            if attempt < Self.maxRetryAttempts {
+                let delay = min(
+                    Self.baseRetryDelay * pow(2.0, Double(attempt)),
+                    Self.maxRetryDelay
+                )
+                debugLog("[Realtime] Retrying \(name) subscription in \(delay)s (attempt \(attempt + 1)/\(Self.maxRetryAttempts))")
+
+                // Schedule retry
+                let retryTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    guard !Task.isCancelled else { return }
+                    let _ = await self?.subscribeWithRetry(channel: channel, name: name, attempt: attempt + 1)
+                }
+                retryTasks[name] = retryTask
+            } else {
+                debugLog("[Realtime] Max retry attempts reached for \(name)")
+                hasConnectionIssue = true
+            }
+
+            return false
+        }
     }
 
     // MARK: - Subscriptions
@@ -93,12 +172,8 @@ final class RealtimeManager: ObservableObject {
             table: "friendships"
         )
 
-        do {
-            try await channel.subscribe()
-        } catch {
-            debugLog("[Realtime] Failed to subscribe to friendships: \(error)")
-            return
-        }
+        let success = await subscribeWithRetry(channel: channel, name: "friendships")
+        guard success else { return }
 
         // Handle new friendships
         Task {
@@ -128,8 +203,6 @@ final class RealtimeManager: ObservableObject {
                 }
             }
         }
-
-        debugLog("[Realtime] Subscribed to friendships")
     }
 
     /// Subscribe to trips table for trip status changes
@@ -153,12 +226,8 @@ final class RealtimeManager: ObservableObject {
             table: "trips"
         )
 
-        do {
-            try await channel.subscribe()
-        } catch {
-            debugLog("[Realtime] Failed to subscribe to trips: \(error)")
-            return
-        }
+        let success = await subscribeWithRetry(channel: channel, name: "trips")
+        guard success else { return }
 
         // Handle trip updates
         Task {
@@ -190,8 +259,6 @@ final class RealtimeManager: ObservableObject {
                 _ = await Session.shared.loadFriendActiveTrips()
             }
         }
-
-        debugLog("[Realtime] Subscribed to trips")
     }
 
     /// Subscribe to trip_participants table for invitations
@@ -215,12 +282,8 @@ final class RealtimeManager: ObservableObject {
             table: "trip_participants"
         )
 
-        do {
-            try await channel.subscribe()
-        } catch {
-            debugLog("[Realtime] Failed to subscribe to participants: \(error)")
-            return
-        }
+        let success = await subscribeWithRetry(channel: channel, name: "participants")
+        guard success else { return }
 
         // Handle new invitations
         Task {
@@ -247,8 +310,6 @@ final class RealtimeManager: ObservableObject {
                 _ = await Session.shared.loadAllTrips()
             }
         }
-
-        debugLog("[Realtime] Subscribed to trip_participants")
     }
 
     /// Subscribe to events table for check-ins and other trip events
@@ -263,12 +324,8 @@ final class RealtimeManager: ObservableObject {
             table: "events"
         )
 
-        do {
-            try await channel.subscribe()
-        } catch {
-            debugLog("[Realtime] Failed to subscribe to events: \(error)")
-            return
-        }
+        let success = await subscribeWithRetry(channel: channel, name: "events")
+        guard success else { return }
 
         // Handle new events
         Task {
@@ -291,8 +348,6 @@ final class RealtimeManager: ObservableObject {
                 Session.shared.notifyTimelineUpdated()
             }
         }
-
-        debugLog("[Realtime] Subscribed to events")
     }
 
     /// Subscribe to checkout_votes table for vote updates
@@ -314,12 +369,8 @@ final class RealtimeManager: ObservableObject {
             table: "checkout_votes"
         )
 
-        do {
-            try await channel.subscribe()
-        } catch {
-            debugLog("[Realtime] Failed to subscribe to checkout_votes: \(error)")
-            return
-        }
+        let success = await subscribeWithRetry(channel: channel, name: "votes")
+        guard success else { return }
 
         // Handle new votes
         Task {
@@ -350,8 +401,6 @@ final class RealtimeManager: ObservableObject {
                 }
             }
         }
-
-        debugLog("[Realtime] Subscribed to checkout_votes")
     }
 
     /// Subscribe to users table for subscription tier changes
@@ -369,12 +418,8 @@ final class RealtimeManager: ObservableObject {
             filter: "id=eq.\(userId)"
         )
 
-        do {
-            try await channel.subscribe()
-        } catch {
-            debugLog("[Realtime] Failed to subscribe to user changes: \(error)")
-            return
-        }
+        let success = await subscribeWithRetry(channel: channel, name: "users")
+        guard success else { return }
 
         // Handle user updates
         Task {
@@ -394,7 +439,5 @@ final class RealtimeManager: ObservableObject {
                 }
             }
         }
-
-        debugLog("[Realtime] Subscribed to user changes")
     }
 }

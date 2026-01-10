@@ -3961,6 +3961,11 @@ final class Session: ObservableObject {
             UserDefaults.standard.removeObject(forKey: "pinnedActivityIds")
             AppPreferences.shared.clearPinnedActivities()
         }
+
+        // Force widget refresh to reflect tier change
+        // This ensures widgets update their UI immediately when subscription changes
+        WidgetCenter.shared.reloadAllTimelines()
+        debugLog("[Session] Triggered widget refresh after tier change (isPremium: \(isPremium))")
     }
 
     /// Check if a premium feature is available
@@ -4049,11 +4054,11 @@ final class Session: ObservableObject {
     func handleSubscriptionChange() async {
         debugLog("[Session] Subscription change detected via Realtime")
 
-        // Reload feature limits from backend
-        await loadFeatureLimits()
-
-        // Sync with StoreKit state
+        // Update StoreKit state first (local source of truth for entitlements)
         await SubscriptionManager.shared.updateSubscriptionStatus()
+
+        // Then reload feature limits from backend (syncs with server state)
+        await loadFeatureLimits()
     }
 
     /// Get subscription status from backend

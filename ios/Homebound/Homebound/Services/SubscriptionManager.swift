@@ -52,6 +52,15 @@ final class SubscriptionManager: ObservableObject {
     /// Whether the last backend sync succeeded
     @Published var lastBackendSyncSucceeded = true
 
+    /// Pending verifications that failed and should be retried
+    private var pendingVerifications: [VerifyPurchaseRequest] = []
+
+    /// Maximum retry attempts for backend verification
+    private static let maxRetryAttempts = 3
+
+    /// Base delay for exponential backoff (in seconds)
+    private static let baseRetryDelay: Double = 2.0
+
     private var transactionListener: Task<Void, Error>?
 
     /// Flag to prevent concurrent status updates (race condition protection)
@@ -437,8 +446,14 @@ final class SubscriptionManager: ObservableObject {
 
     /// Check if subscription is in Apple's billing grace period
     private func checkGracePeriodStatus(for productID: String) async -> (isInGracePeriod: Bool, gracePeriodExpiresDate: Date?) {
+        // Ensure products are loaded before checking grace period
+        if products.isEmpty {
+            await loadProducts()
+        }
+
         guard let product = products.first(where: { $0.id == productID }),
               let subscription = product.subscription else {
+            debugLog("[SubscriptionManager] Could not find product for grace period check: \(productID)")
             return (false, nil)
         }
 
@@ -564,7 +579,7 @@ final class SubscriptionManager: ObservableObject {
 // MARK: - Session Extension
 
 extension Session {
-    /// Verify a purchase with the backend
+    /// Verify a purchase with the backend with exponential backoff retry
     /// - Returns: True if verification succeeded, false otherwise
     @discardableResult
     func verifyPurchase(_ request: VerifyPurchaseRequest) async -> Bool {
@@ -572,29 +587,88 @@ extension Session {
             debugLog("[Session] No access token for purchase verification")
             await MainActor.run {
                 SubscriptionManager.shared.lastBackendSyncSucceeded = false
+                SubscriptionManager.shared.addPendingVerification(request)
             }
             return false
         }
 
         let url = baseURL.appendingPathComponent("/api/v1/subscriptions/verify-purchase")
 
-        do {
-            let response: VerifyPurchaseResponse = try await api.post(url, body: request, bearer: token)
-            debugLog("[Session] Purchase verified: \(response.message)")
+        // Retry with exponential backoff
+        for attempt in 0..<SubscriptionManager.maxRetryAttempts {
+            do {
+                let response: VerifyPurchaseResponse = try await api.post(url, body: request, bearer: token)
+                debugLog("[Session] Purchase verified: \(response.message)")
 
-            // Reload feature limits after verification
-            await loadFeatureLimits()
+                // Reload feature limits after verification
+                await loadFeatureLimits()
 
-            await MainActor.run {
-                SubscriptionManager.shared.lastBackendSyncSucceeded = true
+                await MainActor.run {
+                    SubscriptionManager.shared.lastBackendSyncSucceeded = true
+                    SubscriptionManager.shared.removePendingVerification(request)
+                }
+                return true
+            } catch {
+                let delay = SubscriptionManager.baseRetryDelay * pow(2.0, Double(attempt))
+                debugLog("[Session] Verification attempt \(attempt + 1)/\(SubscriptionManager.maxRetryAttempts) failed: \(error). Retrying in \(delay)s...")
+
+                if attempt < SubscriptionManager.maxRetryAttempts - 1 {
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
             }
-            return true
-        } catch {
-            debugLog("[Session] Failed to verify purchase: \(error)")
-            await MainActor.run {
-                SubscriptionManager.shared.lastBackendSyncSucceeded = false
-            }
-            return false
         }
+
+        // All retries failed - store for later retry
+        debugLog("[Session] All verification attempts failed for transaction \(request.transactionId)")
+        await MainActor.run {
+            SubscriptionManager.shared.lastBackendSyncSucceeded = false
+            SubscriptionManager.shared.addPendingVerification(request)
+        }
+        return false
+    }
+
+    /// Retry any pending verifications that failed previously
+    func retryPendingVerifications() async {
+        let pending = await MainActor.run { SubscriptionManager.shared.getPendingVerifications() }
+
+        if pending.isEmpty {
+            debugLog("[Session] No pending verifications to retry")
+            return
+        }
+
+        debugLog("[Session] Retrying \(pending.count) pending verifications")
+
+        for request in pending {
+            let success = await verifyPurchase(request)
+            if success {
+                debugLog("[Session] Pending verification succeeded for transaction \(request.transactionId)")
+            }
+        }
+    }
+}
+
+extension SubscriptionManager {
+    /// Add a verification request to the pending queue
+    func addPendingVerification(_ request: VerifyPurchaseRequest) {
+        // Avoid duplicates based on transaction ID
+        if !pendingVerifications.contains(where: { $0.transactionId == request.transactionId }) {
+            pendingVerifications.append(request)
+            debugLog("[SubscriptionManager] Added pending verification for transaction \(request.transactionId)")
+        }
+    }
+
+    /// Remove a verification request from the pending queue
+    func removePendingVerification(_ request: VerifyPurchaseRequest) {
+        pendingVerifications.removeAll { $0.transactionId == request.transactionId }
+    }
+
+    /// Get all pending verifications
+    func getPendingVerifications() -> [VerifyPurchaseRequest] {
+        return pendingVerifications
+    }
+
+    /// Check if there are pending verifications
+    var hasPendingVerifications: Bool {
+        return !pendingVerifications.isEmpty
     }
 }

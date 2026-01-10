@@ -20,8 +20,20 @@ from pydantic import BaseModel
 from src import database as db
 from src.api import auth
 from src.services.subscription_check import get_limits_dict, get_user_tier
+from src.services.app_store import app_store_service
 
 logger = logging.getLogger(__name__)
+
+# Valid App Store product IDs
+VALID_PRODUCT_IDS = {
+    "com.homeboundapp.homebound.plus.monthly",
+    "com.homeboundapp.homebound.plus.yearly",
+}
+
+# Processed webhook notification IDs (in-memory cache with TTL would be better for production)
+# This prevents duplicate processing when Apple retries notifications
+_processed_notifications: set[str] = set()
+MAX_PROCESSED_NOTIFICATIONS = 10000  # Limit cache size
 
 router = APIRouter(
     prefix="/api/v1/subscriptions",
@@ -168,25 +180,81 @@ def get_feature_limits(user_id: int = Depends(auth.get_current_user_id)):
 
 
 @router.post("/verify-purchase", response_model=VerifyPurchaseResponse)
-def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get_current_user_id)):
+async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(auth.get_current_user_id)):
     """Verify and record a purchase from StoreKit 2.
 
     This endpoint should be called after a successful StoreKit purchase
     to record the transaction and update the user's subscription status.
 
-    SECURITY NOTE: In production, transactions should be validated with Apple's
-    App Store Server API. See: https://developer.apple.com/documentation/appstoreserverapi
+    When Apple App Store Server API is configured, transactions are validated
+    with Apple's servers before being recorded.
     """
-    # TODO: Add Apple App Store Server API validation for production security
-    # This would involve:
-    # 1. Calling Apple's /inApps/v1/transactions/{transactionId} endpoint
-    # 2. Verifying the signed transaction matches what the client sent
-    # 3. Checking the transaction hasn't been revoked
-    # For now, we trust the client data but log for auditing
-    import logging
-    logger = logging.getLogger(__name__)
+    # Validate product ID against known products
+    if body.product_id not in VALID_PRODUCT_IDS:
+        logger.warning(f"Invalid product ID from user {user_id}: {body.product_id}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid product ID: {body.product_id}"
+        )
+
     logger.info(f"Purchase verification for user {user_id}: product={body.product_id}, "
                 f"transaction={body.transaction_id}, environment={body.environment}")
+
+    # Validate transaction with Apple's servers if configured
+    apple_validated = False
+    if app_store_service.is_configured:
+        try:
+            tx_info = await app_store_service.verify_transaction(
+                body.transaction_id,
+                environment=body.environment
+            )
+
+            if tx_info is None:
+                logger.warning(
+                    f"Apple API validation failed for user {user_id}, transaction {body.transaction_id} - "
+                    "transaction not found or invalid"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Transaction could not be verified with Apple"
+                )
+
+            # Check for revocation
+            if tx_info.revocation_date:
+                logger.warning(
+                    f"Revoked transaction for user {user_id}: {body.transaction_id}, "
+                    f"revoked at {tx_info.revocation_date}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Transaction has been revoked"
+                )
+
+            # Verify the client-provided data matches Apple's data
+            if tx_info.product_id != body.product_id:
+                logger.warning(
+                    f"Product ID mismatch for user {user_id}: client={body.product_id}, "
+                    f"apple={tx_info.product_id}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Transaction product ID mismatch"
+                )
+
+            apple_validated = True
+            logger.info(f"Apple API validation successful for transaction {body.transaction_id}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Log but don't fail if Apple API call fails (e.g., network issues)
+            # Allow processing to continue with client data
+            logger.warning(
+                f"Apple API validation error for user {user_id}: {e}. "
+                "Processing with client-provided data."
+            )
+    else:
+        logger.info("Apple API not configured, skipping server-side validation")
 
     with db.engine.begin() as conn:
         # Parse dates
@@ -429,6 +497,9 @@ def pin_activity(
         )
 
     with db.engine.begin() as conn:
+        # Initialize variable for later reuse
+        existing_at_position = None
+
         # Lock user's pinned activities rows to prevent race condition
         # This ensures atomic check-and-insert
         conn.execute(
@@ -500,7 +571,7 @@ def pin_activity(
             )
 
         # Check if position is taken and swap if needed (reuse from limit check if available)
-        if 'existing_at_position' not in dir() or existing_at_position is None:
+        if existing_at_position is None:
             existing_at_position = conn.execute(
                 sqlalchemy.text(
                     """
@@ -758,12 +829,30 @@ def handle_notification(notification_type: str, subtype: str | None, data: dict)
 
         elif notification_type == "DID_FAIL_TO_RENEW":
             if subtype == "GRACE_PERIOD":
-                # In grace period - keep premium for now
-                logger.info(f"User {user_id} in billing grace period")
+                # In grace period - keep premium but update status
+                # User should retain access during billing retry
+                status_update = "grace_period"
+                # Note: We don't change tier here - user stays on "plus" during grace period
+                # The grace period expiration is handled by GRACE_PERIOD_EXPIRED notification
+                logger.info(f"User {user_id} in billing grace period - retaining premium access")
+
+                # Try to get grace period end date from renewal info
+                signed_renewal_info = data.get("signedRenewalInfo")
+                if signed_renewal_info:
+                    try:
+                        renewal_info = decode_jws_payload(signed_renewal_info, verify=False)
+                        grace_period_expires_ms = renewal_info.get("gracePeriodExpiresDate")
+                        if grace_period_expires_ms:
+                            grace_expires = datetime.fromtimestamp(grace_period_expires_ms / 1000, tz=UTC)
+                            logger.info(f"User {user_id} grace period expires: {grace_expires}")
+                            # Update expires_date to grace period end for UI display
+                            expires_date = grace_expires
+                    except Exception as e:
+                        logger.warning(f"Failed to parse grace period info: {e}")
             else:
                 new_tier = "free"
                 status_update = "billing_failed"
-                logger.info(f"User {user_id} billing failed")
+                logger.info(f"User {user_id} billing failed - downgrading to free")
 
         elif notification_type == "GRACE_PERIOD_EXPIRED":
             new_tier = "free"
@@ -819,6 +908,21 @@ def handle_notification(notification_type: str, subtype: str | None, data: dict)
                     "expires_at": expires_date
                 }
             )
+        elif status_update == "grace_period" and expires_date:
+            # Grace period: tier stays "plus" but update expiration to grace period end
+            # This triggers Realtime notification so iOS knows about the grace period
+            conn.execute(
+                sqlalchemy.text("""
+                    UPDATE users
+                    SET subscription_expires_at = :expires_at
+                    WHERE id = :user_id
+                """),
+                {
+                    "user_id": user_id,
+                    "expires_at": expires_date
+                }
+            )
+            logger.info(f"Updated user {user_id} subscription_expires_at to grace period end: {expires_date}")
 
         return {
             "processed": True,
@@ -866,15 +970,25 @@ async def apple_webhook(request: Request):
             )
 
         # Decode and verify the JWS payload
+        signature_verified = False
         try:
             payload = decode_jws_payload(signed_payload, verify=True)
+            signature_verified = True
         except ValueError as e:
-            logger.error(f"Failed to verify Apple webhook payload: {e}")
+            # Log prominent warning when signature verification fails
+            logger.warning(
+                f"⚠️ SECURITY WARNING: Apple webhook JWS signature verification failed: {e}. "
+                "This could indicate a forged notification or certificate chain issue. "
+                "Falling back to unverified decoding for processing."
+            )
             # Still try to process if signature verification fails
-            # (Apple's cert chain verification is complex)
+            # (Apple's cert chain verification is complex and may fail in edge cases)
             try:
                 payload = decode_jws_payload(signed_payload, verify=False)
-                logger.warning("Processing webhook without signature verification")
+                logger.warning(
+                    "Processing webhook without signature verification. "
+                    "Review Apple certificate chain configuration if this persists."
+                )
             except Exception:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -883,10 +997,27 @@ async def apple_webhook(request: Request):
 
         notification_type = payload.get("notificationType")
         subtype = payload.get("subtype")
+        notification_uuid = payload.get("notificationUUID")
         data = payload.get("data", {})
         environment = data.get("environment", "Production")
 
-        logger.info(f"Apple webhook: type={notification_type}, subtype={subtype}, env={environment}")
+        logger.info(
+            f"Apple webhook: type={notification_type}, subtype={subtype}, env={environment}, "
+            f"uuid={notification_uuid}, verified={signature_verified}"
+        )
+
+        # Idempotency check: skip already processed notifications
+        if notification_uuid:
+            if notification_uuid in _processed_notifications:
+                logger.info(f"Skipping duplicate notification: {notification_uuid}")
+                return {"ok": True, "duplicate": True, "notification_uuid": notification_uuid}
+
+            # Add to processed set (with size limit to prevent unbounded growth)
+            if len(_processed_notifications) >= MAX_PROCESSED_NOTIFICATIONS:
+                # Remove oldest entries (simple approach; LRU cache would be better)
+                _processed_notifications.clear()
+                logger.info("Cleared processed notifications cache (size limit reached)")
+            _processed_notifications.add(notification_uuid)
 
         # Process the notification
         result = handle_notification(notification_type, subtype, data)
