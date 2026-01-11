@@ -94,7 +94,7 @@ final class Session: ObservableObject {
     // swiftlint:disable force_unwrapping
     static let productionURL = URL(string: "https://api.homeboundapp.com")!
     static let devRenderURL = URL(string: "https://homebound-21l1.onrender.com")!
-    static let localURL = URL(string: "http://localhost:3001")!
+    static let localURL = URL(string: "http://Hudsons-MacBook-Pro-337.local:3001")!
     // swiftlint:enable force_unwrapping
 
     @Published var serverEnvironment: ServerEnvironment = {
