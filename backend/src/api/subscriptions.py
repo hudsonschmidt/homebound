@@ -14,6 +14,7 @@ import sqlalchemy
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
@@ -719,13 +720,25 @@ def decode_jws_payload(signed_payload: str, verify: bool = True) -> dict:
         signing_cert = x509.load_der_x509_certificate(cert_der)
 
         # Verify signature
-        signature = base64.urlsafe_b64decode(signature_b64 + "==")
+        raw_signature = base64.urlsafe_b64decode(signature_b64 + "==")
         signed_data = f"{header_b64}.{payload_b64}".encode()
 
         try:
             public_key = signing_cert.public_key()
             if isinstance(public_key, ec.EllipticCurvePublicKey):
-                public_key.verify(signature, signed_data, ec.ECDSA(hashes.SHA256()))
+                # ES256 signatures in JWS are raw R||S format (64 bytes for P-256)
+                # The cryptography library expects DER-encoded signatures
+                # Convert raw R||S to DER format
+                if len(raw_signature) == 64:
+                    r = int.from_bytes(raw_signature[:32], byteorder='big')
+                    s = int.from_bytes(raw_signature[32:], byteorder='big')
+                    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+                    der_signature = encode_dss_signature(r, s)
+                else:
+                    # Assume it's already DER encoded
+                    der_signature = raw_signature
+
+                public_key.verify(der_signature, signed_data, ec.ECDSA(hashes.SHA256()))
             else:
                 raise ValueError("Unexpected key type in certificate")
         except Exception as e:

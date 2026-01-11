@@ -2,32 +2,29 @@
 """Request a test notification from Apple App Store Server API.
 
 Usage:
-    python scripts/request_apple_test_notification.py \
-        --key-file /path/to/AuthKey_XXXXXX.p8 \
-        --key-id YOUR_KEY_ID \
-        --issuer-id YOUR_ISSUER_ID \
-        --bundle-id com.hudsonschmidt.Homebound \
-        --sandbox  # Remove for production
+    python scripts/request_apple_test_notification.py [--sandbox]
 
-You can find these values in App Store Connect:
-- Key ID: Users and Access → Integrations → In-App Purchase → Your key
-- Issuer ID: Users and Access → Integrations → In-App Purchase (shown at top)
-- Bundle ID: Your app's bundle identifier
+Reads credentials from backend/.env:
+    - APP_STORE_KEY_ID
+    - APP_STORE_ISSUER_ID
+    - APP_STORE_PRIVATE_KEY
+    - APP_BUNDLE_ID (optional, defaults to com.hudsonschmidt.Homebound)
 """
 
 import argparse
 import json
+import os
+import sys
 import time
+from pathlib import Path
 
 import jwt
 import httpx
+from dotenv import load_dotenv
 
 
-def create_apple_jwt(key_file: str, key_id: str, issuer_id: str, bundle_id: str) -> str:
+def create_apple_jwt(private_key: str, key_id: str, issuer_id: str, bundle_id: str) -> str:
     """Create a signed JWT for Apple App Store Server API."""
-    with open(key_file, "r") as f:
-        private_key = f.read()
-
     now = int(time.time())
     payload = {
         "iss": issuer_id,
@@ -73,36 +70,75 @@ def request_test_notification(token: str, sandbox: bool = True) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Request Apple test notification")
-    parser.add_argument("--key-file", required=True, help="Path to .p8 key file")
-    parser.add_argument("--key-id", required=True, help="Key ID from App Store Connect")
-    parser.add_argument("--issuer-id", required=True, help="Issuer ID from App Store Connect")
-    parser.add_argument("--bundle-id", default="com.hudsonschmidt.Homebound", help="App bundle ID")
-    parser.add_argument("--sandbox", action="store_true", help="Use sandbox environment")
+    parser.add_argument("--sandbox", action="store_true", default=True, help="Use sandbox environment (default)")
+    parser.add_argument("--production", action="store_true", help="Use production environment")
 
     args = parser.parse_args()
+    use_sandbox = not args.production
 
-    print(f"Creating JWT for bundle: {args.bundle_id}")
-    print(f"Environment: {'Sandbox' if args.sandbox else 'Production'}")
+    # Load .env from backend directory
+    backend_dir = Path(__file__).parent.parent
+    env_path = backend_dir / ".env"
 
-    token = create_apple_jwt(
-        args.key_file,
-        args.key_id,
-        args.issuer_id,
-        args.bundle_id,
-    )
+    if not env_path.exists():
+        print(f"Error: .env file not found at {env_path}")
+        sys.exit(1)
+
+    load_dotenv(env_path)
+
+    # Get credentials from environment
+    key_id = os.getenv("APP_STORE_KEY_ID")
+    issuer_id = os.getenv("APP_STORE_ISSUER_ID")
+    private_key = os.getenv("APP_STORE_PRIVATE_KEY")
+    private_key_path = os.getenv("APP_STORE_PRIVATE_KEY_PATH")
+    bundle_id = os.getenv("APP_BUNDLE_ID", "com.hudsonschmidt.Homebound")
+
+    # Load private key from file if path is provided
+    if not private_key and private_key_path:
+        key_file = backend_dir / private_key_path
+        if key_file.exists():
+            private_key = key_file.read_text()
+            print(f"Loaded private key from {key_file}")
+        else:
+            print(f"Error: Private key file not found at {key_file}")
+            sys.exit(1)
+
+    # Validate required credentials
+    missing = []
+    if not key_id:
+        missing.append("APP_STORE_KEY_ID")
+    if not issuer_id:
+        missing.append("APP_STORE_ISSUER_ID")
+    if not private_key:
+        missing.append("APP_STORE_PRIVATE_KEY or APP_STORE_PRIVATE_KEY_PATH")
+
+    if missing:
+        print(f"Error: Missing required environment variables: {', '.join(missing)}")
+        print(f"Please add them to {env_path}")
+        sys.exit(1)
+
+    # Handle escaped newlines in private key
+    private_key = private_key.replace("\\n", "\n")
+
+    print(f"Bundle ID: {bundle_id}")
+    print(f"Key ID: {key_id}")
+    print(f"Issuer ID: {issuer_id[:8]}...")
+    print(f"Environment: {'Sandbox' if use_sandbox else 'Production'}")
+
+    token = create_apple_jwt(private_key, key_id, issuer_id, bundle_id)
 
     print(f"JWT created successfully")
     print(f"Requesting test notification...")
 
-    result = request_test_notification(token, args.sandbox)
+    result = request_test_notification(token, use_sandbox)
 
     if "testNotificationToken" in result:
-        print(f"\n✅ Success! Test notification requested.")
+        print(f"\nSuccess! Test notification requested.")
         print(f"Token: {result['testNotificationToken']}")
         print(f"\nApple will send a TEST notification to your webhook shortly.")
         print(f"Watch your server logs for: POST /api/v1/subscriptions/apple-webhook")
     else:
-        print(f"\n❌ Failed to request test notification")
+        print(f"\nFailed to request test notification")
         print(f"Result: {json.dumps(result, indent=2)}")
 
 
