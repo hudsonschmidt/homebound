@@ -619,8 +619,7 @@ struct SettingsView: View {
                     }
                 }
 
-                #if DEBUG
-                // Developer Section - only visible in debug builds
+                // Developer Section - only visible to designated emails
                 if session.userEmail == "hudsonschmidt08@gmail.com" || session.userEmail == "parkcityht@gmail.com" {
                     Section("Developer") {
                         VStack(alignment: .leading, spacing: 8) {
@@ -690,7 +689,6 @@ struct SettingsView: View {
                         .foregroundStyle(.red)
                     }
                 }
-                #endif
 
                 // Support Section
                 Section("Support") {
