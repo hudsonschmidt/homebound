@@ -538,13 +538,13 @@ struct ActivePlanCardCompact: View {
     // Group trip checkout confirmation
     @State private var showingGroupCheckoutConfirmation = false
 
-    /// All available extension options
+    /// All available extension options (must match backend PLUS_LIMITS.extensions)
     let allExtendOptions = [
-        (15, "15 min"),
         (30, "30 min"),
         (60, "1 hr"),
         (120, "2 hrs"),
-        (180, "3 hrs")
+        (180, "3 hrs"),
+        (240, "4 hrs")
     ]
 
     /// Check if an extension time is available for the user

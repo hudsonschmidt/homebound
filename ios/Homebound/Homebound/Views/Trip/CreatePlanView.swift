@@ -1511,8 +1511,12 @@ struct Step2TimeSettings: View {
                     Text("Reminder frequency")
                         .font(.subheadline)
 
+                    // Free users only get 30m, premium users get all preset options
+                    let canUseCustom = session.canUse(feature: .customIntervals)
+                    let availableIntervals = canUseCustom ? [15, 30, 60, 120] : [30]
+
                     HStack(spacing: 12) {
-                        ForEach([15, 30, 60, 120], id: \.self) { minutes in
+                        ForEach(availableIntervals, id: \.self) { minutes in
                             Button(action: {
                                 checkinIntervalMinutes = minutes
                                 showCustomInterval = false
@@ -1530,9 +1534,6 @@ struct Step2TimeSettings: View {
                             .buttonStyle(.plain)
                         }
                     }
-
-                    // Custom button on separate row (Premium feature)
-                    let canUseCustom = session.canUse(feature: .customIntervals)
                     Button(action: {
                         if canUseCustom {
                             showCustomInterval = true

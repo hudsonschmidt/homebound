@@ -1625,6 +1625,7 @@ struct PrivacyView: View {
     @State private var isExporting = false
     @State private var showShareSheet = false
     @State private var exportData: Data?
+    @State private var showExportPaywall = false
 
     // Local storage counts (cached trips/activities loaded on appear, pending uses session's reactive property)
     @State private var cachedTripsCount = 0
@@ -1664,9 +1665,14 @@ struct PrivacyView: View {
 
             // Your Data Section
             Section {
+                let canExport = session.canUse(feature: .export)
                 Button {
-                    Task {
-                        await exportUserData()
+                    if canExport {
+                        Task {
+                            await exportUserData()
+                        }
+                    } else {
+                        showExportPaywall = true
                     }
                 } label: {
                     HStack {
@@ -1674,7 +1680,7 @@ struct PrivacyView: View {
                             Text("Export My Data")
                         } icon: {
                             Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(canExport ? .blue : .secondary)
                         }
 
                         Spacer()
@@ -1682,6 +1688,8 @@ struct PrivacyView: View {
                         if isExporting {
                             ProgressView()
                                 .scaleEffect(0.8)
+                        } else if !canExport {
+                            PremiumBadge()
                         } else {
                             Image(systemName: "chevron.right")
                                 .font(.caption)
@@ -1743,6 +1751,9 @@ struct PrivacyView: View {
                let fileURL = writeExportDataToTempFile(data) {
                 ShareSheet(activityItems: [fileURL])
             }
+        }
+        .sheet(isPresented: $showExportPaywall) {
+            PaywallView(feature: .export)
         }
     }
 
