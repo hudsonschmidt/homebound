@@ -318,16 +318,11 @@ final class SubscriptionManager: ObservableObject {
 
         // Map StoreKit environment: .sandbox and .xcode both use sandbox backend
         let environmentString: String
-        switch transaction.environment {
-        case .sandbox:
-            environmentString = "sandbox"
-        case .xcode:
-            // Xcode StoreKit testing should use sandbox backend
-            environmentString = "sandbox"
-        case .production:
+        if transaction.environment == .production {
             environmentString = "production"
-        @unknown default:
-            environmentString = "sandbox"  // Default to sandbox for safety
+        } else {
+            // .sandbox, .xcode, and any future environments use sandbox backend
+            environmentString = "sandbox"
         }
 
         let request = VerifyPurchaseRequest(
