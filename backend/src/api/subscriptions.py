@@ -286,7 +286,8 @@ async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(au
 
         if existing:
             # Update existing subscription with all fields from StoreKit
-            conn.execute(
+            # Use RETURNING to verify the update succeeded (critical for Supabase Transaction Mode)
+            result = conn.execute(
                 sqlalchemy.text(
                     """
                     UPDATE subscriptions
@@ -298,6 +299,7 @@ async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(au
                         product_id = :product_id,
                         updated_at = :updated_at
                     WHERE original_transaction_id = :original_transaction_id
+                    RETURNING id
                     """
                 ),
                 {
@@ -311,9 +313,21 @@ async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(au
                     "updated_at": datetime.now(UTC)
                 }
             )
+            updated_row = result.fetchone()
+            if not updated_row:
+                logger.error(
+                    f"Failed to update subscription for user {user_id}, "
+                    f"original_transaction_id={body.original_transaction_id}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update subscription record"
+                )
+            logger.info(f"Updated subscription {updated_row.id} for user {user_id}")
         else:
             # Insert new subscription record
-            conn.execute(
+            # Use RETURNING to verify the insert succeeded (critical for Supabase Transaction Mode)
+            result = conn.execute(
                 sqlalchemy.text(
                     """
                     INSERT INTO subscriptions (
@@ -325,6 +339,7 @@ async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(au
                         :purchase_date, :expires_date, :status,
                         :auto_renew_status, :is_family_shared, :is_trial, :environment
                     )
+                    RETURNING id
                     """
                 ),
                 {
@@ -340,6 +355,17 @@ async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(au
                     "environment": body.environment
                 }
             )
+            inserted_row = result.fetchone()
+            if not inserted_row:
+                logger.error(
+                    f"Failed to insert subscription for user {user_id}, "
+                    f"original_transaction_id={body.original_transaction_id}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create subscription record"
+                )
+            logger.info(f"Created subscription {inserted_row.id} for user {user_id}")
 
         # Determine if subscription is active
         # Active if: not expired OR in grace period (billing retry in progress)
