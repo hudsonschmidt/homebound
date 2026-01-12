@@ -1631,6 +1631,7 @@ struct PrivacyView: View {
 
     // Live Location state
     @State private var showLiveLocationPermissionAlert = false
+    @State private var showAlwaysPermissionAlert = false
     @State private var isSavingLiveLocation = false
 
     var body: some View {
@@ -1800,6 +1801,20 @@ struct PrivacyView: View {
         } message: {
             Text("Live location sharing requires location permission. Please enable it in Settings to share your location with friends during trips.")
         }
+        .alert("Enable Background Updates?", isPresented: $showAlwaysPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Enable Anyway") {
+                // Enable with "While Using" - will only work in foreground
+                updateBackendLiveLocationSetting(true)
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("For live location to work in the background, change location permission to 'Always' in Settings. With 'While Using', location sharing only works when the app is open.")
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // Re-check permission when app becomes active (after returning from Settings)
             checkLocationStatus()
@@ -1906,9 +1921,8 @@ struct PrivacyView: View {
                 LiveLocationManager.shared.requestPermissionIfNeeded()
                 showLiveLocationPermissionAlert = true
             case .authorizedWhenInUse:
-                // Can enable, but recommend upgrade to Always
-                LiveLocationManager.shared.requestPermissionIfNeeded()
-                updateBackendLiveLocationSetting(true)
+                // Can enable, but prompt to upgrade to Always for background updates
+                showAlwaysPermissionAlert = true
             case .authorizedAlways:
                 // Perfect - enable immediately
                 updateBackendLiveLocationSetting(true)
@@ -2141,107 +2155,9 @@ private struct StatCard: View {
     }
 }
 
-// MARK: - Friends Settings View
+// MARK: - Friends Settings View (Combined)
 
 struct FriendsSettingsView: View {
-    @EnvironmentObject var preferences: AppPreferences
-    @State private var isEditing = false
-
-    var body: some View {
-        List {
-            Section {
-                Text("Choose what information is visible when viewing a friend's profile. Drag to reorder.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .listRowBackground(Color.clear)
-
-            Section("Always Shown") {
-                HStack {
-                    Image(systemName: "person.fill")
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-                    Text("Name")
-                    Spacer()
-                    Image(systemName: "lock.fill")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                HStack {
-                    Image(systemName: "heart.fill")
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-                    Text("Friends Since")
-                    Spacer()
-                    Image(systemName: "lock.fill")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            Section("Stats") {
-                ForEach(preferences.friendStatOrder) { statType in
-                    HStack {
-                        Image(systemName: statType.icon)
-                            .foregroundStyle(statType.iconColor)
-                            .frame(width: 24)
-
-                        Text(statType.displayName)
-
-                        Spacer()
-
-                        Toggle("", isOn: binding(for: statType))
-                            .labelsHidden()
-                    }
-                }
-                .onMove { from, to in
-                    preferences.friendStatOrder.move(fromOffsets: from, toOffset: to)
-                }
-            }
-            .environment(\.editMode, .constant(.active))
-
-            Section {
-                NavigationLink(destination: FriendVisibilitySettingsView()) {
-                    HStack {
-                        Image(systemName: "eye.fill")
-                            .foregroundStyle(.blue)
-                            .frame(width: 24)
-                        Text("What Friends See About You")
-                    }
-                }
-            } header: {
-                Text("Trip Visibility")
-            } footer: {
-                Text("Control what information friends can see when they're your safety contacts.")
-            }
-        }
-        .scrollIndicators(.hidden)
-        .navigationTitle("Friends")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func binding(for statType: FriendStatType) -> Binding<Bool> {
-        switch statType {
-        case .joinDate:
-            return $preferences.showFriendJoinDate
-        case .age:
-            return $preferences.showFriendAge
-        case .achievements:
-            return $preferences.showFriendAchievements
-        case .totalTrips:
-            return $preferences.showFriendTotalTrips
-        case .adventureTime:
-            return $preferences.showFriendAdventureTime
-        case .favoriteActivity:
-            return $preferences.showFriendFavoriteActivity
-        }
-    }
-}
-
-// MARK: - Friend Visibility Settings View
-
-struct FriendVisibilitySettingsView: View {
     @EnvironmentObject var session: Session
     @State private var settings: FriendVisibilitySettings = .defaults
     @State private var isLoading = true
@@ -2249,13 +2165,20 @@ struct FriendVisibilitySettingsView: View {
 
     var body: some View {
         List {
+            // SECTION 1: What Friends See About You
+            Section {
+                Text("Control what information friends can see about you.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .listRowBackground(Color.clear)
+
             Section {
                 Toggle(isOn: $settings.friend_share_checkin_locations) {
                     Label("Share check-in locations", systemImage: "mappin.circle.fill")
                 }
                 .onChange(of: settings.friend_share_checkin_locations) { _, _ in saveSettings() }
 
-                // Live location is now controlled in Privacy settings
                 NavigationLink(destination: PrivacyView()) {
                     HStack {
                         Label("Live location sharing", systemImage: "location.fill")
@@ -2274,43 +2197,44 @@ struct FriendVisibilitySettingsView: View {
                     Label("Allow update requests", systemImage: "bell.badge.fill")
                 }
                 .onChange(of: settings.friend_allow_update_requests) { _, _ in saveSettings() }
-
-                Toggle(isOn: $settings.friend_share_achievements) {
-                    Label("Share achievements", systemImage: "trophy.fill")
-                }
-                .onChange(of: settings.friend_share_achievements) { _, _ in saveSettings() }
             } header: {
-                Text("Trip visibility")
+                Text("During Trips")
             } footer: {
-                Text("These settings apply when friends are your safety contacts during trips.")
+                Text("These settings apply when friends are your safety contacts.")
             }
 
             Section {
                 Toggle(isOn: $settings.friend_share_age) {
-                    Label("Share your age", systemImage: "number.circle.fill")
+                    Label("Age", systemImage: "number.circle.fill")
                 }
                 .onChange(of: settings.friend_share_age) { _, _ in saveSettings() }
 
                 Toggle(isOn: $settings.friend_share_total_trips) {
-                    Label("Share total trips", systemImage: "figure.hiking")
+                    Label("Total trips", systemImage: "figure.hiking")
                 }
                 .onChange(of: settings.friend_share_total_trips) { _, _ in saveSettings() }
 
                 Toggle(isOn: $settings.friend_share_adventure_time) {
-                    Label("Share adventure time", systemImage: "clock.fill")
+                    Label("Adventure time", systemImage: "clock.fill")
                 }
                 .onChange(of: settings.friend_share_adventure_time) { _, _ in saveSettings() }
 
                 Toggle(isOn: $settings.friend_share_favorite_activity) {
-                    Label("Share favorite activity", systemImage: "star.fill")
+                    Label("Favorite activity", systemImage: "star.fill")
                 }
                 .onChange(of: settings.friend_share_favorite_activity) { _, _ in saveSettings() }
+
+                Toggle(isOn: $settings.friend_share_achievements) {
+                    Label("Achievements", systemImage: "trophy.fill")
+                }
+                .onChange(of: settings.friend_share_achievements) { _, _ in saveSettings() }
             } header: {
-                Text("Profile stats")
+                Text("On Your Profile")
             } footer: {
-                Text("Control what stats friends see on your mini profile.")
+                Text("Stats friends can see on your profile.")
             }
 
+            // Info Card
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Friends vs Email Contacts", systemImage: "person.2.fill")
@@ -2322,7 +2246,7 @@ struct FriendVisibilitySettingsView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         BulletPoint("Check-in locations on a map")
-                        BulletPoint("Real-time location (if enabled)")
+                        BulletPoint("Real-time location (if enabled in Privacy)")
                         BulletPoint("Rich overdue alerts with last known location")
                         BulletPoint("Ability to request updates")
                         BulletPoint("Achievement progress and details")
@@ -2338,7 +2262,8 @@ struct FriendVisibilitySettingsView: View {
                 Text("Why share more with friends?")
             }
         }
-        .navigationTitle("Friend Visibility")
+        .scrollIndicators(.hidden)
+        .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if isLoading {
