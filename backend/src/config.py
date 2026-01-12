@@ -71,6 +71,12 @@ class Settings:
     # Apple Sign In settings
     APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID", "com.hudsonschmidt.Homebound")
 
+    # Apple App Store Server API settings (for subscription validation)
+    APP_STORE_KEY_ID: str = os.getenv("APP_STORE_KEY_ID", "")
+    APP_STORE_ISSUER_ID: str = os.getenv("APP_STORE_ISSUER_ID", "")
+    APP_STORE_PRIVATE_KEY: str = os.getenv("APP_STORE_PRIVATE_KEY", "")
+    APP_BUNDLE_ID: str = os.getenv("APP_BUNDLE_ID", "com.hudsonschmidt.Homebound")
+
     # Development settings
     DEV_MODE: bool = os.getenv("DEV_MODE", "false").lower() == "true"
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")

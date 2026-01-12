@@ -58,6 +58,10 @@ class AppStoreService:
         self.issuer_id = getattr(settings, "APP_STORE_ISSUER_ID", None)
         self.private_key = getattr(settings, "APP_STORE_PRIVATE_KEY", None)
 
+        # Handle escaped newlines in private key (common in env vars)
+        if self.private_key:
+            self.private_key = self.private_key.replace("\\n", "\n")
+
         # Check if configured
         self.is_configured = all([self.key_id, self.issuer_id, self.private_key])
 
