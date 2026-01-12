@@ -21,31 +21,13 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 0.6.0",
+        title: "Update 0.6.2",
         features: [
-            WhatsNewFeature(
-                icon: "environments",
-                iconColor: .primary,
-                title: "Homebound+",
-                description: "Subscription to unlock the full app. For testing, you will not be charged if you subscribe."
-            ),
-            WhatsNewFeature(
-                icon: "person.3",
-                iconColor: .primary,
-                title: "Contact Groups",
-                description: "Group friends to make it easier to invite them to trips."
-            ),
-            WhatsNewFeature(
-                icon: "message",
-                iconColor: .primary,
-                title: "Custom Messages",
-                description: "Add custom messages that get sent to contacts during start and overdue."
-            ),
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .primary,
                 title: "Bug Fixes",
-                description: "Can't friend self."
+                description: "Live location permission refactor. Friends settings refactor. Logout fix."
             )
         ]
     )
