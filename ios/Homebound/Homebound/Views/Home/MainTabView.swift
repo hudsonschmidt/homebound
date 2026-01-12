@@ -363,6 +363,12 @@ struct NewHomeView: View {
                     }
                 }
             }
+            .onChange(of: session.accessToken) { _, newToken in
+                // Dismiss settings sheet when user logs out
+                if newToken == nil {
+                    showingSettings = false
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 Task {
                     // Sync when app comes to foreground

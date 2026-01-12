@@ -277,6 +277,13 @@ final class SubscriptionManager: ObservableObject {
 
     /// Send transaction to backend for server-side validation
     private func verifyWithBackend(transaction: Transaction) async {
+        // Validate transaction ID - StoreKit transaction IDs should never be 0
+        guard transaction.id != 0 else {
+            debugLog("[SubscriptionManager] ⚠️ Invalid transaction ID (0) - skipping backend verification")
+            debugLog("[SubscriptionManager] ⚠️ Invalid transaction details: product=\(transaction.productID), originalID=\(transaction.originalID), environment=\(transaction.environment), purchaseDate=\(transaction.purchaseDate)")
+            return
+        }
+
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
@@ -583,6 +590,15 @@ extension Session {
     /// - Returns: True if verification succeeded, false otherwise
     @discardableResult
     func verifyPurchase(_ request: VerifyPurchaseRequest) async -> Bool {
+        // Validate transaction ID - reject and remove invalid requests
+        if request.transactionId == "0" {
+            debugLog("[Session] ⚠️ Invalid transaction ID (0) - removing from pending and skipping verification")
+            await MainActor.run {
+                SubscriptionManager.shared.removePendingVerification(request)
+            }
+            return false
+        }
+
         guard let token = accessToken else {
             debugLog("[Session] No access token for purchase verification")
             await MainActor.run {
@@ -650,6 +666,12 @@ extension Session {
 extension SubscriptionManager {
     /// Add a verification request to the pending queue
     func addPendingVerification(_ request: VerifyPurchaseRequest) {
+        // Reject invalid transaction IDs
+        guard request.transactionId != "0" else {
+            debugLog("[SubscriptionManager] ⚠️ Rejecting invalid pending verification with transaction ID 0")
+            return
+        }
+
         // Avoid duplicates based on transaction ID
         if !pendingVerifications.contains(where: { $0.transactionId == request.transactionId }) {
             pendingVerifications.append(request)
