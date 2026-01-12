@@ -190,6 +190,18 @@ async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(au
     When Apple App Store Server API is configured, transactions are validated
     with Apple's servers before being recorded.
     """
+    # Validate transaction ID - must not be "0" (indicates corrupted iOS transaction)
+    if body.transaction_id == "0":
+        logger.warning(
+            f"Invalid transaction ID '0' from user {user_id} - "
+            f"this indicates a corrupted StoreKit transaction. "
+            f"Product: {body.product_id}, Environment: {body.environment}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid transaction ID: corrupted StoreKit transaction. Please restore purchases."
+        )
+
     # Validate product ID against known products
     if body.product_id not in VALID_PRODUCT_IDS:
         logger.warning(f"Invalid product ID from user {user_id}: {body.product_id}")

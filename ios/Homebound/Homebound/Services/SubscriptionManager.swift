@@ -157,7 +157,7 @@ final class SubscriptionManager: ObservableObject {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
 
-                debugLog("[SubscriptionManager] Purchase successful: \(transaction.productID)")
+                debugLog("[SubscriptionManager] Purchase successful: id=\(transaction.id), product=\(transaction.productID), env=\(transaction.environment)")
 
                 // Send to backend for server-side validation
                 await verifyWithBackend(transaction: transaction)
@@ -256,7 +256,7 @@ final class SubscriptionManager: ObservableObject {
 
     /// Handle a transaction update on the main actor
     private func handleTransactionUpdate(_ transaction: Transaction) async {
-        debugLog("[SubscriptionManager] Transaction update: \(transaction.productID)")
+        debugLog("[SubscriptionManager] Transaction update: id=\(transaction.id), product=\(transaction.productID), env=\(transaction.environment)")
 
         await verifyWithBackend(transaction: transaction)
         await transaction.finish()
@@ -316,13 +316,27 @@ final class SubscriptionManager: ObservableObject {
             }
         }
 
+        // Map StoreKit environment: .sandbox and .xcode both use sandbox backend
+        let environmentString: String
+        switch transaction.environment {
+        case .sandbox:
+            environmentString = "sandbox"
+        case .xcode:
+            // Xcode StoreKit testing should use sandbox backend
+            environmentString = "sandbox"
+        case .production:
+            environmentString = "production"
+        @unknown default:
+            environmentString = "sandbox"  // Default to sandbox for safety
+        }
+
         let request = VerifyPurchaseRequest(
             transactionId: String(transaction.id),
             originalTransactionId: String(transaction.originalID),
             productId: transaction.productID,
             purchaseDate: formatter.string(from: transaction.purchaseDate),
             expiresDate: transaction.expirationDate.map { formatter.string(from: $0) },
-            environment: transaction.environment == .sandbox ? "sandbox" : "production",
+            environment: environmentString,
             isFamilyShared: transaction.ownershipType == .familyShared,
             autoRenew: autoRenew,
             isTrial: isTrial,
@@ -350,6 +364,8 @@ final class SubscriptionManager: ObservableObject {
         for await result in Transaction.currentEntitlements {
             do {
                 let transaction = try checkVerified(result)
+
+                debugLog("[SubscriptionManager] Processing entitlement: id=\(transaction.id), product=\(transaction.productID), env=\(transaction.environment)")
 
                 // Check if transaction was revoked (refunded)
                 if transaction.revocationDate != nil {
