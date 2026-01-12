@@ -249,17 +249,24 @@ def verify_magic_code(body: VerifyRequest):
                 detail="Code expired"
             )
 
-        # Mark token as used
-        connection.execute(
+        # Atomic: Mark token as used (only succeeds if used_at is still NULL)
+        result = connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE login_tokens
                 SET used_at = CURRENT_TIMESTAMP
-                WHERE id = :token_id
+                WHERE id = :token_id AND used_at IS NULL
                 """
             ),
             {"token_id": token.id}
         )
+
+        # If no rows were updated, another request already used this token
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Code already used"
+            )
 
         # Get user info and update last_login_at
         user = connection.execute(

@@ -930,6 +930,7 @@ def test_restore_no_subscription():
 
 import base64
 import json
+from unittest.mock import patch
 from src.api.subscriptions import decode_jws_payload, handle_notification
 
 
@@ -940,6 +941,11 @@ def create_mock_jws(payload: dict) -> str:
     payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     signature_b64 = base64.urlsafe_b64encode(b"mock_signature").decode().rstrip("=")
     return f"{header_b64}.{payload_b64}.{signature_b64}"
+
+
+def mock_decode_jws(signed_payload: str, verify: bool = True) -> dict:
+    """Mock JWS decoder that always skips verification."""
+    return decode_jws_payload(signed_payload, verify=False)
 
 
 def test_decode_jws_payload_without_verification():
@@ -959,7 +965,8 @@ def test_decode_jws_invalid_format():
         decode_jws_payload("not.a.valid.jws.format", verify=False)
 
 
-def test_handle_notification_subscribed():
+@patch('src.api.subscriptions.decode_jws_payload', side_effect=mock_decode_jws)
+def test_handle_notification_subscribed(mock_decode):
     """Test handling SUBSCRIBED notification."""
     test_email = "webhook-subscribed@homeboundapp.com"
     original_txn_id = "orig_webhook_subscribed_123"
@@ -1050,7 +1057,8 @@ def test_handle_notification_subscribed():
             )
 
 
-def test_handle_notification_expired():
+@patch('src.api.subscriptions.decode_jws_payload', side_effect=mock_decode_jws)
+def test_handle_notification_expired(mock_decode):
     """Test handling EXPIRED notification."""
     test_email = "webhook-expired@homeboundapp.com"
     original_txn_id = "orig_webhook_expired_123"
@@ -1139,7 +1147,8 @@ def test_handle_notification_expired():
             )
 
 
-def test_handle_notification_refund():
+@patch('src.api.subscriptions.decode_jws_payload', side_effect=mock_decode_jws)
+def test_handle_notification_refund(mock_decode):
     """Test handling REFUND notification."""
     test_email = "webhook-refund@homeboundapp.com"
     original_txn_id = "orig_webhook_refund_123"
@@ -1239,7 +1248,8 @@ def test_handle_notification_test_type():
     assert result["type"] == "TEST"
 
 
-def test_handle_notification_unknown_subscription():
+@patch('src.api.subscriptions.decode_jws_payload', side_effect=mock_decode_jws)
+def test_handle_notification_unknown_subscription(mock_decode):
     """Test handling notification for unknown subscription."""
     transaction_info = {"originalTransactionId": "unknown_txn_12345"}
     signed_transaction_info = create_mock_jws(transaction_info)
@@ -1255,7 +1265,8 @@ def test_handle_notification_unknown_subscription():
     assert "not found" in result["reason"].lower()
 
 
-def test_handle_notification_did_renew():
+@patch('src.api.subscriptions.decode_jws_payload', side_effect=mock_decode_jws)
+def test_handle_notification_did_renew(mock_decode):
     """Test handling DID_RENEW notification."""
     test_email = "webhook-renew@homeboundapp.com"
     original_txn_id = "orig_webhook_renew_123"

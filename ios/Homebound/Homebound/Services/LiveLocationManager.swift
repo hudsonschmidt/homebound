@@ -45,29 +45,34 @@ final class LiveLocationManager: NSObject, ObservableObject {
     // MARK: - Public Methods
 
     /// Start sharing live location for a specific trip.
-    /// Requires "Always" location permission for background updates.
+    /// Works with both "Always" and "While Using" permissions.
+    /// With "While Using", location updates only work when app is in foreground.
     func startSharing(forTripId tripId: Int) {
         guard !isSharing else {
             debugLog("[LiveLocation] Already sharing for trip \(currentTripId ?? 0)")
             return
         }
 
-        // Check location authorization
+        // Check location authorization - allow both Always and WhenInUse
         let authStatus = locationManager.authorizationStatus
-        guard authStatus == .authorizedAlways else {
-            lastError = "Location permission required. Enable 'Always' in Settings."
-            debugLog("[LiveLocation] ❌ Requires 'Always' location permission, got: \(authStatus.rawValue)")
+        guard authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse else {
+            lastError = "Location permission required."
+            debugLog("[LiveLocation] ❌ Requires location permission, got: \(authStatus.rawValue)")
             return
         }
 
-        debugLog("[LiveLocation] ✅ Starting live location sharing for trip \(tripId)")
+        debugLog("[LiveLocation] ✅ Starting live location sharing for trip \(tripId) (auth: \(authStatus == .authorizedAlways ? "Always" : "WhenInUse"))")
         currentTripId = tripId
         isSharing = true
         lastError = nil
 
-        // Enable background location updates now that we have Always authorization
-        locationManager.allowsBackgroundLocationUpdates = true
-        locationManager.showsBackgroundLocationIndicator = true
+        // Only enable background location updates if we have Always authorization
+        if authStatus == .authorizedAlways {
+            locationManager.allowsBackgroundLocationUpdates = true
+            locationManager.showsBackgroundLocationIndicator = true
+        } else {
+            debugLog("[LiveLocation] ⚠️ Running with 'While Using' only - background updates disabled")
+        }
 
         // Start location updates
         locationManager.startUpdatingLocation()
@@ -122,8 +127,14 @@ final class LiveLocationManager: NSObject, ObservableObject {
         }
     }
 
-    /// Check if we have the required "Always" authorization.
+    /// Check if we have sufficient authorization for live location (either Always or WhenInUse).
     var hasRequiredAuthorization: Bool {
+        let status = locationManager.authorizationStatus
+        return status == .authorizedAlways || status == .authorizedWhenInUse
+    }
+
+    /// Check if we have "Always" authorization for background location updates.
+    var hasBackgroundAuthorization: Bool {
         locationManager.authorizationStatus == .authorizedAlways
     }
 
@@ -213,10 +224,19 @@ extension LiveLocationManager: CLLocationManagerDelegate {
 
         Task { @MainActor in
             debugLog("[LiveLocation] Authorization changed: \(status.rawValue)")
-            if status != .authorizedAlways && self.isSharing {
-                // Lost permission while sharing, stop
+
+            // Only stop sharing if permission is completely revoked
+            if (status == .denied || status == .restricted) && self.isSharing {
                 self.stopSharing()
                 self.lastError = "Location permission revoked"
+                return
+            }
+
+            // If upgraded to Always while sharing, enable background mode
+            if status == .authorizedAlways && self.isSharing {
+                self.locationManager.allowsBackgroundLocationUpdates = true
+                self.locationManager.showsBackgroundLocationIndicator = true
+                debugLog("[LiveLocation] ✅ Upgraded to 'Always' - background updates enabled")
             }
         }
     }

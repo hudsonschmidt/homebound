@@ -674,6 +674,13 @@ def test_delete_account_with_trips_and_events():
         # Create a trip
         from datetime import datetime, timedelta
         now = datetime.utcnow()
+
+        # Get a valid activity ID
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
         trip_result = connection.execute(
             sqlalchemy.text(
                 """
@@ -685,7 +692,7 @@ def test_delete_account_with_trips_and_events():
             {
                 "user_id": user_id,
                 "title": "Test Trip",
-                "activity": 1,  # ID for "Hiking"
+                "activity": activity_id,
                 "start": now,
                 "eta": now + timedelta(hours=2),
                 "grace_min": 30,
@@ -964,6 +971,12 @@ def test_delete_account_full_cascade():
         )
         contact_id = contact_result.fetchone()[0]
 
+        # Get a valid activity ID
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
         # Trip
         trip_result = connection.execute(
             sqlalchemy.text(
@@ -976,7 +989,7 @@ def test_delete_account_full_cascade():
             {
                 "user_id": user_id,
                 "title": "Full Test Trip",
-                "activity": 19,  # ID for "Other Activity"
+                "activity": activity_id,
                 "start": now,
                 "eta": now + timedelta(hours=3),
                 "grace_min": 30,
@@ -1261,17 +1274,25 @@ def test_export_user_data_with_trips():
         # Create trips
         from datetime import datetime, timedelta
         now = datetime.utcnow()
+
+        # Get a valid activity ID
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
         connection.execute(
             sqlalchemy.text(
                 """
                 INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text, gen_lat, gen_lon, contact1, contact2, contact3, status)
                 VALUES
-                    (:user_id, 'Morning Hike', 1, :start1, :eta1, 30, 'Mountain Trail', 37.7749, -122.4194, :contact_id, NULL, NULL, 'completed'),
-                    (:user_id, 'Evening Run', 3, :start2, :eta2, 15, 'Park Loop', 37.7849, -122.4094, :contact_id, NULL, NULL, 'active')
+                    (:user_id, 'Morning Hike', :activity_id, :start1, :eta1, 30, 'Mountain Trail', 37.7749, -122.4194, :contact_id, NULL, NULL, 'completed'),
+                    (:user_id, 'Evening Run', :activity_id, :start2, :eta2, 15, 'Park Loop', 37.7849, -122.4094, :contact_id, NULL, NULL, 'active')
                 """
             ),
             {
                 "user_id": user_id,
+                "activity_id": activity_id,
                 "start1": now - timedelta(days=1),
                 "eta1": now - timedelta(days=1) + timedelta(hours=2),
                 "start2": now,
@@ -1595,17 +1616,25 @@ def test_export_user_data_full():
         # Create trips with activity join
         from datetime import datetime, timedelta
         now = datetime.utcnow()
+
+        # Get a valid activity ID
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
         connection.execute(
             sqlalchemy.text(
                 """
                 INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text, gen_lat, gen_lon, contact1, contact2, contact3, status, notes)
                 VALUES
-                    (:user_id, 'Weekend Camping', 4, :start1, :eta1, 60, 'Yosemite National Park', 37.8651, -119.5383, :contact_id, NULL, NULL, 'completed', 'Bring extra water'),
-                    (:user_id, 'City Walk', 5, :start2, :eta2, 15, 'Downtown', 37.7749, -122.4194, :contact_id, NULL, NULL, 'active', NULL)
+                    (:user_id, 'Weekend Camping', :activity_id, :start1, :eta1, 60, 'Yosemite National Park', 37.8651, -119.5383, :contact_id, NULL, NULL, 'completed', 'Bring extra water'),
+                    (:user_id, 'City Walk', :activity_id, :start2, :eta2, 15, 'Downtown', 37.7749, -122.4194, :contact_id, NULL, NULL, 'active', NULL)
                 """
             ),
             {
                 "user_id": user_id,
+                "activity_id": activity_id,
                 "start1": now - timedelta(days=7),
                 "eta1": now - timedelta(days=5),
                 "start2": now,

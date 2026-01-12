@@ -1629,8 +1629,45 @@ struct PrivacyView: View {
     @State private var cachedTripsCount = 0
     @State private var cachedActivitiesCount = 0
 
+    // Live Location state
+    @State private var showLiveLocationPermissionAlert = false
+    @State private var isSavingLiveLocation = false
+
     var body: some View {
         List {
+            // Live Location Section (Master Toggle)
+            Section {
+                Toggle(isOn: Binding(
+                    get: { session.friendVisibilitySettings.friend_share_live_location },
+                    set: { newValue in
+                        if newValue {
+                            handleLiveLocationToggle(enable: true)
+                        } else {
+                            handleLiveLocationToggle(enable: false)
+                        }
+                    }
+                )) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "location.fill")
+                            .foregroundStyle(session.friendVisibilitySettings.friend_share_live_location ? .green : .secondary)
+                            .frame(width: 24)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Allow Live Location")
+                                .font(.body)
+                            Text(liveLocationStatusText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .disabled(isSavingLiveLocation || locationStatus == .denied || locationStatus == .restricted)
+            } header: {
+                Text("Live Location")
+            } footer: {
+                Text("When enabled, you can share your real-time location with friends during trips. Requires 'Always Allow' location permission for background updates.")
+            }
+
             // Location Section
             Section {
                 HStack {
@@ -1753,6 +1790,27 @@ struct PrivacyView: View {
         .sheet(isPresented: $showExportPaywall) {
             PaywallView(feature: .export)
         }
+        .alert("Location Permission Required", isPresented: $showLiveLocationPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Live location sharing requires location permission. Please enable it in Settings to share your location with friends during trips.")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // Re-check permission when app becomes active (after returning from Settings)
+            checkLocationStatus()
+            if session.friendVisibilitySettings.friend_share_live_location {
+                // Permission was granted while in Settings, keep enabled
+                if locationStatus == .denied || locationStatus == .restricted {
+                    // Permission revoked - disable the setting
+                    updateBackendLiveLocationSetting(false)
+                }
+            }
+        }
     }
 
     private var locationStatusColor: Color {
@@ -1819,6 +1877,65 @@ struct PrivacyView: View {
         } catch {
             debugLog("Failed to write export file: \(error)")
             return nil
+        }
+    }
+
+    // MARK: - Live Location
+
+    private var liveLocationStatusText: String {
+        if locationStatus == .denied || locationStatus == .restricted {
+            return "Location access denied in Settings"
+        }
+        if !session.friendVisibilitySettings.friend_share_live_location {
+            return "Disabled - your location won't be shared"
+        }
+        if locationStatus != .authorizedAlways {
+            return "Enabled - background updates need 'Always Allow'"
+        }
+        return "Enabled - ready to share during trips"
+    }
+
+    private func handleLiveLocationToggle(enable: Bool) {
+        if enable {
+            // Check Apple permission before enabling
+            let currentStatus = CLLocationManager().authorizationStatus
+
+            switch currentStatus {
+            case .notDetermined:
+                // Request permission first
+                LiveLocationManager.shared.requestPermissionIfNeeded()
+                showLiveLocationPermissionAlert = true
+            case .authorizedWhenInUse:
+                // Can enable, but recommend upgrade to Always
+                LiveLocationManager.shared.requestPermissionIfNeeded()
+                updateBackendLiveLocationSetting(true)
+            case .authorizedAlways:
+                // Perfect - enable immediately
+                updateBackendLiveLocationSetting(true)
+            case .denied, .restricted:
+                // Can't enable - show alert
+                showLiveLocationPermissionAlert = true
+            @unknown default:
+                break
+            }
+        } else {
+            // Disabling - just update backend
+            updateBackendLiveLocationSetting(false)
+        }
+    }
+
+    private func updateBackendLiveLocationSetting(_ enabled: Bool) {
+        isSavingLiveLocation = true
+        Task {
+            var settings = session.friendVisibilitySettings
+            settings.friend_share_live_location = enabled
+            let success = await session.saveFriendVisibilitySettings(settings)
+            await MainActor.run {
+                isSavingLiveLocation = false
+                if success {
+                    // Settings saved - session will update friendVisibilitySettings
+                }
+            }
         }
     }
 }
@@ -2129,7 +2246,6 @@ struct FriendVisibilitySettingsView: View {
     @State private var settings: FriendVisibilitySettings = .defaults
     @State private var isLoading = true
     @State private var isSaving = false
-    @State private var showLocationPermissionAlert = false
 
     var body: some View {
         List {
@@ -2139,19 +2255,14 @@ struct FriendVisibilitySettingsView: View {
                 }
                 .onChange(of: settings.friend_share_checkin_locations) { _, _ in saveSettings() }
 
-                Toggle(isOn: $settings.friend_share_live_location) {
-                    Label("Allow live location sharing", systemImage: "location.fill")
-                }
-                .onChange(of: settings.friend_share_live_location) { _, newValue in
-                    if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
-                        // Request permission upgrade - don't reset toggle yet
-                        LiveLocationManager.shared.requestPermissionIfNeeded()
-                        // Show alert explaining they may need to go to Settings
-                        showLocationPermissionAlert = true
-                        // Don't save yet - wait for permission check on app active
-                        return
+                // Live location is now controlled in Privacy settings
+                NavigationLink(destination: PrivacyView()) {
+                    HStack {
+                        Label("Live location sharing", systemImage: "location.fill")
+                        Spacer()
+                        Text(session.friendVisibilitySettings.friend_share_live_location ? "On" : "Off")
+                            .foregroundStyle(.secondary)
                     }
-                    saveSettings()
                 }
 
                 Toggle(isOn: $settings.friend_share_notes) {
@@ -2237,25 +2348,6 @@ struct FriendVisibilitySettingsView: View {
         .disabled(isSaving)
         .task {
             await loadSettings()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            // Re-check permission when app becomes active (after returning from Settings)
-            if settings.friend_share_live_location && !LiveLocationManager.shared.hasRequiredAuthorization {
-                settings.friend_share_live_location = false
-            } else if settings.friend_share_live_location {
-                // Permission was granted, now save the setting
-                saveSettings()
-            }
-        }
-        .alert("Location Permission Required", isPresented: $showLocationPermissionAlert) {
-            Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Live location sharing requires 'Always Allow' location permission so your friends can see your location even when the app is in the background. Please enable it in Settings.")
         }
     }
 

@@ -73,14 +73,15 @@ struct TripInvitationsView: View {
             }) { invitation in
                 JoinTripContactSelectionView(
                     invitation: invitation,
-                    onJoin: { contactIds, friendIds, checkinInterval, notifyStart, notifyEnd in
+                    onJoin: { contactIds, friendIds, checkinInterval, notifyStart, notifyEnd, shareLocation in
                         await acceptInvitation(
                             invitation,
                             withContactIds: contactIds,
                             friendIds: friendIds,
                             checkinInterval: checkinInterval,
                             notifyStart: notifyStart,
-                            notifyEnd: notifyEnd
+                            notifyEnd: notifyEnd,
+                            shareLocation: shareLocation
                         )
                     }
                 )
@@ -95,7 +96,8 @@ struct TripInvitationsView: View {
         friendIds: [Int],
         checkinInterval: Int,
         notifyStart: Int?,
-        notifyEnd: Int?
+        notifyEnd: Int?,
+        shareLocation: Bool
     ) async {
         processingTripId = invitation.trip_id
         let success = await session.acceptTripInvitation(
@@ -104,7 +106,8 @@ struct TripInvitationsView: View {
             safetyFriendIds: friendIds,
             checkinIntervalMin: checkinInterval,
             notifyStartHour: notifyStart,
-            notifyEndHour: notifyEnd
+            notifyEndHour: notifyEnd,
+            shareMyLocation: shareLocation
         )
         if success {
             // Refresh invitations list
@@ -259,7 +262,7 @@ struct JoinTripContactSelectionView: View {
     @Environment(\.dismiss) var dismiss
 
     let invitation: TripInvitation
-    let onJoin: ([Int], [Int], Int, Int?, Int?) async -> Void  // (contactIds, friendIds, interval, start, end)
+    let onJoin: ([Int], [Int], Int, Int?, Int?, Bool) async -> Void  // (contactIds, friendIds, interval, start, end, shareLocation)
 
     @State private var selectedContactIds: Set<Int> = []
     @State private var selectedFriendIds: Set<Int> = []
@@ -279,6 +282,10 @@ struct JoinTripContactSelectionView: View {
     @State private var newContactName: String = ""
     @State private var newContactEmail: String = ""
     @State private var isAddingContact: Bool = false
+
+    // Location sharing consent
+    @State private var shareMyLocation: Bool = false
+    @State private var showLocationPermissionAlert: Bool = false
 
     /// Total number of selected safety contacts (email + friends)
     private var totalSelectedCount: Int {
@@ -540,8 +547,81 @@ struct JoinTripContactSelectionView: View {
                                 Text("You'll receive check-in reminders at any time during the trip.")
                             }
                         }
+
+                        // Location sharing section (only if owner enabled group location sharing)
+                        if invitation.group_settings?.share_locations_between_participants == true {
+                            Section {
+                                if session.friendVisibilitySettings.friend_share_live_location {
+                                    // Master toggle is ON - show opt-in toggle
+                                    Toggle(isOn: $shareMyLocation) {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "location.fill")
+                                                .foregroundStyle(shareMyLocation ? Color.hbBrand : .secondary)
+
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Share My Location")
+                                                    .font(.subheadline)
+                                                Text("Let group members see where you are")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                                    .onChange(of: shareMyLocation) { _, newValue in
+                                        if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                            LiveLocationManager.shared.requestPermissionIfNeeded()
+                                            showLocationPermissionAlert = true
+                                        }
+                                    }
+                                    .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                                        // Re-check permission when app becomes active (user may have returned from Settings)
+                                        if shareMyLocation && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                            shareMyLocation = false
+                                        }
+                                    }
+                                } else {
+                                    // Master toggle is OFF - show disabled state with link to Privacy
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "location.slash.fill")
+                                            .foregroundStyle(.secondary)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Location Sharing")
+                                                .font(.subheadline)
+                                            Text("Enable in Settings > Privacy to share your location")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+
+                                        Spacer()
+
+                                        NavigationLink(destination: PrivacyView()) {
+                                            Text("Enable")
+                                                .font(.caption)
+                                                .foregroundStyle(Color.hbBrand)
+                                        }
+                                    }
+                                    .opacity(0.7)
+                                }
+                            } header: {
+                                Text("Location Sharing")
+                            } footer: {
+                                Text("The trip owner has enabled location sharing between participants. You can choose whether to share your location with the group.")
+                            }
+                        }
                     }
                     .listStyle(.insetGrouped)
+                    .alert("Location Permission Required", isPresented: $showLocationPermissionAlert) {
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("Live location sharing requires location permission. Please enable it in Settings.")
+                    }
                 }
 
                 // Join button
@@ -554,7 +634,8 @@ struct JoinTripContactSelectionView: View {
                                 Array(selectedFriendIds),
                                 checkinInterval,
                                 useQuietHours ? notifyStartHour : nil,
-                                useQuietHours ? notifyEndHour : nil
+                                useQuietHours ? notifyEndHour : nil,
+                                shareMyLocation
                             )
                             isJoining = false
                             dismiss()

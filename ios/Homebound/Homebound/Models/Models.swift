@@ -1202,6 +1202,7 @@ struct TripInvitation: Codable, Identifiable {
     let activity_name: String
     let activity_icon: String
     let participant_user_ids: [Int]?  // User IDs of all trip participants (to filter from friend contacts)
+    let group_settings: GroupSettings?  // Group trip settings to check location sharing preference
 
     var invitedAtDate: Date? {
         guard let invited_at else { return nil }
@@ -1232,4 +1233,6 @@ struct AcceptInvitationRequest: Codable {
     let checkin_interval_min: Int
     let notify_start_hour: Int?  // nil = no quiet hours
     let notify_end_hour: Int?    // nil = no quiet hours
+    // Location sharing consent - whether participant wants to share their location with the group
+    let share_my_location: Bool
 }

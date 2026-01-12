@@ -2813,56 +2813,75 @@ struct Step4AdditionalNotes: View {
                             }
                         }
 
-                        Toggle(isOn: $shareLiveLocation) {
+                        // Check if master toggle is enabled in Privacy settings
+                        if session.friendVisibilitySettings.friend_share_live_location {
+                            // Master toggle is ON - show the trip-level toggle
+                            Toggle(isOn: $shareLiveLocation) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "location.fill")
+                                        .foregroundStyle(shareLiveLocation ? Color.hbBrand : .secondary)
+                                        .frame(width: 24)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Share Live Location")
+                                            .font(.subheadline)
+                                        Text("Friends can see your location during this trip")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                            .padding()
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .cornerRadius(12)
+                            .onChange(of: shareLiveLocation) { _, newValue in
+                                if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                    // Request permission upgrade - don't reset toggle yet
+                                    LiveLocationManager.shared.requestPermissionIfNeeded()
+                                    // Show alert explaining they may need to go to Settings
+                                    showLocationPermissionAlert = true
+                                }
+                            }
+                            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                                // Re-check permission when app becomes active (after returning from Settings)
+                                if shareLiveLocation && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                    shareLiveLocation = false
+                                }
+                            }
+                        } else {
+                            // Master toggle is OFF - show disabled state with link to Privacy
                             HStack(spacing: 12) {
-                                Image(systemName: "location.fill")
-                                    .foregroundStyle(shareLiveLocation ? Color.hbBrand : .secondary)
+                                Image(systemName: "location.slash.fill")
+                                    .foregroundStyle(.secondary)
                                     .frame(width: 24)
 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Share Live Location")
+                                    Text("Live Location Sharing")
                                         .font(.subheadline)
-                                    Text("Friends can see your location during this trip")
+                                    Text("Enable in Settings > Privacy to share location")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
-                            }
-                        }
-                        .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
-                        .padding()
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .cornerRadius(12)
-                        .onChange(of: shareLiveLocation) { _, newValue in
-                            if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
-                                // Request permission upgrade - don't reset toggle yet
-                                LiveLocationManager.shared.requestPermissionIfNeeded()
-                                // Show alert explaining they may need to go to Settings
-                                showLocationPermissionAlert = true
-                            }
-                        }
-                        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                            // Re-check permission when app becomes active (after returning from Settings)
-                            if shareLiveLocation && !LiveLocationManager.shared.hasRequiredAuthorization {
-                                shareLiveLocation = false
-                            }
-                        }
 
-                        // Warning if global friend visibility setting is off
-                        if shareLiveLocation && !session.friendVisibilitySettings.friend_share_live_location {
-                            HStack(spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange)
-                                Text("Global sharing is off. Enable in Settings > Friends for friends to see your location.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                Spacer()
+
+                                NavigationLink(destination: PrivacyView()) {
+                                    Text("Enable")
+                                        .font(.caption)
+                                        .foregroundStyle(Color.hbBrand)
+                                }
                             }
-                            .padding(.top, 4)
+                            .padding()
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .cornerRadius(12)
+                            .opacity(0.7)
                         }
                     }
                     .alert("Live Location Sharing", isPresented: $showLiveLocationInfo) {
                         Button("OK", role: .cancel) { }
                     } message: {
-                        Text("When enabled, friends who are safety contacts can see your real-time location on a map during your trip. This requires 'Always' location permission and uses battery. You can enable this globally in Settings > Friend Visibility.")
+                        Text("When enabled, friends who are safety contacts can see your real-time location on a map during your trip. This requires 'Always' location permission and uses battery. Enable this in Settings > Privacy.")
                     }
                     .alert("Location Permission Required", isPresented: $showLocationPermissionAlert) {
                         Button("Open Settings") {
@@ -2872,7 +2891,7 @@ struct Step4AdditionalNotes: View {
                         }
                         Button("Cancel", role: .cancel) { }
                     } message: {
-                        Text("Live location sharing requires 'Always Allow' location permission so your friends can see your location even when the app is in the background. Please enable it in Settings.")
+                        Text("Live location sharing requires location permission. 'While Using' works when the app is open. For background updates, enable 'Always' in Settings.")
                     }
                 }
 
@@ -3360,36 +3379,67 @@ struct Step5FinalNotes: View {
                             }
                         }
 
-                        Toggle(isOn: $shareLiveLocation) {
+                        // Check if master toggle is enabled in Privacy settings
+                        if session.friendVisibilitySettings.friend_share_live_location {
+                            // Master toggle is ON - show the trip-level toggle
+                            Toggle(isOn: $shareLiveLocation) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "location.fill")
+                                        .foregroundStyle(shareLiveLocation ? Color.hbBrand : .secondary)
+                                        .frame(width: 24)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Share Live Location")
+                                            .font(.subheadline)
+                                        Text("Safety contacts can see your location during this trip")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
+                            .padding()
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .cornerRadius(12)
+                            .onChange(of: shareLiveLocation) { _, newValue in
+                                if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
+                                    LiveLocationManager.shared.requestPermissionIfNeeded()
+                                    showLocationPermissionAlert = true
+                                }
+                            }
+                        } else {
+                            // Master toggle is OFF - show disabled state with link to Privacy
                             HStack(spacing: 12) {
-                                Image(systemName: "location.fill")
-                                    .foregroundStyle(shareLiveLocation ? Color.hbBrand : .secondary)
+                                Image(systemName: "location.slash.fill")
+                                    .foregroundStyle(.secondary)
                                     .frame(width: 24)
 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Share Live Location")
+                                    Text("Live Location Sharing")
                                         .font(.subheadline)
-                                    Text("Safety contacts can see your location during this trip")
+                                    Text("Enable in Settings > Privacy to share location")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
+
+                                Spacer()
+
+                                NavigationLink(destination: PrivacyView()) {
+                                    Text("Enable")
+                                        .font(.caption)
+                                        .foregroundStyle(Color.hbBrand)
+                                }
                             }
-                        }
-                        .toggleStyle(SwitchToggleStyle(tint: Color.hbBrand))
-                        .padding()
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .cornerRadius(12)
-                        .onChange(of: shareLiveLocation) { _, newValue in
-                            if newValue && !LiveLocationManager.shared.hasRequiredAuthorization {
-                                LiveLocationManager.shared.requestPermissionIfNeeded()
-                                showLocationPermissionAlert = true
-                            }
+                            .padding()
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .cornerRadius(12)
+                            .opacity(0.7)
                         }
                     }
                     .alert("Live Location Sharing", isPresented: $showLiveLocationInfo) {
                         Button("OK", role: .cancel) { }
                     } message: {
-                        Text("When enabled, friends who are safety contacts can see your real-time location on a map during your trip.")
+                        Text("When enabled, friends who are safety contacts can see your real-time location on a map during your trip. Enable this in Settings > Privacy.")
                     }
                     .alert("Location Permission Required", isPresented: $showLocationPermissionAlert) {
                         Button("Open Settings") {
@@ -3399,7 +3449,7 @@ struct Step5FinalNotes: View {
                         }
                         Button("Cancel", role: .cancel) { }
                     } message: {
-                        Text("Live location sharing requires 'Always Allow' location permission. Please enable it in Settings.")
+                        Text("Live location sharing requires location permission. 'While Using' works when the app is open. For background updates, enable 'Always' in Settings.")
                     }
                 }
 

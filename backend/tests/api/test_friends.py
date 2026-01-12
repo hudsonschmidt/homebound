@@ -889,12 +889,18 @@ from src.api.friends import request_trip_update, get_friend_active_trips
 def _create_trip_for_user(connection, user_id: int, title: str = "Test Trip", status: str = "active") -> int:
     """Helper to create a trip for testing."""
     now = datetime.utcnow()
+    # Get a valid activity ID from the database
+    activity = connection.execute(
+        sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+    ).fetchone()
+    activity_id = activity[0] if activity else 1
+
     result = connection.execute(
         sqlalchemy.text(
             """
             INSERT INTO trips (user_id, title, activity, start, eta, grace_min, location_text,
                               gen_lat, gen_lon, status, created_at)
-            VALUES (:user_id, :title, 1, :start, :eta, 30, 'Test Location',
+            VALUES (:user_id, :title, :activity_id, :start, :eta, 30, 'Test Location',
                    37.7749, -122.4194, :status, :created_at)
             RETURNING id
             """
@@ -902,6 +908,7 @@ def _create_trip_for_user(connection, user_id: int, title: str = "Test Trip", st
         {
             "user_id": user_id,
             "title": title,
+            "activity_id": activity_id,
             "start": now,
             "eta": now + timedelta(hours=2),
             "status": status,

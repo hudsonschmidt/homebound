@@ -3504,16 +3504,18 @@ final class Session: ObservableObject {
         safetyFriendIds: [Int] = [],
         checkinIntervalMin: Int = 30,
         notifyStartHour: Int? = nil,
-        notifyEndHour: Int? = nil
+        notifyEndHour: Int? = nil,
+        shareMyLocation: Bool = false
     ) async -> Bool {
-        debugLog("[Session] 🔵 ACCEPT called for trip \(tripId) with contacts \(safetyContactIds), friends \(safetyFriendIds)")
+        debugLog("[Session] 🔵 ACCEPT called for trip \(tripId) with contacts \(safetyContactIds), friends \(safetyFriendIds), shareLocation=\(shareMyLocation)")
         do {
             let request = AcceptInvitationRequest(
                 safety_contact_ids: safetyContactIds,
                 safety_friend_ids: safetyFriendIds,
                 checkin_interval_min: checkinIntervalMin,
                 notify_start_hour: notifyStartHour,
-                notify_end_hour: notifyEndHour
+                notify_end_hour: notifyEndHour,
+                share_my_location: shareMyLocation
             )
             debugLog("[Session] 🔵 Sending POST to /accept endpoint for trip \(tripId)")
             let _: GenericResponse = try await withAuth { bearer in

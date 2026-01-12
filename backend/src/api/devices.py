@@ -192,8 +192,8 @@ def delete_device_by_token(token: str, user_id: int = Depends(auth.get_current_u
 
         # Delete device
         connection.execute(
-            sqlalchemy.text("DELETE FROM devices WHERE token = :token"),
-            {"token": token}
+            sqlalchemy.text("DELETE FROM devices WHERE token = :token AND user_id = :user_id"),
+            {"token": token, "user_id": user_id}
         )
 
         return {"ok": True, "message": "Device unregistered successfully"}

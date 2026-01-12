@@ -768,6 +768,12 @@ def test_e2e_cascade_delete_order():
         )
         contact_id = contact_result.fetchone()[0]
 
+        # Get a valid activity ID
+        activity = connection.execute(
+            sqlalchemy.text("SELECT id FROM activities LIMIT 1")
+        ).fetchone()
+        activity_id = activity[0] if activity else 1
+
         # 3. Create trip (references users)
         trip_result = connection.execute(
             sqlalchemy.text(
@@ -780,7 +786,7 @@ def test_e2e_cascade_delete_order():
             {
                 "user_id": user_id,
                 "title": "Test Trip",
-                "activity": 19,  # ID for "Other Activity"
+                "activity": activity_id,
                 "start": now,
                 "eta": now + timedelta(hours=2),
                 "grace_min": 30,

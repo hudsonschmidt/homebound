@@ -54,6 +54,8 @@ class AcceptInvitationRequest(BaseModel):
     checkin_interval_min: int = 30  # How often to send check-in reminders (minutes)
     notify_start_hour: int | None = None  # Quiet hours start (0-23), None = no quiet hours
     notify_end_hour: int | None = None  # Quiet hours end (0-23), None = no quiet hours
+    # Location sharing consent - whether participant wants to share their location with the group
+    share_my_location: bool = False
 
 
 class ParticipantResponse(BaseModel):
@@ -73,6 +75,8 @@ class ParticipantResponse(BaseModel):
     user_name: str | None = None
     user_email: str | None = None
     profile_photo_url: str | None = None
+    # Location sharing preference
+    share_location: bool = False
 
 
 class ParticipantListResponse(BaseModel):
@@ -424,7 +428,8 @@ def invite_participants(
                 last_lon=p.last_lon,
                 user_name=f"{p.first_name} {p.last_name}".strip() or None,
                 user_email=p.email,
-                profile_photo_url=p.profile_photo_url
+                profile_photo_url=p.profile_photo_url,
+                share_location=p.share_location if hasattr(p, 'share_location') else False
             )
             for p in participants
         ]
@@ -497,7 +502,8 @@ def get_participants(
                     last_lon=p.last_lon,
                     user_name=f"{p.first_name} {p.last_name}".strip() or None,
                     user_email=p.email,
-                    profile_photo_url=p.profile_photo_url
+                    profile_photo_url=p.profile_photo_url,
+                    share_location=p.share_location if hasattr(p, 'share_location') else False
                 )
                 for p in participants
             ],
@@ -561,7 +567,7 @@ def accept_invitation(
                 id1, id2 = min(user_id, friend_id), max(user_id, friend_id)
                 is_friend = connection.execute(
                     sqlalchemy.text(
-                        "SELECT 1 FROM friends WHERE user_id_1 = :id1 AND user_id_2 = :id2"
+                        "SELECT 1 FROM friendships WHERE user_id_1 = :id1 AND user_id_2 = :id2"
                     ),
                     {"id1": id1, "id2": id2}
                 ).fetchone()
@@ -602,7 +608,7 @@ def accept_invitation(
 
         # Accept the invitation and store personal notification settings
         now = datetime.now(UTC).isoformat()
-        log.info(f"[ACCEPT] Updating status to 'accepted' for trip {trip_id}, user {user_id}")
+        log.info(f"[ACCEPT] Updating status to 'accepted' for trip {trip_id}, user {user_id}, share_location={request.share_my_location}")
         connection.execute(
             sqlalchemy.text(
                 """
@@ -611,7 +617,8 @@ def accept_invitation(
                     joined_at = :now,
                     checkin_interval_min = :checkin_interval,
                     notify_start_hour = :notify_start,
-                    notify_end_hour = :notify_end
+                    notify_end_hour = :notify_end,
+                    share_location = :share_location
                 WHERE trip_id = :trip_id AND user_id = :user_id
                 """
             ),
@@ -621,7 +628,8 @@ def accept_invitation(
                 "now": now,
                 "checkin_interval": request.checkin_interval_min,
                 "notify_start": request.notify_start_hour,
-                "notify_end": request.notify_end_hour
+                "notify_end": request.notify_end_hour,
+                "share_location": request.share_my_location
             }
         )
         log.info(f"[ACCEPT] Status updated successfully for trip {trip_id}, user {user_id}")
@@ -1083,11 +1091,12 @@ def get_participant_locations(
             ]
 
         # Get all accepted participants with their locations
+        # Include share_location field to respect participant privacy preferences
         participants = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT p.user_id, p.last_checkin_at, p.last_lat, p.last_lon,
-                       u.first_name, u.last_name
+                       p.share_location, u.first_name, u.last_name
                 FROM trip_participants p
                 JOIN users u ON p.user_id = u.id
                 WHERE p.trip_id = :trip_id AND p.status = 'accepted'
@@ -1096,15 +1105,16 @@ def get_participant_locations(
             {"trip_id": trip_id}
         ).fetchall()
 
-        # Also get live locations if available
+        # Also get live locations if available (only for participants who share location)
         live_locations = {}
         live_rows = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT DISTINCT ON (user_id) user_id, latitude, longitude, timestamp
-                FROM live_locations
-                WHERE trip_id = :trip_id
-                ORDER BY user_id, timestamp DESC
+                SELECT DISTINCT ON (ll.user_id) ll.user_id, ll.latitude, ll.longitude, ll.timestamp
+                FROM live_locations ll
+                JOIN trip_participants tp ON ll.trip_id = tp.trip_id AND ll.user_id = tp.user_id
+                WHERE ll.trip_id = :trip_id AND tp.share_location = true
+                ORDER BY ll.user_id, ll.timestamp DESC
                 """
             ),
             {"trip_id": trip_id}
@@ -1117,19 +1127,43 @@ def get_participant_locations(
                 "timestamp": _to_iso8601(row.timestamp)
             }
 
-        return [
-            ParticipantLocationResponse(
-                user_id=p.user_id,
-                user_name=f"{p.first_name} {p.last_name}".strip() or None,
-                last_checkin_at=_to_iso8601(p.last_checkin_at),
-                last_lat=p.last_lat,
-                last_lon=p.last_lon,
-                live_lat=live_locations.get(p.user_id, {}).get("lat"),
-                live_lon=live_locations.get(p.user_id, {}).get("lon"),
-                live_timestamp=live_locations.get(p.user_id, {}).get("timestamp")
+        # Build response, respecting share_location preference
+        # Users always see their own location, owner sees all, others see only those who opted in
+        is_owner = trip.user_id == user_id
+        result = []
+        for p in participants:
+            # Determine if location should be visible
+            show_location = (
+                p.user_id == user_id or  # Always show own location
+                is_owner or               # Owner sees all locations
+                p.share_location          # Participant opted in to share
             )
-            for p in participants
-        ]
+
+            if show_location:
+                result.append(ParticipantLocationResponse(
+                    user_id=p.user_id,
+                    user_name=f"{p.first_name} {p.last_name}".strip() or None,
+                    last_checkin_at=_to_iso8601(p.last_checkin_at),
+                    last_lat=p.last_lat,
+                    last_lon=p.last_lon,
+                    live_lat=live_locations.get(p.user_id, {}).get("lat"),
+                    live_lon=live_locations.get(p.user_id, {}).get("lon"),
+                    live_timestamp=live_locations.get(p.user_id, {}).get("timestamp")
+                ))
+            else:
+                # Include participant but without location data
+                result.append(ParticipantLocationResponse(
+                    user_id=p.user_id,
+                    user_name=f"{p.first_name} {p.last_name}".strip() or None,
+                    last_checkin_at=None,
+                    last_lat=None,
+                    last_lon=None,
+                    live_lat=None,
+                    live_lon=None,
+                    live_timestamp=None
+                ))
+
+        return result
 
 
 @router.post("/{trip_id}/checkin", response_model=CheckinResponse)
@@ -1823,16 +1857,18 @@ def remove_vote(
     Allows a participant to change their mind about ending the trip.
     """
     with db.engine.begin() as connection:
-        # Verify trip exists and user is participant
+        # Verify trip exists and user is owner or participant
         trip = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, user_id, status, title, group_settings, is_group_trip
-                FROM trips
-                WHERE id = :trip_id
+                SELECT t.id, t.user_id, t.status, t.title, t.group_settings, t.is_group_trip
+                FROM trips t
+                LEFT JOIN trip_participants tp ON tp.trip_id = t.id AND tp.user_id = :user_id
+                WHERE t.id = :trip_id
+                  AND (t.user_id = :user_id OR tp.user_id IS NOT NULL)
                 """
             ),
-            {"trip_id": trip_id}
+            {"trip_id": trip_id, "user_id": user_id}
         ).fetchone()
 
         if not trip:
@@ -1951,6 +1987,7 @@ def get_pending_invitations(
                 """
                 SELECT p.id, p.trip_id, p.invited_at, p.invited_by,
                        t.title as trip_title, t.start, t.eta, t.location_text,
+                       t.group_settings,
                        a.name as activity_name, a.icon as activity_icon,
                        u.first_name as inviter_first_name, u.last_name as inviter_last_name
                 FROM trip_participants p
@@ -1979,6 +2016,14 @@ def get_pending_invitations(
             ).fetchall()
             participant_user_ids = [p.user_id for p in participants]
 
+            # Parse group_settings JSON
+            group_settings = None
+            if inv.group_settings:
+                try:
+                    group_settings = json.loads(inv.group_settings) if isinstance(inv.group_settings, str) else inv.group_settings
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
             result.append({
                 "id": inv.id,
                 "trip_id": inv.trip_id,
@@ -1991,7 +2036,8 @@ def get_pending_invitations(
                 "trip_location": inv.location_text,
                 "activity_name": inv.activity_name,
                 "activity_icon": inv.activity_icon,
-                "participant_user_ids": participant_user_ids
+                "participant_user_ids": participant_user_ids,
+                "group_settings": group_settings
             })
 
         return result
