@@ -9,6 +9,17 @@ from pydantic import BaseModel
 from src import database as db
 from src.api import auth
 
+
+def _safe_float(value) -> float | None:
+    """Safely convert a value to float, returning None if conversion fails."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
 router = APIRouter(
     prefix="/api/v1/profile",
     tags=["profile"],
@@ -269,8 +280,8 @@ def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
                     "eta_at": str(t.eta) if t.eta else None,
                     "grace_minutes": t.grace_min,
                     "location_text": t.location_text,
-                    "location_lat": float(t.gen_lat) if t.gen_lat else None,
-                    "location_lng": float(t.gen_lon) if t.gen_lon else None,
+                    "location_lat": _safe_float(t.gen_lat),
+                    "location_lng": _safe_float(t.gen_lon),
                     "notes": t.notes,
                     "status": t.status,
                     "completed_at": str(t.completed_at) if hasattr(t, 'completed_at') and t.completed_at else None,

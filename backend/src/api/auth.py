@@ -30,14 +30,22 @@ async def get_current_user_id(request: Request) -> int:
             detail="Missing bearer token"
         )
 
-    token = auth.split(" ", 1)[1].strip()
+    # Split and validate token exists after "Bearer "
+    parts = auth.split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        logger.debug("Bearer header present but token missing")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token"
+        )
+    token = parts[1].strip()
 
     try:
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM],
-            options={"verify_iat": False}  # Disable iat validation to avoid clock skew issues
+            options={"leeway": 30}  # Allow 30 seconds clock skew tolerance
         )
 
         # Verify it's an access token
@@ -89,14 +97,18 @@ async def get_optional_user_id(request: Request) -> int | None:
     if not auth or not auth.lower().startswith("bearer "):
         return None
 
-    token = auth.split(" ", 1)[1].strip()
+    # Split and validate token exists after "Bearer "
+    parts = auth.split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        return None
+    token = parts[1].strip()
 
     try:
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM],
-            options={"verify_iat": False}
+            options={"leeway": 30}  # Allow 30 seconds clock skew tolerance
         )
 
         # Verify it's an access token

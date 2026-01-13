@@ -176,8 +176,9 @@ final class RealtimeManager: ObservableObject {
         guard success else { return }
 
         // Handle new friendships
-        Task {
+        Task { [weak self] in
             for await insert in inserts {
+                guard self != nil else { break }  // Exit if manager deallocated
                 // Check if this friendship involves the current user
                 // record is [String: AnyJSON], extract values
                 let record = insert.record
@@ -191,8 +192,9 @@ final class RealtimeManager: ObservableObject {
         }
 
         // Handle removed friendships
-        Task {
+        Task { [weak self] in
             for await delete in deletes {
+                guard self != nil else { break }  // Exit if manager deallocated
                 // On delete, oldRecord contains the deleted data
                 let oldRecord = delete.oldRecord
                 if let userId1 = oldRecord["user_id_1"]?.intValue,
@@ -230,8 +232,9 @@ final class RealtimeManager: ObservableObject {
         guard success else { return }
 
         // Handle trip updates
-        Task {
+        Task { [weak self] in
             for await update in updates {
+                guard self != nil else { break }  // Exit if manager deallocated
                 // Refresh trip data - Session will filter to relevant trips
                 let record = update.record
                 let tripId = record["trip_id"]?.intValue ?? record["id"]?.intValue
@@ -253,8 +256,9 @@ final class RealtimeManager: ObservableObject {
         }
 
         // Handle new trips
-        Task {
+        Task { [weak self] in
             for await _ in inserts {
+                guard self != nil else { break }  // Exit if manager deallocated
                 debugLog("[Realtime] New trip detected")
                 _ = await Session.shared.loadFriendActiveTrips()
             }
@@ -286,8 +290,9 @@ final class RealtimeManager: ObservableObject {
         guard success else { return }
 
         // Handle new invitations
-        Task {
+        Task { [weak self] in
             for await insert in inserts {
+                guard self != nil else { break }  // Exit if manager deallocated
                 // Check if this invitation is for the current user
                 let record = insert.record
                 if let invitedUserId = record["user_id"]?.intValue,
@@ -299,8 +304,9 @@ final class RealtimeManager: ObservableObject {
         }
 
         // Handle invitation status updates
-        Task {
+        Task { [weak self] in
             for await _ in updates {
+                guard self != nil else { break }  // Exit if manager deallocated
                 // Refresh participant data - someone accepted/declined
                 debugLog("[Realtime] Participant status changed")
                 // Bug 3 fix: Check protection window before refreshing active plan
@@ -328,8 +334,9 @@ final class RealtimeManager: ObservableObject {
         guard success else { return }
 
         // Handle new events
-        Task {
+        Task { [weak self] in
             for await insert in inserts {
+                guard self != nil else { break }  // Exit if manager deallocated
                 // Someone checked in or performed an action
                 let record = insert.record
                 let eventType = record["what"]?.stringValue ?? "unknown"
@@ -373,8 +380,9 @@ final class RealtimeManager: ObservableObject {
         guard success else { return }
 
         // Handle new votes
-        Task {
+        Task { [weak self] in
             for await insert in inserts {
+                guard self != nil else { break }  // Exit if manager deallocated
                 let record = insert.record
                 let tripId = record["trip_id"]?.intValue
                 debugLog("[Realtime] Vote cast detected: tripId=\(String(describing: tripId))")
@@ -388,8 +396,9 @@ final class RealtimeManager: ObservableObject {
         }
 
         // Handle vote deletions (vote removed or trip completed)
-        Task {
+        Task { [weak self] in
             for await delete in deletes {
+                guard self != nil else { break }  // Exit if manager deallocated
                 let oldRecord = delete.oldRecord
                 let tripId = oldRecord["trip_id"]?.intValue
                 debugLog("[Realtime] Vote deleted: tripId=\(String(describing: tripId))")
@@ -422,8 +431,9 @@ final class RealtimeManager: ObservableObject {
         guard success else { return }
 
         // Handle user updates
-        Task {
+        Task { [weak self] in
             for await update in updates {
+                guard self != nil else { break }  // Exit if manager deallocated
                 let oldRecord = update.oldRecord
                 let newRecord = update.record
 

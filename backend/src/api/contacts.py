@@ -93,7 +93,11 @@ def create_contact(body: ContactCreate, user_id: int = Depends(auth.get_current_
             }
         )
         row = result.fetchone()
-        assert row is not None
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create contact"
+            )
         contact_id = row[0]
 
         # Fetch created contact
@@ -107,7 +111,11 @@ def create_contact(body: ContactCreate, user_id: int = Depends(auth.get_current_
             ),
             {"contact_id": contact_id}
         ).fetchone()
-        assert contact is not None
+        if contact is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve created contact"
+            )
 
         return Contact(**dict(contact._mapping))
 
@@ -138,9 +146,9 @@ def update_contact(
                 detail="Contact not found"
             )
 
-        # Build update query
+        # Build update query with ownership check to prevent race conditions
         updates: list[str] = []
-        params: dict[str, int | str] = {"contact_id": contact_id}
+        params: dict[str, int | str] = {"contact_id": contact_id, "user_id": user_id}
 
         if body.name is not None:
             updates.append("name = :name")
@@ -152,22 +160,26 @@ def update_contact(
 
         if updates:
             connection.execute(
-                sqlalchemy.text(f"UPDATE contacts SET {', '.join(updates)} WHERE id = :contact_id"),
+                sqlalchemy.text(f"UPDATE contacts SET {', '.join(updates)} WHERE id = :contact_id AND user_id = :user_id"),
                 params
             )
 
-        # Fetch updated contact
+        # Fetch updated contact with ownership verification
         contact = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT id, user_id, name, email
                 FROM contacts
-                WHERE id = :contact_id
+                WHERE id = :contact_id AND user_id = :user_id
                 """
             ),
-            {"contact_id": contact_id}
+            {"contact_id": contact_id, "user_id": user_id}
         ).fetchone()
-        assert contact is not None
+        if contact is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve updated contact"
+            )
 
         return Contact(**dict(contact._mapping))
 
@@ -194,39 +206,42 @@ def delete_contact(contact_id: int, user_id: int = Depends(auth.get_current_user
                 detail="Contact not found"
             )
 
-        # Check if contact is being used by any active or planned trips
+        # Check if contact is being used by any active or planned trips owned by this user
         trips_using_contact = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT id, title
+                SELECT id
                 FROM trips
-                WHERE (contact1 = :contact_id OR contact2 = :contact_id OR contact3 = :contact_id)
+                WHERE user_id = :user_id
+                AND (contact1 = :contact_id OR contact2 = :contact_id OR contact3 = :contact_id)
                 AND status IN ('planned', 'active')
                 LIMIT 1
                 """
             ),
-            {"contact_id": contact_id}
+            {"contact_id": contact_id, "user_id": user_id}
         ).fetchone()
 
         if trips_using_contact:
-            trip_title = trips_using_contact.title
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot delete contact. Used by trip: {trip_title}"
+                detail="Cannot delete contact while it is assigned to an active or planned trip"
             )
 
-        # Replace contact references in completed trips with the DELETED placeholder (id=1)
-        # contact1 is NOT NULL, so we replace with DELETED placeholder
+        # Replace contact1 references in completed trips owned by this user.
+        # contact1 has a NOT NULL + FK constraint, so we must replace with a valid contact.
+        # Using ID 1 as a system-level "DELETED" placeholder contact.
+        # TODO: Consider migrating to make contact1 nullable, or creating per-user deleted placeholders.
         connection.execute(
             sqlalchemy.text(
                 """
                 UPDATE trips
                 SET contact1 = 1
-                WHERE contact1 = :contact_id
+                WHERE user_id = :user_id
+                AND contact1 = :contact_id
                 AND status = 'completed'
                 """
             ),
-            {"contact_id": contact_id}
+            {"contact_id": contact_id, "user_id": user_id}
         )
 
         # contact2 and contact3 are nullable, so we set them to NULL
@@ -235,11 +250,12 @@ def delete_contact(contact_id: int, user_id: int = Depends(auth.get_current_user
                 """
                 UPDATE trips
                 SET contact2 = NULL
-                WHERE contact2 = :contact_id
+                WHERE user_id = :user_id
+                AND contact2 = :contact_id
                 AND status = 'completed'
                 """
             ),
-            {"contact_id": contact_id}
+            {"contact_id": contact_id, "user_id": user_id}
         )
 
         connection.execute(
@@ -247,11 +263,12 @@ def delete_contact(contact_id: int, user_id: int = Depends(auth.get_current_user
                 """
                 UPDATE trips
                 SET contact3 = NULL
-                WHERE contact3 = :contact_id
+                WHERE user_id = :user_id
+                AND contact3 = :contact_id
                 AND status = 'completed'
                 """
             ),
-            {"contact_id": contact_id}
+            {"contact_id": contact_id, "user_id": user_id}
         )
 
         # Delete contact

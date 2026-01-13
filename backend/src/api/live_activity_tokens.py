@@ -102,7 +102,11 @@ def register_live_activity_token(
             }
         )
         row = result.fetchone()
-        assert row is not None
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to register live activity token"
+            )
 
         log.info(
             f"[LiveActivity] Token registered: trip_id={row.trip_id}, user_id={user_id}, "
@@ -181,42 +185,3 @@ def get_live_activity_token(
         )
 
 
-@router.get("/debug/{trip_id}")
-def debug_token_status(trip_id: int):
-    """Debug endpoint to check token status for a trip (no auth required for debugging)."""
-    with db.engine.connect() as conn:
-        # Get token for this trip
-        token_row = conn.execute(
-            sqlalchemy.text("""
-                SELECT id, trip_id, user_id, token, bundle_id, env, created_at, updated_at
-                FROM live_activity_tokens
-                WHERE trip_id = :trip_id
-            """),
-            {"trip_id": trip_id}
-        ).fetchone()
-
-        # Get count of all tokens
-        total_count = conn.execute(
-            sqlalchemy.text("SELECT COUNT(*) as cnt FROM live_activity_tokens")
-        ).fetchone()
-
-        if not token_row:
-            return {
-                "found": False,
-                "trip_id": trip_id,
-                "message": f"No token found for trip {trip_id}",
-                "total_tokens_in_db": total_count.cnt if total_count else 0
-            }
-
-        return {
-            "found": True,
-            "id": token_row.id,
-            "trip_id": token_row.trip_id,
-            "user_id": token_row.user_id,
-            "env": token_row.env,
-            "bundle_id": token_row.bundle_id,
-            "token_prefix": token_row.token[:20] + "...",
-            "created_at": str(token_row.created_at),
-            "updated_at": str(token_row.updated_at),
-            "total_tokens_in_db": total_count.cnt if total_count else 0
-        }

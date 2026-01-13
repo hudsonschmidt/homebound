@@ -47,17 +47,24 @@ final class LiveActivityManager: ObservableObject {
     /// Thread-safe lock: prevent concurrent start/update operations that cause flicker
     private let operationLock = NSLock()
     private var _isOperationInProgress = false
-    private var isOperationInProgress: Bool {
-        get {
-            operationLock.lock()
-            defer { operationLock.unlock() }
-            return _isOperationInProgress
+
+    /// Atomically try to acquire the operation lock
+    /// Returns true if lock was acquired, false if operation already in progress
+    private func tryAcquireOperation() -> Bool {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+        if _isOperationInProgress {
+            return false
         }
-        set {
-            operationLock.lock()
-            defer { operationLock.unlock() }
-            _isOperationInProgress = newValue
-        }
+        _isOperationInProgress = true
+        return true
+    }
+
+    /// Release the operation lock
+    private func releaseOperation() {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+        _isOperationInProgress = false
     }
 
     // MARK: - Initialization
@@ -138,13 +145,12 @@ final class LiveActivityManager: ObservableObject {
     /// - Returns: True if activity was started successfully
     @discardableResult
     func startActivity(for trip: Trip, checkinCount: Int? = nil) async -> Bool {
-        // Mutex: prevent concurrent operations that cause flicker
-        guard !isOperationInProgress else {
+        // Mutex: atomically check and acquire lock to prevent concurrent operations
+        guard tryAcquireOperation() else {
             debugLog("[LiveActivity] Operation already in progress, skipping start for trip #\(trip.id)")
             return false
         }
-        isOperationInProgress = true
-        defer { isOperationInProgress = false }
+        defer { releaseOperation() }
 
         guard #available(iOS 16.1, *) else {
             debugLog("[LiveActivity] iOS 16.1+ required")

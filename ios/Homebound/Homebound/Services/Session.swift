@@ -255,6 +255,8 @@ final class Session: ObservableObject {
     private var isExtensionInProgress: Bool = false
     /// The expected new ETA during extension (for validation/logging)
     private var extensionNewETA: Date? = nil
+    /// Task to release the extension lock (tracked to prevent orphaned tasks)
+    private var extensionLockReleaseTask: Task<Void, Never>?
 
     // Saved trip templates (local-only)
     @Published var savedTemplates: [SavedTripTemplate] = []
@@ -625,6 +627,26 @@ final class Session: ObservableObject {
                 await MainActor.run {
                     self.deviceRegistrationRetryCount = 0
                     self.deviceRegistrationTask = nil
+                }
+            } catch API.APIError.unauthorized {
+                // Token expired - try to refresh and retry
+                debugLog("[APNs] ⚠️ Got 401 - attempting token refresh...")
+                guard !Task.isCancelled else {
+                    debugLog("[APNs] Registration task cancelled during auth retry")
+                    return
+                }
+
+                let refreshed = await self.refreshAccessToken()
+                if refreshed, let newBearer = await MainActor.run(body: { self.accessToken }) {
+                    debugLog("[APNs] ✅ Token refreshed - retrying device registration")
+                    await MainActor.run {
+                        self.registerDeviceWithRetry(token: token, bearer: newBearer)
+                    }
+                } else {
+                    debugLog("[APNs] ❌ Token refresh failed - cannot register device")
+                    await MainActor.run {
+                        self.deviceRegistrationTask = nil
+                    }
                 }
             } catch {
                 // Check for cancellation before retrying
@@ -2334,16 +2356,18 @@ final class Session: ObservableObject {
             debugLog("[Session] 🔒 Extension lock acquired - blocking all activeTrip updates")
         }
 
-        // Helper to release the lock after a delay
+        // Helper to release the lock after a delay (tracked to prevent orphaned tasks)
         func releaseExtensionLock() {
-            Task {
+            // Cancel any existing release task
+            extensionLockReleaseTask?.cancel()
+            extensionLockReleaseTask = Task { @MainActor in
                 // Wait 2 seconds to let UI settle and any pending Realtime events clear
                 try? await Task.sleep(for: .seconds(2))
-                await MainActor.run {
-                    self.isExtensionInProgress = false
-                    self.extensionNewETA = nil
-                    debugLog("[Session] 🔓 Extension lock released")
-                }
+                guard !Task.isCancelled else { return }
+                self.isExtensionInProgress = false
+                self.extensionNewETA = nil
+                self.extensionLockReleaseTask = nil
+                debugLog("[Session] 🔓 Extension lock released")
             }
         }
 

@@ -78,7 +78,11 @@ def checkin_with_token(
             {"user_id": trip.user_id, "trip_id": trip.id, "timestamp": now.isoformat(), "lat": lat, "lon": lon}
         )
         row = result.fetchone()
-        assert row is not None
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create check-in event"
+            )
         event_id = row[0]
         log.info(f"[Checkin] Created event id={event_id} with lat={lat}, lon={lon}")
 

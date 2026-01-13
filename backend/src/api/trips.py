@@ -8,7 +8,7 @@ from typing import Optional
 
 import sqlalchemy
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from src import database as db
 from src.api import auth
@@ -323,9 +323,17 @@ def to_iso8601_required(dt: datetime | str | None) -> str:
 class GroupSettings(BaseModel):
     """Settings for group trip behavior, configurable by trip owner."""
     checkout_mode: str = "anyone"  # "anyone" | "vote" | "owner_only"
-    vote_threshold: float = 0.5  # For vote mode: percentage needed (0.0-1.0)
+    vote_threshold: float = Field(default=0.5, ge=0.0, le=1.0)  # For vote mode: percentage needed (0.0-1.0)
     allow_participant_invites: bool = False  # Can participants invite others?
     share_locations_between_participants: bool = True  # Can participants see each other's locations?
+
+    @field_validator("checkout_mode")
+    @classmethod
+    def validate_checkout_mode(cls, v: str) -> str:
+        valid_modes = {"anyone", "vote", "owner_only"}
+        if v not in valid_modes:
+            raise ValueError(f"checkout_mode must be one of: {valid_modes}")
+        return v
 
 
 def parse_group_settings(settings_json) -> GroupSettings | None:
@@ -353,13 +361,13 @@ class TripCreate(BaseModel):
     activity: str  # Activity name reference
     start: datetime
     eta: datetime
-    grace_min: int
+    grace_min: int = Field(gt=0, le=1440)  # 1 minute to 24 hours
     location_text: str | None = None
-    gen_lat: float | None = None
-    gen_lon: float | None = None
+    gen_lat: float | None = Field(default=None, ge=-90, le=90)
+    gen_lon: float | None = Field(default=None, ge=-180, le=180)
     start_location_text: str | None = None  # Optional start location for trips with separate start/end
-    start_lat: float | None = None
-    start_lon: float | None = None
+    start_lat: float | None = Field(default=None, ge=-90, le=90)
+    start_lon: float | None = Field(default=None, ge=-180, le=180)
     has_separate_locations: bool = False  # True if trip has separate start and destination
     notes: str | None = None
     contact1: int | None = None  # Contact ID reference (email contact)
@@ -371,9 +379,9 @@ class TripCreate(BaseModel):
     timezone: str | None = None  # User's timezone (e.g., "America/New_York") - used for notifications
     start_timezone: str | None = None  # Timezone for start time (e.g., "America/Los_Angeles")
     eta_timezone: str | None = None  # Timezone for return time (e.g., "America/New_York")
-    checkin_interval_min: int = 30  # Minutes between check-in reminders
-    notify_start_hour: int | None = None  # Hour (0-23) when notifications start
-    notify_end_hour: int | None = None  # Hour (0-23) when notifications end
+    checkin_interval_min: int = Field(default=30, gt=0, le=1440)  # Minutes between check-in reminders
+    notify_start_hour: int | None = Field(default=None, ge=0, le=23)  # Hour (0-23) when notifications start
+    notify_end_hour: int | None = Field(default=None, ge=0, le=23)  # Hour (0-23) when notifications end
     notify_self: bool = False  # Send copy of all emails to trip owner
     share_live_location: bool = False  # Share live location with friends during trip
     # Group trip fields
@@ -384,6 +392,38 @@ class TripCreate(BaseModel):
     custom_start_message: str | None = None  # Custom message for trip start notification
     custom_overdue_message: str | None = None  # Custom message for overdue notification
 
+    @field_validator("eta")
+    @classmethod
+    def validate_eta_after_start(cls, v: datetime, info) -> datetime:
+        """Ensure ETA is after start time"""
+        start = info.data.get("start")
+        if start and v <= start:
+            raise ValueError("ETA must be after start time")
+        return v
+
+    @field_validator("contact2")
+    @classmethod
+    def validate_contact2_unique(cls, v: int | None, info) -> int | None:
+        """Ensure contact2 is different from contact1"""
+        if v is not None:
+            contact1 = info.data.get("contact1")
+            if contact1 is not None and v == contact1:
+                raise ValueError("contact2 must be different from contact1")
+        return v
+
+    @field_validator("contact3")
+    @classmethod
+    def validate_contact3_unique(cls, v: int | None, info) -> int | None:
+        """Ensure contact3 is different from contact1 and contact2"""
+        if v is not None:
+            contact1 = info.data.get("contact1")
+            contact2 = info.data.get("contact2")
+            if contact1 is not None and v == contact1:
+                raise ValueError("contact3 must be different from contact1")
+            if contact2 is not None and v == contact2:
+                raise ValueError("contact3 must be different from contact2")
+        return v
+
 
 class TripUpdate(BaseModel):
     """Model for updating an existing trip. All fields are optional."""
@@ -391,13 +431,13 @@ class TripUpdate(BaseModel):
     activity: str | None = None  # Activity name reference
     start: datetime | None = None
     eta: datetime | None = None
-    grace_min: int | None = None
+    grace_min: int | None = Field(default=None, gt=0, le=1440)
     location_text: str | None = None
-    gen_lat: float | None = None
-    gen_lon: float | None = None
+    gen_lat: float | None = Field(default=None, ge=-90, le=90)
+    gen_lon: float | None = Field(default=None, ge=-180, le=180)
     start_location_text: str | None = None
-    start_lat: float | None = None
-    start_lon: float | None = None
+    start_lat: float | None = Field(default=None, ge=-90, le=90)
+    start_lon: float | None = Field(default=None, ge=-180, le=180)
     has_separate_locations: bool | None = None
     notes: str | None = None
     contact1: int | None = None  # Contact ID reference (email contact)
@@ -409,9 +449,9 @@ class TripUpdate(BaseModel):
     timezone: str | None = None
     start_timezone: str | None = None
     eta_timezone: str | None = None
-    checkin_interval_min: int | None = None
-    notify_start_hour: int | None = None
-    notify_end_hour: int | None = None
+    checkin_interval_min: int | None = Field(default=None, gt=0, le=1440)
+    notify_start_hour: int | None = Field(default=None, ge=0, le=23)
+    notify_end_hour: int | None = Field(default=None, ge=0, le=23)
     notify_self: bool | None = None  # Send copy of all emails to trip owner
     share_live_location: bool | None = None  # Share live location with friends during trip
     # Custom messages (Premium feature)
@@ -641,9 +681,8 @@ def create_trip(
                 body.gen_lon is not None and
                 (body.gen_lat != 0.0 or body.gen_lon != 0.0)
             )
-            if has_valid_coords:
+            if has_valid_coords and body.gen_lat is not None and body.gen_lon is not None:
                 log.info(f"[Trips] Reverse geocoding at ({body.gen_lat}, {body.gen_lon})")
-                assert body.gen_lat is not None and body.gen_lon is not None
                 geocoded = reverse_geocode_sync(body.gen_lat, body.gen_lon)
                 if geocoded:
                     location_text = geocoded
@@ -662,9 +701,8 @@ def create_trip(
                 body.start_lon is not None and
                 (body.start_lat != 0.0 or body.start_lon != 0.0)
             )
-            if has_valid_start_coords:
+            if has_valid_start_coords and body.start_lat is not None and body.start_lon is not None:
                 log.info(f"[Trips] Reverse geocoding start at ({body.start_lat}, {body.start_lon})")
-                assert body.start_lat is not None and body.start_lon is not None
                 geocoded_start = reverse_geocode_sync(body.start_lat, body.start_lon)
                 if geocoded_start:
                     start_location_text = geocoded_start
@@ -749,7 +787,11 @@ def create_trip(
             }
         )
         row = result.fetchone()
-        assert row is not None
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create trip"
+            )
         trip_id = row[0]
 
         # If group trip, add owner and invited participants
@@ -818,7 +860,11 @@ def create_trip(
             ),
             {"trip_id": trip_id}
         ).mappings().fetchone()
-        assert trip is not None
+        if trip is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve created trip"
+            )
 
         # Construct Activity object from trip data
         activity_obj = Activity(
@@ -1521,7 +1567,11 @@ def update_trip(
             ),
             {"trip_id": trip_id}
         ).mappings().fetchone()
-        assert updated_trip is not None
+        if updated_trip is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve updated trip"
+            )
 
         # Construct Activity object
         activity_obj = Activity(
@@ -1958,7 +2008,11 @@ def extend_trip(
             }
         )
         row = result.fetchone()
-        assert row is not None
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create check-in event"
+            )
         checkin_event_id = row[0]
 
         # Update trip ETA and reset status to active (user is checking in)

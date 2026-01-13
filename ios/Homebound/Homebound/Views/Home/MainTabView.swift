@@ -220,7 +220,7 @@ struct NewHomeView: View {
                         // Header with greeting and settings
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("\(greeting)\(firstName != nil ? ", \(firstName!)" : "")")
+                                Text("\(greeting)\(firstName.map { ", \($0)" } ?? "")")
                                     .font(.largeTitle)
                                     .fontWeight(.bold)
                                     .foregroundStyle(
@@ -945,7 +945,7 @@ struct ActivePlanCardCompact: View {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }
                     Task {
-                        isPerformingAction = true
+                        await MainActor.run { isPerformingAction = true }
                         let success = await session.checkIn()
 
                         if success {
@@ -1458,12 +1458,15 @@ struct UpcomingTripsSection: View {
         // Only auto-start if not already starting something and no failures
         guard startingTripId == nil else { return }
 
+        // Capture time once to avoid race conditions with timer updates
+        let checkTime = currentTime
+
         for plan in upcomingPlans {
             // Skip trips that already failed
             if failedTripIds.contains(plan.id) { continue }
 
             // Auto-start if the start time has passed
-            if plan.start_at <= currentTime {
+            if plan.start_at <= checkTime {
                 startTrip(plan.id)
                 break
             }

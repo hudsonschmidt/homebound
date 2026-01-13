@@ -109,7 +109,11 @@ async def request_magic_link(body: MagicLinkRequest):
                 }
             )
             user = result.fetchone()
-            assert user is not None
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create user account"
+                )
 
         # Generate 6-digit code
         code = f"{secrets.randbelow(1000000):06d}"
@@ -280,7 +284,11 @@ def verify_magic_code(body: VerifyRequest):
             ),
             {"user_id": token.user_id}
         ).fetchone()
-        assert user is not None
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve user after token verification"
+            )
 
         # Create JWT pair
         access, refresh = create_jwt_pair(user.id, user.email)
@@ -507,7 +515,11 @@ def apple_sign_in(body: AppleSignInRequest):
             }
         )
         new_user = result.fetchone()
-        assert new_user is not None
+        if new_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user with Apple Sign In"
+            )
 
         access, refresh = create_jwt_pair(new_user.id, new_user.email)
 

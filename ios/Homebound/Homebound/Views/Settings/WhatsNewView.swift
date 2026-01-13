@@ -21,13 +21,25 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 0.6.2",
+        title: "Update 1.0",
         features: [
+            WhatsNewFeature(
+                icon: "fireworks",
+                iconColor: .primary,
+                title: "Public Launch!",
+                description: "Homebound is now available to everyone on the App Store. Thank you for being part of this journey!"
+            )
+            WhatsNewFeature(
+                icon: "heart",
+                iconColor: .primary,
+                title: "Thank you so much!",
+                description: "I am so appreciative to each and every one of you for helping me make this. I could not have done this without you."
+            )
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .primary,
                 title: "Bug Fixes",
-                description: "Live location permission refactor. Friends settings refactor. Logout fix."
+                description: "Final bug and security fixes."
             )
         ]
     )

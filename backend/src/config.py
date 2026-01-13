@@ -17,8 +17,18 @@ class Settings:
     # Example: postgresql+psycopg://postgres.[ref]:[password]@aws-1-us-east-2.pooler.supabase.com:5432/postgres
     POSTGRES_URI: str = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI") or "postgresql://myuser:mypassword@localhost:5432/mydatabase"
 
+    # Development mode flag (must be defined before SECRET_KEY)
+    DEV_MODE: bool = os.getenv("DEV_MODE", "false").lower() == "true"
+
     # JWT settings for authentication
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+    # SECURITY: In production (DEV_MODE=false), SECRET_KEY must be set via environment variable
+    _secret_key_env: str | None = os.getenv("SECRET_KEY")
+    if not DEV_MODE and not _secret_key_env:
+        raise RuntimeError(
+            "SECURITY ERROR: SECRET_KEY environment variable must be set in production. "
+            "Set DEV_MODE=true for local development."
+        )
+    SECRET_KEY: str = _secret_key_env or "dev-secret-key-for-local-development-only"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 days (for mobile persistent login)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 90  # 90 days
@@ -78,7 +88,7 @@ class Settings:
     APP_BUNDLE_ID: str = os.getenv("APP_BUNDLE_ID", "com.hudsonschmidt.Homebound")
 
     # Development settings
-    DEV_MODE: bool = os.getenv("DEV_MODE", "false").lower() == "true"
+    # DEV_MODE is defined earlier in the class for SECRET_KEY validation
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")
 
     # Notification backend settings

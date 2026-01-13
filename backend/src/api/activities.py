@@ -1,7 +1,7 @@
 from typing import Any
 
 import sqlalchemy
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from src import database as db
@@ -57,6 +57,11 @@ def get_activity(name: str):
             {"name": name},
         ).mappings().one_or_none()
 
-    return Activity(**activity) if activity else None
+    if not activity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Activity '{name}' not found"
+        )
+    return Activity(**activity)
 
 

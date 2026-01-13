@@ -80,7 +80,11 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
             }
         )
         row = result.fetchone()
-        assert row is not None
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to register device"
+            )
         device_id = row[0]
 
         # Fetch device
@@ -94,7 +98,11 @@ def register_device(body: DeviceRegister, user_id: int = Depends(auth.get_curren
             ),
             {"device_id": device_id}
         ).fetchone()
-        assert device is not None
+        if device is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve registered device"
+            )
 
         return DeviceResponse(
             id=device.id,

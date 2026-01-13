@@ -116,13 +116,13 @@ struct TripDetailView: View {
 
     private func loadParticipantsIfGroupTrip() async {
         guard let trip = trip, trip.is_group_trip else { return }
-        isLoadingParticipants = true
+        await MainActor.run { isLoadingParticipants = true }
         if let response = await session.getParticipants(tripId: tripId) {
             await MainActor.run {
                 participants = response.participants
             }
         }
-        isLoadingParticipants = false
+        await MainActor.run { isLoadingParticipants = false }
     }
 
     private func refreshAllData() async {
@@ -152,16 +152,19 @@ struct TripDetailView: View {
     }
 
     private func loadTimelineEvents() async {
-        isLoadingTimeline = true
-        timelineEvents = await session.loadTimeline(planId: tripId)
-        isLoadingTimeline = false
+        await MainActor.run { isLoadingTimeline = true }
+        let events = await session.loadTimeline(planId: tripId)
+        await MainActor.run {
+            timelineEvents = events
+            isLoadingTimeline = false
+        }
 
         // Debug: Log timeline events
-        debugLog("[TripDetailView] Loaded \(timelineEvents.count) timeline events for trip \(tripId)")
-        for event in timelineEvents {
+        debugLog("[TripDetailView] Loaded \(events.count) timeline events for trip \(tripId)")
+        for event in events {
             debugLog("[TripDetailView] Event: kind=\(event.kind), lat=\(String(describing: event.lat)), lon=\(String(describing: event.lon))")
         }
-        let checkins = timelineEvents.filter { $0.kind == "checkin" && $0.lat != nil && $0.lon != nil }
+        let checkins = events.filter { $0.kind == "checkin" && $0.lat != nil && $0.lon != nil }
         debugLog("[TripDetailView] Check-ins with coordinates: \(checkins.count)")
     }
 

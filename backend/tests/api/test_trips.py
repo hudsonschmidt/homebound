@@ -3150,37 +3150,31 @@ def test_complete_trip_already_completed_fails():
 # =============================================================================
 
 def test_create_trip_start_after_eta():
-    """Trip where start time is after ETA - behavior test"""
+    """Trip where start time is after ETA - should fail with validation error"""
     user_id, contact_id = setup_test_user_and_contact()
 
-    # Create trip with start > eta (nonsensical but may be allowed)
+    # Create trip with start > eta (nonsensical - should be rejected)
     now = datetime.now(UTC)
-    trip_data = TripCreate(
-        title="Backwards Trip",
-        activity="Hiking",
-        start=now + timedelta(hours=2),
-        eta=now + timedelta(hours=1),  # ETA before start!
-        grace_min=30,
-        location_text="Mountain Trail",
-        contact1=contact_id,
-        gen_lat=37.7749,
-        gen_lon=-122.4194
-    )
 
-    background_tasks = MagicMock(spec=BackgroundTasks)
+    # Pydantic validation should reject this at model creation time
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError) as exc_info:
+        TripCreate(
+            title="Backwards Trip",
+            activity="Hiking",
+            start=now + timedelta(hours=2),
+            eta=now + timedelta(hours=1),  # ETA before start!
+            grace_min=30,
+            location_text="Mountain Trail",
+            contact1=contact_id,
+            gen_lat=37.7749,
+            gen_lon=-122.4194
+        )
 
-    # This may succeed or fail depending on validation
-    # Recording actual behavior for documentation
-    try:
-        trip = create_trip(trip_data, background_tasks, user_id=user_id)
-        # If it succeeds, document this as allowed (potential bug)
-        cleanup_test_data(user_id)
-        # Note: This test documents that start > eta is currently ALLOWED
-        # Consider adding validation to prevent this
-    except HTTPException as e:
-        # If it fails with validation error, that's the expected safe behavior
-        assert e.status_code == 400
-        cleanup_test_data(user_id)
+    # Verify the error is about eta being before start
+    assert "ETA must be after start time" in str(exc_info.value)
+
+    cleanup_test_data(user_id)
 
 
 # =============================================================================

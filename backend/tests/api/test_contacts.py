@@ -649,7 +649,7 @@ def test_cannot_delete_contact_used_by_active_trip():
         delete_contact(contact_ids[0], user_id=user_id)
 
     assert exc_info.value.status_code == 409
-    assert "Used by trip" in exc_info.value.detail
+    assert "Cannot delete contact" in exc_info.value.detail
 
     # Clean up
     with db.engine.begin() as connection:
@@ -685,7 +685,7 @@ def test_cannot_delete_contact_used_by_planned_trip():
         delete_contact(contact_ids[0], user_id=user_id)
 
     assert exc_info.value.status_code == 409
-    assert "Used by trip" in exc_info.value.detail
+    assert "Cannot delete contact" in exc_info.value.detail
 
     # Clean up
     with db.engine.begin() as connection:

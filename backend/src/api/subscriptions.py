@@ -1021,30 +1021,19 @@ async def apple_webhook(request: Request):
             )
 
         # Decode and verify the JWS payload
-        signature_verified = False
+        # SECURITY: Fail closed - reject webhooks that fail signature verification
         try:
             payload = decode_jws_payload(signed_payload, verify=True)
-            signature_verified = True
         except ValueError as e:
-            # Log prominent warning when signature verification fails
+            # Log prominent warning and reject the webhook
             logger.warning(
-                f"⚠️ SECURITY WARNING: Apple webhook JWS signature verification failed: {e}. "
-                "This could indicate a forged notification or certificate chain issue. "
-                "Falling back to unverified decoding for processing."
+                f"⚠️ SECURITY: Rejecting Apple webhook - JWS signature verification failed: {e}. "
+                "This could indicate a forged notification or certificate chain issue."
             )
-            # Still try to process if signature verification fails
-            # (Apple's cert chain verification is complex and may fail in edge cases)
-            try:
-                payload = decode_jws_payload(signed_payload, verify=False)
-                logger.warning(
-                    "Processing webhook without signature verification. "
-                    "Review Apple certificate chain configuration if this persists."
-                )
-            except Exception:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid payload: {e}"
-                )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signature verification failed"
+            )
 
         notification_type = payload.get("notificationType")
         subtype = payload.get("subtype")
@@ -1054,7 +1043,7 @@ async def apple_webhook(request: Request):
 
         logger.info(
             f"Apple webhook: type={notification_type}, subtype={subtype}, env={environment}, "
-            f"uuid={notification_uuid}, verified={signature_verified}"
+            f"uuid={notification_uuid}, verified=True"
         )
 
         # Idempotency check: skip already processed notifications
