@@ -28,13 +28,13 @@ enum WhatsNewContent {
                 iconColor: .primary,
                 title: "Public Launch!",
                 description: "Homebound is now available to everyone on the App Store. Thank you for being part of this journey!"
-            )
+            ),
             WhatsNewFeature(
                 icon: "heart",
                 iconColor: .primary,
                 title: "Thank you so much!",
                 description: "I am so appreciative to each and every one of you for helping me make this. I could not have done this without you."
-            )
+            ),
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .primary,
