@@ -49,6 +49,8 @@ class User(Base):
     apple_user_id = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
+    subscription_tier = Column(String(20), nullable=False, default="free")
+    subscription_expires_at = Column(DateTime, nullable=True)
 
 
 class Activity(Base):

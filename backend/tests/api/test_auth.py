@@ -68,8 +68,8 @@ def test_request_magic_link_existing_user():
             connection.execute(
                 sqlalchemy.text(
                     """
-                    INSERT INTO users (email, first_name, last_name, age)
-                    VALUES (:email, :first_name, :last_name, :age)
+                    INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                    VALUES (:email, :first_name, :last_name, :age, 'free')
                     """
                 ),
                 {
@@ -336,8 +336,8 @@ def test_verify_magic_code_success():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -413,8 +413,8 @@ def test_verify_magic_code_already_used():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -473,8 +473,8 @@ def test_verify_magic_code_expired():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -527,8 +527,8 @@ def test_refresh_token_success():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -570,8 +570,8 @@ def test_refresh_token_invalid_type():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -631,10 +631,20 @@ def test_refresh_token_invalid():
     assert "invalid" in exc_info.value.detail.lower()
 
 
-def test_apple_review_test_account_new_user():
+def test_apple_review_test_account_new_user(monkeypatch):
     """Test Apple App Store Review test account creates user"""
     apple_review_email = "apple-review@homeboundapp.com"
     apple_review_code = "123456"
+
+    # Set environment variables for the test
+    monkeypatch.setenv("APPLE_REVIEW_EMAIL", apple_review_email)
+    monkeypatch.setenv("APPLE_REVIEW_CODE", apple_review_code)
+
+    # Reload the module to pick up the new env vars
+    import importlib
+    from src.api import auth_endpoints
+    importlib.reload(auth_endpoints)
+    from src.api.auth_endpoints import verify_magic_code
 
     # Clean up any existing test user
     with db.engine.begin() as connection:
@@ -647,7 +657,10 @@ def test_apple_review_test_account_new_user():
     verify_req = VerifyRequest(email=apple_review_email, code=apple_review_code)
     token_response = verify_magic_code(verify_req)
 
-    assert isinstance(token_response, TokenResponse)
+    # Check response has expected attributes (don't use isinstance due to module reload)
+    assert hasattr(token_response, 'access')
+    assert hasattr(token_response, 'refresh')
+    assert hasattr(token_response, 'user')
     assert token_response.user["email"] == apple_review_email
     assert token_response.user["first_name"] == "Apple"
     assert token_response.user["last_name"] == "Reviewer"
@@ -661,10 +674,20 @@ def test_apple_review_test_account_new_user():
         )
 
 
-def test_apple_review_test_account_existing_user():
+def test_apple_review_test_account_existing_user(monkeypatch):
     """Test Apple App Store Review test account with existing user"""
     apple_review_email = "apple-review@homeboundapp.com"
     apple_review_code = "123456"
+
+    # Set environment variables for the test
+    monkeypatch.setenv("APPLE_REVIEW_EMAIL", apple_review_email)
+    monkeypatch.setenv("APPLE_REVIEW_CODE", apple_review_code)
+
+    # Reload the module to pick up the new env vars
+    import importlib
+    from src.api import auth_endpoints
+    importlib.reload(auth_endpoints)
+    from src.api.auth_endpoints import verify_magic_code
 
     # Ensure test user exists
     with db.engine.begin() as connection:
@@ -674,8 +697,8 @@ def test_apple_review_test_account_existing_user():
         )
         connection.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'Apple', 'Reviewer', 30)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, 'Apple', 'Reviewer', 30, 'free')
             """),
             {"email": apple_review_email}
         )
@@ -684,7 +707,10 @@ def test_apple_review_test_account_existing_user():
     verify_req = VerifyRequest(email=apple_review_email, code=apple_review_code)
     token_response = verify_magic_code(verify_req)
 
-    assert isinstance(token_response, TokenResponse)
+    # Check response has expected attributes (don't use isinstance due to module reload)
+    assert hasattr(token_response, 'access')
+    assert hasattr(token_response, 'refresh')
+    assert hasattr(token_response, 'user')
     assert token_response.user["email"] == apple_review_email
 
     # Clean up

@@ -26,32 +26,57 @@ struct FriendsTabView: View {
     private let pollingInterval: TimeInterval = 30
     private let tabSwitchDebounce: TimeInterval = 5
 
+    // Navigation from push notifications
+    @Binding var scrollToTripId: Int?
+    @State private var highlightedTripId: Int?
+
+    init(scrollToTripId: Binding<Int?> = .constant(nil)) {
+        _scrollToTripId = scrollToTripId
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 Color(.systemBackground)
                     .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 24) {
-                        // Header
-                        headerView
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Header
+                            headerView
 
-                        // Trip invitations banner (if any pending)
-                        tripInvitationsBanner
+                            // Trip invitations banner (if any pending)
+                            tripInvitationsBanner
 
-                        // Action buttons
-                        actionButtonsView
+                            // Action buttons
+                            actionButtonsView
 
-                        // Friends list
-                        friendsListView
+                            // Friends list
+                            friendsListView
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 100)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 100)
-                }
-                .scrollIndicators(.hidden)
-                .refreshable {
-                    await loadData()
+                    .scrollIndicators(.hidden)
+                    .refreshable {
+                        await loadData()
+                    }
+                    .onChange(of: scrollToTripId) { oldValue, newValue in
+                        if let tripId = newValue {
+                            // Scroll to the trip card
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo("trip-\(tripId)", anchor: .center)
+                            }
+                            // Highlight the card briefly
+                            highlightedTripId = tripId
+                            // Clear after a short delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                highlightedTripId = nil
+                                scrollToTripId = nil
+                            }
+                        }
+                    }
                 }
             }
             .navigationBarHidden(true)
@@ -255,11 +280,12 @@ struct FriendsTabView: View {
                 // Empty state
                 emptyStateView
             } else {
-                // Friends list with expandable trip cards
-                ForEach(session.friends) { friend in
+                // Friends list with expandable trip cards (active trips sorted to top)
+                ForEach(sortedFriends) { friend in
                     FriendRowWithTripsView(
                         friend: friend,
                         trips: tripsForFriend(friend),
+                        highlightedTripId: highlightedTripId,
                         onTap: { selectedFriend = friend }
                     )
                     .id("\(friend.user_id)-\(groupsRefreshTrigger)")  // Force refresh when groups change
@@ -307,6 +333,27 @@ struct FriendsTabView: View {
 
     private func tripsForFriend(_ friend: Friend) -> [FriendActiveTrip] {
         session.friendActiveTrips.filter { $0.owner.user_id == friend.user_id }
+    }
+
+    /// Friends sorted with those who have active trips at the top
+    private var sortedFriends: [Friend] {
+        session.friends.sorted { friend1, friend2 in
+            let trips1 = tripsForFriend(friend1)
+            let trips2 = tripsForFriend(friend2)
+            let hasActive1 = trips1.contains { $0.isActiveStatus }
+            let hasActive2 = trips2.contains { $0.isActiveStatus }
+
+            // Friends with active trips come first
+            if hasActive1 != hasActive2 {
+                return hasActive1
+            }
+            // Then friends with any trips
+            if !trips1.isEmpty != !trips2.isEmpty {
+                return !trips1.isEmpty
+            }
+            // Otherwise maintain original order (by name or however they're sorted)
+            return false
+        }
     }
 
     // MARK: - Empty State
@@ -440,6 +487,7 @@ struct FriendRowView: View {
 struct FriendRowWithTripsView: View {
     let friend: Friend
     let trips: [FriendActiveTrip]
+    var highlightedTripId: Int? = nil
     let onTap: () -> Void
 
     /// Trips that are active/overdue (auto-expanded with full details)
@@ -462,7 +510,8 @@ struct FriendRowWithTripsView: View {
             if !activeTrips.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(activeTrips) { trip in
-                        FriendActiveTripCardExpanded(trip: trip)
+                        FriendActiveTripCardExpanded(trip: trip, isHighlighted: highlightedTripId == trip.id)
+                            .id("trip-\(trip.id)")
                     }
                 }
                 .padding(.horizontal)
@@ -590,6 +639,7 @@ struct FriendPlannedTripCompact: View {
 /// Expanded card for active/overdue trips with live timer
 struct FriendActiveTripCardExpanded: View {
     let trip: FriendActiveTrip
+    var isHighlighted: Bool = false
     @EnvironmentObject var session: Session
 
     // Timer state
@@ -812,9 +862,13 @@ struct FriendActiveTripCardExpanded: View {
                 .fill(trip.primaryColor.opacity(0.1))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(statusColor.opacity(0.3), lineWidth: 1)
+                        .strokeBorder(
+                            isHighlighted ? Color.hbBrand : statusColor.opacity(0.3),
+                            lineWidth: isHighlighted ? 2 : 1
+                        )
                 )
         )
+        .shadow(color: isHighlighted ? Color.hbBrand.opacity(0.3) : .clear, radius: 8)
         .sheet(isPresented: $showingMap) {
             FriendTripMapView(trip: trip)
                 .environmentObject(session)

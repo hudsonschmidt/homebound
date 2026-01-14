@@ -127,9 +127,11 @@ Homebound+ subscribers have access to additional features that may collect:
 - **Custom Messages**: Personalized notification text you create
 - **Contact Groups**: Organization names for your contacts
 - **Group Trips**: Participant data, voting records, and shared locations
-- **Data Export**: We generate exports of your data upon request
 - **Pinned Activities**: Your favorite activities for quick access
 - **Enhanced Privacy Controls**: Additional friend visibility settings
+
+### 1.10 Data Export
+All users can export their data. When you request an export, we generate a copy of your trips, contacts, and profile information.
 
 ---
 

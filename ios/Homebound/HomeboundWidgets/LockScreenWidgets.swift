@@ -28,7 +28,7 @@ struct LockScreenCircularView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        // Check if widgets are enabled (premium feature)
+        // Check if widgets are enabled
         if !LiveActivityConstants.widgetsEnabled {
             UpgradePremiumCircularView()
         } else if let trip = entry.tripData {
@@ -132,7 +132,7 @@ struct LockScreenInlineView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        // Check if widgets are enabled (premium feature)
+        // Check if widgets are enabled
         if !LiveActivityConstants.widgetsEnabled {
             Label("Upgrade to Plus", systemImage: "star.fill")
         } else if let trip = entry.tripData {
@@ -166,7 +166,7 @@ struct LockScreenRectangularView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        // Check if widgets are enabled (premium feature)
+        // Check if widgets are enabled
         if !LiveActivityConstants.widgetsEnabled {
             UpgradePremiumRectangularView()
         } else if let trip = entry.tripData {

@@ -4,7 +4,7 @@ from datetime import datetime, UTC
 
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src import database as db
 from src.api import auth
@@ -28,9 +28,9 @@ router = APIRouter(
 
 
 class ProfileUpdate(BaseModel):
-    first_name: str | None = None
-    last_name: str | None = None
-    age: int | None = None
+    first_name: str | None = Field(None, max_length=100)
+    last_name: str | None = Field(None, max_length=100)
+    age: int | None = Field(None, ge=1, le=150, description="Age must be between 1 and 150")
     notify_trip_reminders: bool | None = None
     notify_checkin_alerts: bool | None = None
 
@@ -304,43 +304,155 @@ def export_user_data(user_id: int = Depends(auth.get_current_user_id)):
 
 @router.delete("/account")
 def delete_account(user_id: int = Depends(auth.get_current_user_id)):
-    """Delete current user's account and all associated data"""
-    with db.engine.begin() as connection:
-        # Delete in order to satisfy foreign key constraints:
-        # Events reference trips, trips reference contacts
-        # So delete order: events → trips → contacts
+    """Delete current user's account and all associated data.
 
-        # 1. Delete events (they reference trips via trip_id)
+    Deletes all user data in order to satisfy foreign key constraints.
+    This ensures complete removal for GDPR compliance.
+    """
+    with db.engine.begin() as connection:
+        # Get user's trip IDs for cascade deletion
+        user_trips = connection.execute(
+            sqlalchemy.text("SELECT id FROM trips WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchall()
+        trip_ids = [t.id for t in user_trips]
+
+        # Get user's contact IDs for cascade deletion
+        user_contacts = connection.execute(
+            sqlalchemy.text("SELECT id FROM contacts WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchall()
+        contact_ids = [c.id for c in user_contacts]
+
+        # Get user's contact group IDs
+        user_groups = connection.execute(
+            sqlalchemy.text("SELECT id FROM contact_groups WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchall()
+        group_ids = [g.id for g in user_groups]
+
+        # 1. Delete participant-related data (deepest level)
+        if trip_ids:
+            connection.execute(
+                sqlalchemy.text(
+                    """
+                    DELETE FROM participant_trip_contacts
+                    WHERE trip_id = ANY(:trip_ids)
+                    """
+                ),
+                {"trip_ids": trip_ids}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trip_participants WHERE trip_id = ANY(:trip_ids)"),
+                {"trip_ids": trip_ids}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM trip_safety_contacts WHERE trip_id = ANY(:trip_ids)"),
+                {"trip_ids": trip_ids}
+            )
+
+        # 2. Delete trip participants where user is a participant (not owner)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                DELETE FROM participant_trip_contacts
+                WHERE participant_user_id = :user_id
+                """
+            ),
+            {"user_id": user_id}
+        )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM trip_participants WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 3. Delete events (they reference trips via trip_id)
         connection.execute(
             sqlalchemy.text("DELETE FROM events WHERE user_id = :user_id"),
             {"user_id": user_id}
         )
 
-        # 2. Delete trips (they reference contacts via contact1/2/3)
+        # 4. Delete live activity tokens and live locations
+        if trip_ids:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM live_activity_tokens WHERE trip_id = ANY(:trip_ids)"),
+                {"trip_ids": trip_ids}
+            )
+            connection.execute(
+                sqlalchemy.text("DELETE FROM live_locations WHERE trip_id = ANY(:trip_ids)"),
+                {"trip_ids": trip_ids}
+            )
+
+        # 5. Delete trips (they reference contacts via FKs)
         connection.execute(
             sqlalchemy.text("DELETE FROM trips WHERE user_id = :user_id"),
             {"user_id": user_id}
         )
 
-        # 3. Delete saved contacts (now safe since trips are deleted)
+        # 6. Delete contact group members and groups
+        if group_ids:
+            connection.execute(
+                sqlalchemy.text("DELETE FROM contact_group_members WHERE group_id = ANY(:group_ids)"),
+                {"group_ids": group_ids}
+            )
+        connection.execute(
+            sqlalchemy.text("DELETE FROM contact_groups WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 7. Delete saved contacts (now safe since trips are deleted)
         connection.execute(
             sqlalchemy.text("DELETE FROM contacts WHERE user_id = :user_id"),
             {"user_id": user_id}
         )
 
-        # 4. Delete devices
+        # 8. Delete friendships (both directions)
+        connection.execute(
+            sqlalchemy.text(
+                """
+                DELETE FROM friendships
+                WHERE user_id_1 = :user_id OR user_id_2 = :user_id
+                """
+            ),
+            {"user_id": user_id}
+        )
+
+        # 9. Delete friend invites
+        connection.execute(
+            sqlalchemy.text(
+                """
+                DELETE FROM friend_invites
+                WHERE inviter_id = :user_id OR accepted_by = :user_id
+                """
+            ),
+            {"user_id": user_id}
+        )
+
+        # 10. Delete subscriptions
+        connection.execute(
+            sqlalchemy.text("DELETE FROM subscriptions WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 11. Delete pinned activities
+        connection.execute(
+            sqlalchemy.text("DELETE FROM pinned_activities WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+
+        # 12. Delete devices
         connection.execute(
             sqlalchemy.text("DELETE FROM devices WHERE user_id = :user_id"),
             {"user_id": user_id}
         )
 
-        # 5. Delete login tokens
+        # 13. Delete login tokens
         connection.execute(
             sqlalchemy.text("DELETE FROM login_tokens WHERE user_id = :user_id"),
             {"user_id": user_id}
         )
 
-        # 6. Finally delete the user
+        # 14. Finally delete the user
         connection.execute(
             sqlalchemy.text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id}

@@ -782,8 +782,8 @@ def test_update_trip_other_users_trip():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -2716,8 +2716,8 @@ def test_start_trip_other_users_trip_fails():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -2970,8 +2970,8 @@ def test_extend_trip_other_users_trip_fails():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -3239,8 +3239,8 @@ def setup_test_user_with_friend():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -3257,8 +3257,8 @@ def setup_test_user_with_friend():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -3418,8 +3418,8 @@ def test_create_trip_with_invalid_friend_contact():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -3516,7 +3516,7 @@ def test_create_trip_with_multiple_friend_contacts():
         friend_ids = []
         for i in range(3):
             result = connection.execute(
-                sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age) VALUES (:email, :name, 'Friend', 25) RETURNING id"),
+                sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES (:email, :name, 'Friend', 25, 'free') RETURNING id"),
                 {"email": f"multi_friend{i}@test.com", "name": f"Friend{i}"}
             )
             friend_id = result.fetchone()[0]
@@ -3744,7 +3744,7 @@ def test_update_trip_invalid_friend_contact():
     # Create a non-friend user
     with db.engine.begin() as connection:
         result = connection.execute(
-            sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age) VALUES ('nonfriend_update@test.com', 'Non', 'Friend', 25) RETURNING id"),
+            sqlalchemy.text("INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES ('nonfriend_update@test.com', 'Non', 'Friend', 25, 'free') RETURNING id"),
             {}
         )
         non_friend_id = result.fetchone()[0]
@@ -4068,8 +4068,8 @@ def test_update_live_location_wrong_user():
         other_result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES ('other@test.com', 'Other', 'User', 25)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES ('other@test.com', 'Other', 'User', 25, 'free')
                 RETURNING id
                 """
             )

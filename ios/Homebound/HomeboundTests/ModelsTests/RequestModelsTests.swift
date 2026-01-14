@@ -1,6 +1,7 @@
 import XCTest
 @testable import Homebound
 
+@MainActor
 final class RequestModelsTests: XCTestCase {
 
     // MARK: - TripCreateRequest Tests
@@ -246,7 +247,8 @@ final class RequestModelsTests: XCTestCase {
             safety_friend_ids: [10, 20],
             checkin_interval_min: 20,
             notify_start_hour: 9,
-            notify_end_hour: 21
+            notify_end_hour: 21,
+            share_my_location: true
         )
 
         let data = try JSONEncoder().encode(request)
@@ -265,7 +267,8 @@ final class RequestModelsTests: XCTestCase {
             safety_friend_ids: [10],
             checkin_interval_min: 30,
             notify_start_hour: nil,
-            notify_end_hour: nil
+            notify_end_hour: nil,
+            share_my_location: false
         )
 
         let data = try JSONEncoder().encode(request)

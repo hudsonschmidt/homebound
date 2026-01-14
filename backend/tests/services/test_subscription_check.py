@@ -173,8 +173,8 @@ def test_get_user_tier_null_tier():
         result = conn.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -234,9 +234,9 @@ def test_get_limits_free_tier():
         assert limits.contacts_per_trip == 2
         assert limits.saved_trips == 0
         assert limits.history_days == 30
-        assert limits.extensions == [30]
+        assert limits.extensions == [30, 60, 120, 180, 240]  # All extensions now free
         assert limits.visible_stats == 2
-        assert limits.widgets is False
+        assert limits.widgets is True  # Widgets now free
         assert limits.live_activity is False
         assert limits.custom_intervals is False
         assert limits.trip_map is False
@@ -244,7 +244,7 @@ def test_get_limits_free_tier():
         assert limits.group_trips is False
         assert limits.contact_groups is False
         assert limits.custom_messages is False
-        assert limits.export is False
+        assert limits.export is True  # Export now free
     finally:
         with db.engine.begin() as conn:
             conn.execute(
@@ -479,7 +479,7 @@ def test_check_contact_limit_plus_allows_five():
 
 
 def test_check_extension_allowed_free():
-    """Free tier only allows 30 min extension"""
+    """Free tier now allows all extension durations"""
     test_email = "extension-free@homeboundapp.com"
 
     with db.engine.begin() as conn:
@@ -507,18 +507,12 @@ def test_check_extension_allowed_free():
         user_id = result.fetchone()[0]
 
     try:
-        # 30 min should work
+        # All durations should now work for free users
         check_extension_allowed(user_id, 30)
-
-        # 60 min should fail
-        with pytest.raises(HTTPException) as exc_info:
-            check_extension_allowed(user_id, 60)
-        assert exc_info.value.status_code == 403
-
-        # 120 min should fail
-        with pytest.raises(HTTPException) as exc_info:
-            check_extension_allowed(user_id, 120)
-        assert exc_info.value.status_code == 403
+        check_extension_allowed(user_id, 60)
+        check_extension_allowed(user_id, 120)
+        check_extension_allowed(user_id, 180)
+        check_extension_allowed(user_id, 240)
     finally:
         with db.engine.begin() as conn:
             conn.execute(
@@ -893,9 +887,11 @@ def test_free_limits_constant():
     assert FREE_LIMITS.contacts_per_trip == 2
     assert FREE_LIMITS.saved_trips == 0
     assert FREE_LIMITS.history_days == 30
-    assert FREE_LIMITS.widgets is False
+    assert FREE_LIMITS.widgets is True  # Widgets now free
     assert FREE_LIMITS.live_activity is False
     assert FREE_LIMITS.group_trips is False
+    assert FREE_LIMITS.export is True  # Export now free
+    assert FREE_LIMITS.extensions == [30, 60, 120, 180, 240]  # All extensions now free
 
 
 def test_plus_limits_constant():

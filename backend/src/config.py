@@ -30,7 +30,7 @@ class Settings:
         )
     SECRET_KEY: str = _secret_key_env or "dev-secret-key-for-local-development-only"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 days (for mobile persistent login)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days (balances security with mobile UX)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 90  # 90 days
 
     # Email settings for magic links

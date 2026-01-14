@@ -155,16 +155,14 @@ struct PaywallView: View {
                 .font(.headline)
                 .padding(.horizontal, 4)
 
-            // Big 8 feature grid
+            // Premium feature grid
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 PaywallFeatureRow(icon: "person.2.fill", title: "Group Trips", subtitle: "Travel with friends")
                 PaywallFeatureRow(icon: "clock.arrow.circlepath", title: "Unlimited History", subtitle: "Relive every adventure")
                 PaywallFeatureRow(icon: "platter.filled.bottom.iphone", title: "Live Activity", subtitle: "& Dynamic Island")
-                PaywallFeatureRow(icon: "widget.small.badge.plus", title: "Widgets", subtitle: "Quick trip status")
                 PaywallFeatureRow(icon: "map.fill", title: "Trip Map", subtitle: "See all your adventures")
                 PaywallFeatureRow(icon: "bookmark.fill", title: "Trip Templates", subtitle: "Start trips in seconds")
-                PaywallFeatureRow(icon: "timer", title: "Flexible Extensions", subtitle: "Up to 4 hour extensions")
-                PaywallFeatureRow(icon: "square.and.arrow.up", title: "Export Your Data", subtitle: "Download trip history")
+                PaywallFeatureRow(icon: "text.bubble.fill", title: "Custom Messages", subtitle: "Personalize notifications")
             }
 
             // Additional features bullet list
@@ -196,8 +194,7 @@ struct PaywallView: View {
             "5 contacts per trip (vs 2 free)",
             "8 trip statistics (vs 2 free)",
             "Pin 3 favorite activities",
-            "Sort Contacts by Group",
-            "Custom notification messages",
+            "Sort contacts by group",
             "Custom check-in intervals"
         ]
     }

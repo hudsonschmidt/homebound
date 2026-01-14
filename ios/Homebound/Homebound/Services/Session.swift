@@ -82,6 +82,17 @@ private struct RefreshResponse: Decodable {
         let profile_completed: Bool?
     }
 }
+
+// MARK: - Navigation Destination
+/// Represents deep link destinations for notification handling
+enum NavigationDestination: Equatable {
+    case trip(tripId: Int)           // User's own trip → TripDetailView
+    case friendTrip(tripId: Int)     // Friend's trip → FriendsTab + scroll to card
+    case tripInvitations             // Group trip invite → TripInvitationsView
+    case friends                     // General → FriendsTab
+    case home                        // Fallback → HomeTab
+}
+
 final class Session: ObservableObject {
 
     // MARK: - Shared Instance
@@ -216,6 +227,9 @@ final class Session: ObservableObject {
     @Published var pendingActionsCount: Int = 0
     @Published var failedActionsCount: Int = 0
 
+    // Navigation (for deep linking from notifications)
+    @Published var pendingNavigation: NavigationDestination?
+
     // Activities
     @Published var activities: [Activity] = []
     @Published var isLoadingActivities: Bool = false
@@ -293,6 +307,12 @@ final class Session: ObservableObject {
             self.contacts = LocalStorage.shared.getCachedContacts()
             self.activities = LocalStorage.shared.getCachedActivities()
             debugLog("[Session] ℹ️ Loaded cached data: \(cachedTrips.count) trips, \(contacts.count) contacts, \(activities.count) activities")
+
+            // Load cached visibility settings
+            if let cachedSettings = loadCachedVisibilitySettings() {
+                self.friendVisibilitySettings = cachedSettings
+                debugLog("[Session] ℹ️ Loaded cached visibility settings (live location: \(cachedSettings.friend_share_live_location))")
+            }
         }
 
         // Initialize pending actions count
@@ -1423,7 +1443,8 @@ final class Session: ObservableObject {
             async let tripsTask: [Trip] = loadAllTrips()  // Cache all trips for offline access
             async let friendsTask: [Friend] = loadFriends()  // Load friends for offline access
             async let featureLimitsTask: Void = loadFeatureLimits()  // Load subscription feature limits
-            _ = await (activitiesTask, activePlanTask, profileTask, contactsTask, tripsTask, friendsTask, featureLimitsTask)
+            async let visibilitySettingsTask: FriendVisibilitySettings = loadFriendVisibilitySettings()  // Load privacy settings
+            _ = await (activitiesTask, activePlanTask, profileTask, contactsTask, tripsTask, friendsTask, featureLimitsTask, visibilitySettingsTask)
 
             // Sync pending actions after data loads
             await syncPendingActions()
@@ -2258,6 +2279,9 @@ final class Session: ObservableObject {
                 self.updateWidgetData()
                 // Check for new achievements after trip completion
                 AchievementNotificationManager.shared.checkForNewAchievements(trips: self.allTrips)
+                // Check for App Store review opportunity
+                let completedCount = self.allTrips.filter { $0.status == "completed" }.count
+                ReviewManager.shared.checkForReviewOpportunity(completedTripCount: completedCount)
             }
 
             // Reload to check for any other active plans
@@ -3275,8 +3299,36 @@ final class Session: ObservableObject {
         return response.ok
     }
 
-    /// Load friend visibility settings
+    // MARK: - Friend Visibility Settings Cache
+
+    private static let visibilitySettingsCacheKey = "CachedFriendVisibilitySettings"
+
+    /// Load cached visibility settings from UserDefaults
+    private func loadCachedVisibilitySettings() -> FriendVisibilitySettings? {
+        guard let data = UserDefaults.standard.data(forKey: Self.visibilitySettingsCacheKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(FriendVisibilitySettings.self, from: data)
+    }
+
+    /// Cache visibility settings to UserDefaults
+    private func cacheVisibilitySettings(_ settings: FriendVisibilitySettings) {
+        if let data = try? JSONEncoder().encode(settings) {
+            UserDefaults.standard.set(data, forKey: Self.visibilitySettingsCacheKey)
+        }
+    }
+
+    /// Load friend visibility settings (from cache first, then network)
     func loadFriendVisibilitySettings() async -> FriendVisibilitySettings {
+        // Load from cache immediately
+        if let cached = loadCachedVisibilitySettings() {
+            await MainActor.run {
+                self.friendVisibilitySettings = cached
+            }
+            debugLog("[Session] 📦 Loaded friend visibility settings from cache")
+        }
+
+        // Then refresh from network
         do {
             let settings: FriendVisibilitySettings = try await withAuth { bearer in
                 try await self.api.get(
@@ -3284,19 +3336,27 @@ final class Session: ObservableObject {
                     bearer: bearer
                 )
             }
-            debugLog("[Session] ✅ Loaded friend visibility settings")
+            debugLog("[Session] ✅ Loaded friend visibility settings from network")
+            cacheVisibilitySettings(settings)
             await MainActor.run {
                 self.friendVisibilitySettings = settings
             }
             return settings
         } catch {
             debugLog("[Session] ❌ Failed to load friend visibility settings: \(error.localizedDescription)")
-            return .defaults
+            return friendVisibilitySettings  // Return current value (cached or defaults)
         }
     }
 
     /// Save friend visibility settings
     func saveFriendVisibilitySettings(_ settings: FriendVisibilitySettings) async -> Bool {
+        // Update local state and cache immediately for responsiveness
+        await MainActor.run {
+            self.friendVisibilitySettings = settings
+        }
+        cacheVisibilitySettings(settings)
+
+        // Then sync to backend
         do {
             let _: FriendVisibilitySettings = try await withAuth { bearer in
                 try await self.api.put(
@@ -3306,9 +3366,6 @@ final class Session: ObservableObject {
                 )
             }
             debugLog("[Session] ✅ Saved friend visibility settings")
-            await MainActor.run {
-                self.friendVisibilitySettings = settings
-            }
             return true
         } catch {
             debugLog("[Session] ❌ Failed to save friend visibility settings: \(error.localizedDescription)")

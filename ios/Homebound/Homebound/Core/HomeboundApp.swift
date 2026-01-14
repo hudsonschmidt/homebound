@@ -562,13 +562,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 await handleCheckoutAction(userInfo: userInfo)
 
             case UNNotificationDefaultActionIdentifier:
-                // User tapped notification banner - navigate to trip
-                if let data = userInfo["data"] as? [String: Any],
-                   let tripId = data["trip_id"] as? Int {
-                    NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
-                } else if let tripId = userInfo["trip_id"] as? Int {
-                    NotificationCenter.default.post(name: .hbNavigateToTrip, object: tripId)
-                }
+                // User tapped notification banner - navigate based on notification type
+                await handleNotificationTap(userInfo: userInfo)
 
             default:
                 break
@@ -579,6 +574,50 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     // MARK: - Notification Action Handlers
+
+    /// Handle notification tap to navigate to appropriate screen
+    private func handleNotificationTap(userInfo: [AnyHashable: Any]) async {
+        // Extract data from either top-level or nested "data" object
+        let data = userInfo["data"] as? [String: Any] ?? userInfo as? [String: Any] ?? [:]
+
+        // Get trip_id if present
+        let tripId: Int? = (data["trip_id"] as? Int) ?? (userInfo["trip_id"] as? Int)
+
+        // Get notification type, action, and friend flag
+        let notificationType = (data["notification_type"] as? String) ?? (userInfo["notification_type"] as? String)
+        let action = (data["action"] as? String) ?? (userInfo["action"] as? String)
+        let isFriendNotification = (data["is_friend_notification"] as? Bool) ?? (userInfo["is_friend_notification"] as? Bool) ?? false
+
+        // Determine navigation destination
+        await MainActor.run {
+            if action == "trip_invitation" {
+                // Group trip invitation → TripInvitationsView
+                Session.shared.pendingNavigation = .tripInvitations
+                debugLog("[Notification] Navigating to trip invitations")
+            } else if notificationType == "friend_trip" || isFriendNotification {
+                // Friend-related notification → FriendsTab with scroll to trip
+                if let tripId = tripId {
+                    Session.shared.pendingNavigation = .friendTrip(tripId: tripId)
+                    debugLog("[Notification] Navigating to friend trip #\(tripId)")
+                } else {
+                    Session.shared.pendingNavigation = .friends
+                    debugLog("[Notification] Navigating to friends tab")
+                }
+            } else if notificationType == "friend_request" {
+                // Friend request → FriendsTab
+                Session.shared.pendingNavigation = .friends
+                debugLog("[Notification] Navigating to friends tab (friend request)")
+            } else if tripId != nil {
+                // Own trip notification → Home tab
+                Session.shared.pendingNavigation = .home
+                debugLog("[Notification] Navigating to home (own trip)")
+            } else {
+                // Fallback → Home
+                Session.shared.pendingNavigation = .home
+                debugLog("[Notification] Navigating to home (no specific destination)")
+            }
+        }
+    }
 
     private func handleCheckinAction(userInfo: [AnyHashable: Any]) async {
         guard let data = userInfo["data"] as? [String: Any],
@@ -604,11 +643,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
 
         do {
-            let (_, response) = try await URLSession.shared.data(from: url)
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+            let statusCode = try await API().fetch(url)
+            if statusCode == 200 {
                 debugLog("[Notification Action] Check-in successful")
             } else {
-                debugLog("[Notification Action] Check-in failed with response: \(response)")
+                debugLog("[Notification Action] Check-in returned status: \(statusCode)")
             }
         } catch {
             debugLog("[Notification Action] Check-in error: \(error)")
@@ -632,11 +671,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
 
         do {
-            let (_, response) = try await URLSession.shared.data(from: url)
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+            let statusCode = try await API().fetch(url)
+            if statusCode == 200 {
                 debugLog("[Notification Action] Check-out successful")
             } else {
-                debugLog("[Notification Action] Check-out failed with response: \(response)")
+                debugLog("[Notification Action] Check-out returned status: \(statusCode)")
             }
         } catch {
             debugLog("[Notification Action] Check-out error: \(error)")

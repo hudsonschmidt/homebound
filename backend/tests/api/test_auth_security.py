@@ -76,7 +76,7 @@ def test_sql_injection_in_code_parameter():
     with db.engine.begin() as connection:
         connection.execute(
             sqlalchemy.text(
-                "INSERT INTO users (email, first_name, last_name, age) VALUES (:email, '', '', 0)"
+                "INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES (:email, '', '', 0, 'free')"
             ),
             {"email": test_email}
         )
@@ -113,7 +113,7 @@ def test_token_with_tampered_payload_rejected():
     with db.engine.begin() as connection:
         result = connection.execute(
             sqlalchemy.text(
-                "INSERT INTO users (email, first_name, last_name, age) VALUES (:email, 'Test', 'User', 25) RETURNING id"
+                "INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES (:email, 'Test', 'User', 25, 'free') RETURNING id"
             ),
             {"email": test_email}
         )
@@ -195,7 +195,7 @@ def test_token_with_invalid_type_rejected():
     with db.engine.begin() as connection:
         result = connection.execute(
             sqlalchemy.text(
-                "INSERT INTO users (email, first_name, last_name, age) VALUES (:email, 'Test', 'User', 25) RETURNING id"
+                "INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES (:email, 'Test', 'User', 25, 'free') RETURNING id"
             ),
             {"email": test_email}
         )
@@ -228,7 +228,7 @@ def test_deleted_user_token_rejected():
     with db.engine.begin() as connection:
         result = connection.execute(
             sqlalchemy.text(
-                "INSERT INTO users (email, first_name, last_name, age) VALUES (:email, 'Deleted', 'User', 25) RETURNING id"
+                "INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES (:email, 'Deleted', 'User', 25, 'free') RETURNING id"
             ),
             {"email": test_email}
         )
@@ -334,7 +334,7 @@ def test_magic_code_expiration_enforced():
     with db.engine.begin() as connection:
         result = connection.execute(
             sqlalchemy.text(
-                "INSERT INTO users (email, first_name, last_name, age) VALUES (:email, '', '', 0) RETURNING id"
+                "INSERT INTO users (email, first_name, last_name, age, subscription_tier) VALUES (:email, '', '', 0, 'free') RETURNING id"
             ),
             {"email": test_email}
         )

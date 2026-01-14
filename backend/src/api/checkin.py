@@ -25,6 +25,22 @@ from src.services.notifications import (
 
 log = logging.getLogger(__name__)
 
+
+def safe_background_task(task_name: str):
+    """Decorator to wrap background tasks with error handling and logging.
+
+    Ensures background task failures are logged but don't crash the worker.
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                log.exception(f"[BackgroundTask] {task_name} failed: {e}")
+        return wrapper
+    return decorator
+
+
 router = APIRouter(prefix="/t", tags=["checkin"])
 
 
@@ -319,6 +335,7 @@ def checkin_with_token(
         grace_min_for_la = grace_min
 
         # Always send Live Activity update (runs in background)
+        @safe_background_task("send_live_activity_update")
         def send_live_activity_sync():
             asyncio.run(send_live_activity_update(
                 trip_id=trip_id_for_la,
@@ -333,6 +350,7 @@ def checkin_with_token(
         background_tasks.add_task(send_live_activity_sync)
 
         # Schedule background task to send checkin update emails to contacts and push to user
+        @safe_background_task("send_checkin_notifications")
         def send_notifications_sync():
             # Send push notification to user confirming check-in
             asyncio.run(send_push_to_user(
@@ -399,6 +417,8 @@ def checkin_with_token(
         if friend_user_ids:
             trip_title_for_push = trip.title
             user_name_for_push = user_name
+
+            @safe_background_task("send_friend_checkin_push")
             def send_friend_checkin_sync():
                 for friend_id in friend_user_ids:
                     asyncio.run(send_friend_checkin_push(
@@ -425,6 +445,7 @@ def checkin_with_token(
             if all_participant_ids:
                 trip_id_for_refresh = trip.id
 
+                @safe_background_task("send_refresh_pushes")
                 def send_refresh_pushes():
                     for p in all_participant_ids:
                         asyncio.run(send_data_refresh_push(p.user_id, "trip", trip_id_for_refresh))
@@ -515,6 +536,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
         trip_id_for_la = trip.id
 
         # Send Live Activity "end" event to dismiss the widget
+        @safe_background_task("send_live_activity_end")
         def send_live_activity_end_sync():
             asyncio.run(send_live_activity_update(
                 trip_id=trip_id_for_la,
@@ -530,6 +552,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
 
         # Schedule background task to send emails to contacts
         # If trip was overdue, send "all clear" email from alerts@
+        @safe_background_task("send_checkout_notifications")
         def send_notifications_sync():
             # Send emails to contacts
             if was_overdue:
@@ -593,6 +616,8 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
             trip_title_for_push = trip.title
             user_name_for_push = user_name
             was_overdue_for_push = was_overdue
+
+            @safe_background_task("send_friend_checkout_push")
             def send_friend_push_sync():
                 for friend_id in friend_user_ids:
                     if was_overdue_for_push:
@@ -630,6 +655,7 @@ def checkout_with_token(token: str, background_tasks: BackgroundTasks):
                 owner_name_for_participants = user_name
                 trip_id_for_participants = trip.id
 
+                @safe_background_task("send_participant_completion_push")
                 def send_participant_completion_push():
                     for pid in participant_ids:
                         asyncio.run(send_trip_completed_push(

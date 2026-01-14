@@ -57,8 +57,8 @@ def setup_test_user_and_trip():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -259,8 +259,8 @@ def test_register_live_activity_token_wrong_user():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -358,8 +358,8 @@ def test_delete_live_activity_token_wrong_user():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -450,8 +450,8 @@ def test_get_live_activity_token_wrong_user():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),

@@ -23,18 +23,21 @@ log = logging.getLogger(__name__)
 async def send_friend_trip_created_push(
     friend_user_id: int,
     user_name: str,
-    trip_title: str
+    trip_title: str,
+    trip_id: int | None = None
 ):
     """Send push notification to a friend when they're added as a safety contact."""
     log.info(f"[Notifications] send_friend_trip_created_push called: friend_user_id={friend_user_id}, user_name={user_name}, trip_title={trip_title}")
     title = "Safety Contact Added"
     body = f"{user_name} added you as a safety contact for their trip '{trip_title}'"
 
+    data = {"trip_id": trip_id} if trip_id else None
     await send_push_to_user(
         friend_user_id,
         title,
         body,
-        notification_type="general"
+        data=data,
+        notification_type="friend_trip"
     )
     log.info(f"[Notifications] Completed send_friend_trip_created_push to user {friend_user_id}")
 
@@ -43,6 +46,7 @@ async def send_friend_trip_starting_push(
     friend_user_id: int,
     user_name: str,
     trip_title: str,
+    trip_id: int | None = None,
     custom_message: str | None = None
 ):
     """Send push notification to a friend when the trip they're monitoring starts.
@@ -58,11 +62,13 @@ async def send_friend_trip_starting_push(
         msg = custom_message.strip()[:150]
         body = f"{body}\n\n📝 {user_name}'s note: \"{msg}\""
 
+    data = {"trip_id": trip_id} if trip_id else None
     await send_push_to_user(
         friend_user_id,
         title,
         body,
-        notification_type="general"
+        data=data,
+        notification_type="friend_trip"
     )
     log.info(f"Sent friend trip starting push to user {friend_user_id}")
 
@@ -104,7 +110,8 @@ async def send_friend_overdue_push(
         body = f"{body}\n\n⚠️ {user_name}'s emergency note: \"{msg}\""
 
     # Include coordinates in data for map deep linking
-    data: dict = {"trip_id": trip_id, "is_overdue_alert": True}
+    # Note: is_overdue_alert flag tells iOS this is a friend notification for navigation
+    data: dict = {"trip_id": trip_id, "is_overdue_alert": True, "is_friend_notification": True}
     if last_location_coords:
         data["last_known_lat"] = last_location_coords[0]
         data["last_known_lon"] = last_location_coords[1]
@@ -114,7 +121,7 @@ async def send_friend_overdue_push(
         title,
         body,
         data=data,
-        notification_type="emergency"  # Emergency notifications always send
+        notification_type="emergency"  # Emergency notifications always bypass preferences
     )
     log.info(f"Sent friend OVERDUE push to user {friend_user_id} for trip {trip_id}")
 
@@ -122,17 +129,20 @@ async def send_friend_overdue_push(
 async def send_friend_trip_completed_push(
     friend_user_id: int,
     user_name: str,
-    trip_title: str
+    trip_title: str,
+    trip_id: int | None = None
 ):
     """Send push notification to a friend when the trip owner is safe."""
     title = f"✅ {user_name} is safe!"
     body = f"{user_name} completed their trip '{trip_title}' safely."
 
+    data = {"trip_id": trip_id} if trip_id else None
     await send_push_to_user(
         friend_user_id,
         title,
         body,
-        notification_type="general"
+        data=data,
+        notification_type="friend_trip"
     )
     log.info(f"Sent friend trip completed push to user {friend_user_id}")
 
@@ -140,16 +150,20 @@ async def send_friend_trip_completed_push(
 async def send_friend_overdue_resolved_push(
     friend_user_id: int,
     user_name: str,
-    trip_title: str
+    trip_title: str,
+    trip_id: int | None = None
 ):
     """Send push notification to a friend when an overdue situation is resolved."""
     title = f"✅ {user_name} is safe!"
     body = f"Good news! {user_name} has checked in from '{trip_title}'."
 
+    # Use emergency type to bypass preferences, but include friend flag for iOS navigation
+    data = {"trip_id": trip_id, "is_friend_notification": True} if trip_id else {"is_friend_notification": True}
     await send_push_to_user(
         friend_user_id,
         title,
         body,
+        data=data,
         notification_type="emergency"  # Use emergency to ensure it's delivered
     )
     log.info(f"Sent friend overdue resolved push to user {friend_user_id}")
@@ -159,6 +173,7 @@ async def send_friend_checkin_push(
     friend_user_id: int,
     user_name: str,
     trip_title: str,
+    trip_id: int | None = None,
     location_name: str | None = None,
     coordinates: tuple[float, float] | None = None
 ):
@@ -175,7 +190,7 @@ async def send_friend_checkin_push(
         body = f"{user_name} checked in on their trip '{trip_title}'"
 
     # Include coordinates in data for map deep linking
-    data: dict = {}
+    data: dict = {"trip_id": trip_id} if trip_id else {}
     if coordinates:
         data["checkin_lat"] = coordinates[0]
         data["checkin_lon"] = coordinates[1]
@@ -185,7 +200,7 @@ async def send_friend_checkin_push(
         title,
         body,
         data=data if data else None,
-        notification_type="general"
+        notification_type="friend_trip"
     )
     log.info(f"Sent friend check-in push to user {friend_user_id}")
 
@@ -194,17 +209,20 @@ async def send_friend_trip_extended_push(
     friend_user_id: int,
     user_name: str,
     trip_title: str,
-    extended_by_minutes: int
+    trip_id: int | None = None,
+    extended_by_minutes: int = 0
 ):
     """Send push notification to a friend when the trip they're monitoring is extended."""
     title = "Trip Extended"
     body = f"{user_name} extended their trip '{trip_title}' by {extended_by_minutes} minutes"
 
+    data = {"trip_id": trip_id} if trip_id else None
     await send_push_to_user(
         friend_user_id,
         title,
         body,
-        notification_type="general"
+        data=data,
+        notification_type="friend_trip"
     )
     log.info(f"Sent friend trip extended push to user {friend_user_id}")
 
@@ -245,7 +263,7 @@ async def send_friend_request_accepted_push(
         inviter_user_id,
         title,
         body,
-        notification_type="general"
+        notification_type="friend_request"  # Navigate to Friends tab
     )
     log.info(f"Sent friend request accepted push to user {inviter_user_id}")
 
@@ -669,8 +687,9 @@ async def send_push_to_user(
         title: Notification title
         body: Notification body
         data: Optional data payload
-        notification_type: Type of notification - "trip_reminder", "checkin", "emergency", or "general"
+        notification_type: Type of notification - "trip_reminder", "checkin", "emergency", "friend_trip", or "general"
                           Emergency notifications always send; others respect user preferences.
+                          This value is included in the data payload for iOS navigation.
         category: APNs category for actionable notifications (e.g., "CHECKIN_REMINDER")
     """
     import asyncio
@@ -678,6 +697,11 @@ async def send_push_to_user(
 
     MAX_RETRIES = 3
     RETRY_DELAYS = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
+
+    # Include notification_type in data payload for iOS deep linking navigation
+    if data is None:
+        data = {}
+    data["notification_type"] = notification_type
 
     # Check user preferences (emergency notifications always sent for safety)
     if notification_type != "emergency":

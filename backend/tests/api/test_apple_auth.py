@@ -86,7 +86,7 @@ class TestFetchApplePublicKeys:
                 _fetch_apple_public_keys()
 
             assert exc_info.value.status_code == 503
-            assert "Failed to fetch Apple public keys" in exc_info.value.detail
+            assert "Unable to verify Apple credentials" in exc_info.value.detail
 
     def test_fetch_keys_http_error(self):
         """Test handling of HTTP errors when fetching keys."""
@@ -188,7 +188,7 @@ class TestValidateAppleIdentityToken:
                 validate_apple_identity_token(mock_token, "com.test.app")
 
             assert exc_info.value.status_code == 500
-            assert "Failed to construct public key" in exc_info.value.detail
+            assert "Failed to verify Apple credentials" in exc_info.value.detail
 
     def test_validate_expired_token(self):
         """Test that expired tokens are rejected."""
@@ -232,7 +232,7 @@ class TestValidateAppleIdentityToken:
                         validate_apple_identity_token(mock_token, "com.test.app")
 
                     assert exc_info.value.status_code == 401
-                    assert "Invalid token claims" in exc_info.value.detail
+                    assert "Invalid Apple credentials" in exc_info.value.detail
 
     def test_validate_jwt_error(self):
         """Test handling of general JWT errors."""
@@ -254,7 +254,7 @@ class TestValidateAppleIdentityToken:
                         validate_apple_identity_token(mock_token, "com.test.app")
 
                     assert exc_info.value.status_code == 401
-                    assert "Invalid token" in exc_info.value.detail
+                    assert "Invalid Apple credentials" in exc_info.value.detail
 
     def test_validate_success(self):
         """Test successful token validation."""

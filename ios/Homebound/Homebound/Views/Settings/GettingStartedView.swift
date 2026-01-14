@@ -42,6 +42,13 @@ enum GettingStartedContent {
             title: "Homebound",
             subtitle: "Home safe",
             description: "Tap \"I'm Safe\" when you make it wherever your adventures took you. If you don't check out in time, your safety contacts will be automatically notified. (Following a grace period you set up front.)"
+        ),
+        GettingStartedStep(
+            icon: "person.fill.questionmark",
+            iconColor: Color(hex: "#2596be") ?? Color.teal,
+            title: "Why?",
+            subtitle: "What can you use Homebound for?",
+            description: "Anything you want! The idea for this app originally was to encourage more people to explore our beautiful Earth, staying safe while doing so. But throughout development, this app has turned into something bigger. Read more in the About section of Settings."
         )
     ]
 }

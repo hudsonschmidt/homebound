@@ -69,8 +69,8 @@ def test_user_with_device():
         # Create user
         result = conn.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'Notification', 'Test', 30)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, 'Notification', 'Test', 30, 'free')
                 RETURNING id
             """),
             {"email": test_email}
@@ -808,8 +808,8 @@ def test_user_with_trip_and_la_token():
         # Create user
         result = conn.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'LA', 'Test', 30)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, 'LA', 'Test', 30, 'free')
                 RETURNING id
             """),
             {"email": test_email}
@@ -1211,8 +1211,8 @@ def test_user_with_multiple_devices():
         # Create user
         result = conn.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'Multi', 'Device', 30)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, 'Multi', 'Device', 30, 'free')
                 RETURNING id
             """),
             {"email": test_email}
@@ -1357,8 +1357,8 @@ async def test_device_env_mismatch_skipped():
         # Create user
         result = conn.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'Env', 'Test', 30)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, 'Env', 'Test', 30, 'free')
                 RETURNING id
             """),
             {"email": test_email}

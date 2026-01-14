@@ -38,8 +38,10 @@ Homebound+ is an optional paid subscription that provides additional features, i
 - Custom notification messages
 - Contact groups for organization
 - Group trips with multiple participants
-- Data export capabilities
 - Pinned activities for quick access
+- Unlimited trip history
+- Live Activity and Dynamic Island support
+- Trip Map to view all your adventures
 - Enhanced privacy controls
 
 The specific features included in Homebound+ may change over time. See Section 7 for subscription terms.

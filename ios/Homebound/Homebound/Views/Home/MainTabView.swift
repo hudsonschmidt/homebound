@@ -7,6 +7,8 @@ struct MainTabView: View {
     @EnvironmentObject var session: Session
     @State private var selectedTab = 0
     @State private var showPaywall = false
+    @State private var scrollToFriendTripId: Int?
+    @State private var showTripInvitations = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -25,7 +27,7 @@ struct MainTabView: View {
                 .tag(1)
 
             // Friends Tab
-            FriendsTabView()
+            FriendsTabView(scrollToTripId: $scrollToFriendTripId)
                 .tabItem {
                     Label("Friends", systemImage: "person.2.fill")
                 }
@@ -51,9 +53,45 @@ struct MainTabView: View {
                 NotificationCenter.default.post(name: .friendsTabSelected, object: nil)
             }
         }
+        .onChange(of: session.pendingNavigation) { oldValue, newValue in
+            handlePendingNavigation(newValue)
+        }
         .sheet(isPresented: $showPaywall) {
             PaywallView()
                 .environmentObject(session)
+        }
+        .sheet(isPresented: $showTripInvitations) {
+            TripInvitationsView()
+                .environmentObject(session)
+        }
+    }
+
+    /// Handle navigation from push notifications
+    private func handlePendingNavigation(_ destination: NavigationDestination?) {
+        guard let destination = destination else { return }
+
+        // Clear the pending navigation immediately to prevent re-triggering
+        DispatchQueue.main.async {
+            session.pendingNavigation = nil
+        }
+
+        switch destination {
+        case .home, .trip:
+            // Own trip notifications and fallback → Home tab
+            selectedTab = 0
+
+        case .friendTrip(let tripId):
+            // Navigate to Friends tab and scroll to trip
+            selectedTab = 2
+            scrollToFriendTripId = tripId
+
+        case .tripInvitations:
+            // Show trip invitations sheet
+            showTripInvitations = true
+
+        case .friends:
+            // Just switch to Friends tab
+            selectedTab = 2
         }
     }
 }

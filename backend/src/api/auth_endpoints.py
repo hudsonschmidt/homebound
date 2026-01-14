@@ -4,10 +4,12 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 import sqlalchemy
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, EmailStr
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from src import config
 from src import database as db
@@ -15,6 +17,10 @@ from src.api.apple_auth import validate_apple_identity_token
 from src.services.notifications import send_magic_link_email
 
 logger = logging.getLogger(__name__)
+
+# Rate limiter for auth endpoints - disabled in DEV_MODE for easier testing
+_settings = config.get_settings()
+limiter = Limiter(key_func=get_remote_address, enabled=not _settings.DEV_MODE)
 
 router = APIRouter(
     prefix="/api/v1/auth",
@@ -24,8 +30,10 @@ router = APIRouter(
 settings = config.get_settings()
 
 # Apple App Store Review test account - configurable via environment variables
-APPLE_REVIEW_EMAIL = os.getenv("APPLE_REVIEW_EMAIL", "apple-review@homeboundapp.com")
-APPLE_REVIEW_CODE = os.getenv("APPLE_REVIEW_CODE", "123456")
+# IMPORTANT: Both values MUST be set via environment variables in production
+# If APPLE_REVIEW_CODE is not set, the bypass is disabled
+APPLE_REVIEW_EMAIL = os.getenv("APPLE_REVIEW_EMAIL")
+APPLE_REVIEW_CODE = os.getenv("APPLE_REVIEW_CODE")
 
 
 class MagicLinkRequest(BaseModel):
@@ -76,8 +84,12 @@ def create_jwt_pair(user_id: int, email: str) -> tuple[str, str]:
 
 
 @router.post("/request-magic-link")
-async def request_magic_link(body: MagicLinkRequest):
-    """Request a magic link code to be sent to email"""
+@limiter.limit("5/minute")
+async def request_magic_link(body: MagicLinkRequest, request: Request = None):
+    """Request a magic link code to be sent to email
+
+    Rate limited to 5 requests per minute per IP to prevent abuse.
+    """
     with db.engine.begin() as connection:
         # Check if user exists
         user = connection.execute(
@@ -146,11 +158,17 @@ async def request_magic_link(body: MagicLinkRequest):
 
 
 @router.post("/verify", response_model=TokenResponse)
-def verify_magic_code(body: VerifyRequest):
-    """Verify magic link code and return JWT tokens"""
+@limiter.limit("10/minute")
+def verify_magic_code(body: VerifyRequest, request: Request = None):
+    """Verify magic link code and return JWT tokens
+
+    Rate limited to 10 requests per minute per IP to prevent brute force attacks.
+    """
     with db.engine.begin() as connection:
         # Special case: Apple App Store Review test account
-        if body.email == APPLE_REVIEW_EMAIL and body.code == APPLE_REVIEW_CODE:
+        # Only enabled if both env vars are explicitly set
+        if (APPLE_REVIEW_EMAIL and APPLE_REVIEW_CODE and
+            body.email == APPLE_REVIEW_EMAIL and body.code == APPLE_REVIEW_CODE):
 
             # Get or create the test user
             user = connection.execute(
@@ -315,8 +333,12 @@ def verify_magic_code(body: VerifyRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh_token(body: RefreshRequest):
-    """Exchange refresh token for new access and refresh tokens"""
+@limiter.limit("20/minute")
+def refresh_token(body: RefreshRequest, request: Request = None):
+    """Exchange refresh token for new access and refresh tokens
+
+    Rate limited to 20 requests per minute per IP.
+    """
     try:
         payload = jwt.decode(
             body.refresh_token,
@@ -405,7 +427,8 @@ class AppleSignInResponse(BaseModel):
 
 
 @router.post("/apple", response_model=AppleSignInResponse)
-def apple_sign_in(body: AppleSignInRequest):
+@limiter.limit("10/minute")
+def apple_sign_in(body: AppleSignInRequest, request: Request = None):
     """
     Authenticate or create user via Sign in with Apple
 
@@ -549,7 +572,8 @@ class AppleLinkRequest(BaseModel):
 
 
 @router.post("/apple/link")
-def link_apple_account(body: AppleLinkRequest):
+@limiter.limit("5/minute")
+def link_apple_account(body: AppleLinkRequest, request: Request = None):
     """
     Link Apple ID to existing account (user must first authenticate with magic link)
 

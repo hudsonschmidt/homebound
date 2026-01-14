@@ -7,7 +7,8 @@ and Apple App Store Server Notifications webhook.
 import base64
 import json
 import logging
-from datetime import datetime, UTC
+import random
+from datetime import datetime, timedelta, UTC
 
 import httpx
 import sqlalchemy
@@ -31,10 +32,8 @@ VALID_PRODUCT_IDS = {
     "com.homeboundapp.homebound.plus.yearly",
 }
 
-# Processed webhook notification IDs (in-memory cache with TTL would be better for production)
-# This prevents duplicate processing when Apple retries notifications
-_processed_notifications: set[str] = set()
-MAX_PROCESSED_NOTIFICATIONS = 10000  # Limit cache size
+# Webhook deduplication TTL (7 days)
+WEBHOOK_DEDUP_TTL_DAYS = 7
 
 router = APIRouter(
     prefix="/api/v1/subscriptions",
@@ -1046,18 +1045,49 @@ async def apple_webhook(request: Request):
             f"uuid={notification_uuid}, verified=True"
         )
 
-        # Idempotency check: skip already processed notifications
+        # Idempotency check: skip already processed notifications (database-backed)
         if notification_uuid:
-            if notification_uuid in _processed_notifications:
-                logger.info(f"Skipping duplicate notification: {notification_uuid}")
-                return {"ok": True, "duplicate": True, "notification_uuid": notification_uuid}
+            with db.engine.begin() as connection:
+                # Check if notification was already processed
+                existing = connection.execute(
+                    sqlalchemy.text(
+                        """
+                        SELECT id FROM processed_webhooks
+                        WHERE notification_uuid = :uuid
+                        """
+                    ),
+                    {"uuid": notification_uuid}
+                ).fetchone()
 
-            # Add to processed set (with size limit to prevent unbounded growth)
-            if len(_processed_notifications) >= MAX_PROCESSED_NOTIFICATIONS:
-                # Remove oldest entries (simple approach; LRU cache would be better)
-                _processed_notifications.clear()
-                logger.info("Cleared processed notifications cache (size limit reached)")
-            _processed_notifications.add(notification_uuid)
+                if existing:
+                    logger.info(f"Skipping duplicate notification: {notification_uuid}")
+                    return {"ok": True, "duplicate": True, "notification_uuid": notification_uuid}
+
+                # Record this notification as processed
+                expires_at = datetime.now(UTC) + timedelta(days=WEBHOOK_DEDUP_TTL_DAYS)
+                connection.execute(
+                    sqlalchemy.text(
+                        """
+                        INSERT INTO processed_webhooks (notification_uuid, notification_type, expires_at)
+                        VALUES (:uuid, :type, :expires_at)
+                        ON CONFLICT (notification_uuid) DO NOTHING
+                        """
+                    ),
+                    {"uuid": notification_uuid, "type": notification_type, "expires_at": expires_at}
+                )
+
+                # Clean up expired entries periodically (1% chance per request)
+                if random.random() < 0.01:
+                    connection.execute(
+                        sqlalchemy.text(
+                            """
+                            DELETE FROM processed_webhooks
+                            WHERE expires_at < :now
+                            """
+                        ),
+                        {"now": datetime.now(UTC)}
+                    )
+                    logger.info("Cleaned up expired webhook deduplication entries")
 
         # Process the notification
         result = handle_notification(notification_type, subtype, data)

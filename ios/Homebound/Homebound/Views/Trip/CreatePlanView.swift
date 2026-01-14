@@ -772,20 +772,21 @@ struct Step1TripDetails: View {
                     }
                 }
 
-                // Location Mode Toggle
+                // Location Mode Picker
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle(isOn: $useSeparateLocations) {
-                        HStack {
-                            Image(systemName: useSeparateLocations ? "arrow.triangle.swap" : "mappin.circle")
-                                .foregroundStyle(useSeparateLocations ? Color.hbAccent : .secondary)
-                            Text(useSeparateLocations ? "Start + Destination" : "Single Location")
-                                .font(.subheadline)
-                        }
+                    Picker("Trip Type", selection: $useSeparateLocations) {
+                        Text("Single Location")
+                            .tag(false)
+                        Text("Start → End")
+                            .tag(true)
                     }
-                    .tint(.hbAccent)
-                    .padding()
-                    .background(Color(.secondarySystemFill))
-                    .cornerRadius(12)
+                    .pickerStyle(.segmented)
+
+                    Text(useSeparateLocations
+                        ? "You're traveling from one place to another"
+                        : "You're staying at or returning to one location")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 // Location Selection(s)

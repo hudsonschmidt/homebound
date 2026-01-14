@@ -20,7 +20,9 @@ If you don't check out by your ETA (plus a grace period), Homebound automaticall
 - **Smart notifications**: Emergency contacts receive detailed trip info including location, notes, and activity type
 - **Flexible check-ins**: Check in via the app to reset your timer and share your location
 - **Grace periods**: Configurable buffer time before overdue alerts trigger
-- **Extend time**: Running late? Extend your trip with one tap
+- **Extend time**: Running late? Extend your trip up to 4 hours with one tap
+- **Home screen widgets**: Quick access to trip status and check-in
+- **Export your data**: Download your trip history anytime
 
 ### Friends & Social
 - **Add friends**: Connect via invite links or QR code scanning
@@ -42,8 +44,12 @@ If you don't check out by your ETA (plus a grace period), Homebound automaticall
 
 ### Premium (Homebound+)
 - **Trip Map**: See all your adventures plotted on an interactive map
-- **Extended time options**: More flexibility with 2hr, 3hr, 4hr extensions
+- **Unlimited history**: View your complete trip history
+- **Live Activity**: Track trips with Dynamic Island and lock screen
+- **Group trips**: Create trips with multiple participants
 - **Contact groups**: Organize friends into groups for quick trip setup
+- **Custom messages**: Personalize notification messages to contacts
+- **Trip templates**: Save favorite routes for quick reuse
 - **Monthly or yearly subscription**
 
 ## App Structure

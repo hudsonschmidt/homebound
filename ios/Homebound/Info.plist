@@ -41,9 +41,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Homebound needs your location to show nearby places and set your trip location.</string>
+	<string>Homebound uses your location to search for nearby places and set trip destinations.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Homebound needs your location to track your safety during trips and notify contacts if needed.</string>
+	<string>Homebound uses your location to share your real-time position with friends during active trips. This allows safety contacts to see where you are on a map.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UIBackgroundModes</key>
@@ -73,5 +73,9 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Homebound needs camera access to scan QR codes for adding friends.</string>
+	<key>SUPABASE_URL</key>
+	<string>https://kolnssrlszsyylhouswp.supabase.co</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvbG5zc3Jsc3pzeXlsaG91c3dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEyNDQ2NTcsImV4cCI6MjA3NjgyMDY1N30.D3eWhtUpoifs6YOOwQFmd6GZx8AH-_E7OAxuuCwmdsg</string>
 </dict>
 </plist>

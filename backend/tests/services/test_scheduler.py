@@ -42,8 +42,8 @@ def test_user_with_trip():
         # Create user
         result = conn.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'Scheduler', 'Test', 30)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, 'Scheduler', 'Test', 30, 'free')
                 RETURNING id
             """),
             {"email": test_email}
@@ -1618,8 +1618,8 @@ async def test_clean_stale_live_activity_tokens():
         # Create test user
         result = conn.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, 'LA', 'Cleanup', 30)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, 'LA', 'Cleanup', 30, 'free')
                 RETURNING id
             """),
             {"email": test_email}

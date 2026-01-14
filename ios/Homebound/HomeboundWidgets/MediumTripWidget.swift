@@ -30,7 +30,7 @@ struct MediumTripWidgetView: View {
     let entry: TripWidgetEntry
 
     var body: some View {
-        // Check if widgets are enabled (premium feature)
+        // Check if widgets are enabled
         if !LiveActivityConstants.widgetsEnabled {
             UpgradePremiumMediumView()
         } else if let trip = entry.tripData {

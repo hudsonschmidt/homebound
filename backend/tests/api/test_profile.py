@@ -29,8 +29,8 @@ def test_get_profile():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -75,8 +75,8 @@ def test_update_profile():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -127,8 +127,8 @@ def test_update_profile_partial():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -172,8 +172,8 @@ def test_delete_account():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -218,8 +218,8 @@ def test_patch_profile():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -268,8 +268,8 @@ def test_profile_completed_logic():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -292,10 +292,9 @@ def test_profile_completed_logic():
     response = update_profile(update_data, user_id=user_id)
     assert response.user["profile_completed"] is True
 
-    # Update to make incomplete again (age = 0)
-    update_data = ProfileUpdate(age=0)
-    response = update_profile(update_data, user_id=user_id)
-    assert response.user["profile_completed"] is False
+    # Note: age=0 is now rejected by validation (age must be >= 1), so we can't
+    # test making profile incomplete via age. The profile_completed logic still
+    # works correctly for users with age=0 in the database (legacy data).
 
     # Clean up
     with db.engine.begin() as connection:
@@ -320,8 +319,8 @@ def test_onboarding_flow_simulation():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -371,8 +370,8 @@ def test_update_only_first_name():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -415,8 +414,8 @@ def test_update_only_last_name():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -459,8 +458,8 @@ def test_empty_strings_mark_profile_incomplete():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -505,8 +504,8 @@ def test_zero_age_marks_profile_incomplete():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -552,8 +551,8 @@ def test_delete_account_with_contacts():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -640,8 +639,8 @@ def test_delete_account_with_trips_and_events():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -763,8 +762,8 @@ def test_delete_account_with_devices():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -833,8 +832,8 @@ def test_delete_account_with_login_tokens():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -920,8 +919,8 @@ def test_delete_account_full_cascade():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -1337,15 +1336,15 @@ def test_export_user_data_with_trips():
 
 
 def test_export_user_data_nonexistent_user():
-    """Test exporting data for non-existent user returns 403.
+    """Test exporting data for non-existent user returns 404.
 
-    Note: The subscription check happens before user existence check,
-    so a non-existent user returns 403 (no subscription) not 404.
+    Note: Export is now free for all users, so a non-existent user
+    returns 404 (not found) instead of 403 (premium required).
     """
     with pytest.raises(HTTPException) as exc_info:
         export_user_data(user_id=999999)
-    assert exc_info.value.status_code == 403
-    assert "Homebound+" in exc_info.value.detail
+    assert exc_info.value.status_code == 404
+    assert "not found" in exc_info.value.detail.lower()
 
 
 def test_get_profile_includes_notification_preferences():
@@ -1363,8 +1362,8 @@ def test_get_profile_includes_notification_preferences():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -1408,8 +1407,8 @@ def test_update_notification_preferences():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -1466,8 +1465,8 @@ def test_patch_notification_preferences():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -1513,8 +1512,8 @@ def test_update_profile_with_notification_prefs_and_other_fields():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -1706,8 +1705,8 @@ def test_get_friend_visibility_defaults():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -1751,8 +1750,8 @@ def test_update_friend_visibility():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),
@@ -1809,8 +1808,8 @@ def test_update_friend_visibility_partial():
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, :age)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, :age, 'free')
                 RETURNING id
                 """
             ),

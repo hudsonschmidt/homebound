@@ -14,6 +14,51 @@ struct FriendTripMapView: View {
     init(trip: FriendActiveTrip) {
         self.trip = trip
         _currentTrip = State(initialValue: trip)
+        _mapPosition = State(initialValue: Self.initialMapPosition(for: trip))
+    }
+
+    /// Calculate initial map position that fits all markers with comfortable padding
+    private static func initialMapPosition(for trip: FriendActiveTrip) -> MapCameraPosition {
+        var coordinates: [CLLocationCoordinate2D] = []
+
+        if let coord = trip.destinationCoordinate {
+            coordinates.append(coord)
+        }
+        if let coord = trip.startCoordinate {
+            coordinates.append(coord)
+        }
+        if let checkins = trip.checkin_locations {
+            coordinates.append(contentsOf: checkins.compactMap { $0.coordinate })
+        }
+        if let liveLocation = trip.live_location {
+            coordinates.append(liveLocation.coordinate)
+        }
+
+        guard !coordinates.isEmpty else {
+            return .automatic
+        }
+
+        // Calculate bounding box
+        let minLat = coordinates.map { $0.latitude }.min()!
+        let maxLat = coordinates.map { $0.latitude }.max()!
+        let minLon = coordinates.map { $0.longitude }.min()!
+        let maxLon = coordinates.map { $0.longitude }.max()!
+
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+
+        // Calculate span with padding (add 50% extra space on each side)
+        let latDelta = max((maxLat - minLat) * 1.5, 0.01)  // Minimum 0.01 degrees (~1km)
+        let lonDelta = max((maxLon - minLon) * 1.5, 0.01)
+
+        let region = MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(latitudeDelta: latDelta, longitudeDelta: lonDelta)
+        )
+
+        return .region(region)
     }
 
     // MARK: - Map Content
@@ -76,6 +121,15 @@ struct FriendTripMapView: View {
                         dismiss()
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if currentTrip.live_location != nil {
+                        Button {
+                            centerOnLiveLocation()
+                        } label: {
+                            Image(systemName: "location.fill")
+                        }
+                    }
+                }
             }
             .overlay(alignment: .bottom) {
                 // Trip info card at bottom
@@ -90,6 +144,16 @@ struct FriendTripMapView: View {
                     await refreshTripData()
                 }
             }
+        }
+    }
+
+    private func centerOnLiveLocation() {
+        guard let liveLocation = currentTrip.live_location else { return }
+        withAnimation {
+            mapPosition = .region(MKCoordinateRegion(
+                center: liveLocation.coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+            ))
         }
     }
 
@@ -273,11 +337,16 @@ private struct TripInfoCard: View {
             }
 
             // Live location indicator
-            if trip.live_location != nil {
+            if let liveLocation = trip.live_location {
                 HStack {
                     Image(systemName: "location.fill")
                         .foregroundStyle(.blue)
-                    Text("Live location sharing enabled")
+                    Text("Live location")
+                    Spacer()
+                    if let date = liveLocation.timestampDate {
+                        Text(date, style: .relative)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.blue)

@@ -50,9 +50,9 @@ struct FeatureLimits: Codable {
         contactsPerTrip: 2,
         savedTripsLimit: 0,
         historyDays: 30,
-        extensions: [30],
+        extensions: [30, 60, 120, 180, 240],
         visibleStats: 2,
-        widgetsEnabled: false,
+        widgetsEnabled: true,
         liveActivityEnabled: false,
         customIntervalsEnabled: false,
         tripMapEnabled: false,
@@ -60,7 +60,7 @@ struct FeatureLimits: Codable {
         groupTripsEnabled: false,
         contactGroupsEnabled: false,
         customMessagesEnabled: false,
-        exportEnabled: false,
+        exportEnabled: true,
         familySharingEnabled: false
     )
 

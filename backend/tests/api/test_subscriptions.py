@@ -587,7 +587,8 @@ def test_limits_endpoint_returns_correct_tier():
         assert limits.contacts_per_trip == 2
         assert limits.saved_trips_limit == 0
         assert limits.history_days == 30
-        assert limits.widgets_enabled is False
+        assert limits.widgets_enabled is True  # Widgets now free
+        assert limits.export_enabled is True  # Export now free
     finally:
         with db.engine.begin() as conn:
             conn.execute(

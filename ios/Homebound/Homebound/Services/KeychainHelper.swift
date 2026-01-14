@@ -123,7 +123,7 @@ final class KeychainHelper {
             kSecAttrAccount as String: key
         ]
 
-        // Attributes to update
+        // Attributes to update (including accessibility for any newly created items)
         let updateAttributes: [String: Any] = [
             kSecValueData as String: data
         ]
@@ -132,12 +132,17 @@ final class KeychainHelper {
         var status = SecItemUpdate(searchQuery as CFDictionary, updateAttributes as CFDictionary)
 
         if status == errSecItemNotFound {
-            // Item doesn't exist, add it
+            // Item doesn't exist, add it with explicit accessibility
+            // kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly provides:
+            // - Access after first device unlock (works in background)
+            // - Data stays on this device only (not synced to iCloud Keychain)
+            // - Appropriate security for auth tokens
             let addQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
                 kSecAttrAccount as String: key,
-                kSecValueData as String: data
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             ]
             status = SecItemAdd(addQuery as CFDictionary, nil)
 

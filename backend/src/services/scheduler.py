@@ -370,12 +370,35 @@ async def _process_overdue_trip(trip, now: datetime):
 
         if friend_contacts:
             log.info(f"[Scheduler] Sending overdue push notifications to {len(friend_contacts)} friend contacts for trip {trip_id}")
+
+            # Fetch the latest live location for this trip's user to include in overdue alerts
+            last_location_coords = None
+            try:
+                with db.engine.connect() as conn:
+                    live_loc = conn.execute(
+                        sqlalchemy.text("""
+                            SELECT latitude, longitude
+                            FROM live_locations
+                            WHERE user_id = :user_id
+                            ORDER BY timestamp DESC
+                            LIMIT 1
+                        """),
+                        {"user_id": trip.user_id}
+                    ).fetchone()
+                    if live_loc:
+                        last_location_coords = (live_loc.latitude, live_loc.longitude)
+                        log.info(f"[Scheduler] Trip {trip_id}: Found last known location for overdue alert: {last_location_coords}")
+            except Exception as e:
+                log.warning(f"[Scheduler] Trip {trip_id}: Failed to fetch live location for overdue alert: {e}")
+
             for friend in friend_contacts:
                 await send_friend_overdue_push(
                     friend_user_id=friend.friend_user_id,
                     user_name=user_name,
                     trip_title=trip.title,
                     trip_id=trip_id,
+                    last_location_coords=last_location_coords,
+                    destination_text=trip.location_text,
                     custom_message=custom_overdue_message
                 )
             log.info(f"[Scheduler] Friend overdue notifications sent for trip {trip_id}")

@@ -44,9 +44,10 @@ def _fetch_apple_public_keys() -> dict:
 
         return keys
     except requests.RequestException as e:
+        logger.error(f"Failed to fetch Apple public keys: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to fetch Apple public keys: {str(e)}"
+            detail="Unable to verify Apple credentials. Please try again later."
         )
 
 
@@ -120,9 +121,10 @@ def validate_apple_identity_token(
         try:
             public_key_pem = jwk.construct(apple_public_key).to_pem()
         except Exception as e:
+            logger.error(f"Failed to construct public key from Apple JWK: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to construct public key: {str(e)}"
+                detail="Failed to verify Apple credentials"
             )
 
         # Decode and validate the token
@@ -146,14 +148,16 @@ def validate_apple_identity_token(
                 detail="Apple identity token has expired"
             )
         except JWTClaimsError as e:
+            logger.warning(f"Invalid Apple token claims: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token claims: {str(e)}"
+                detail="Invalid Apple credentials"
             )
         except JWTError as e:
+            logger.warning(f"Invalid Apple token: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token: {str(e)}"
+                detail="Invalid Apple credentials"
             )
 
         # Validate user ID if provided

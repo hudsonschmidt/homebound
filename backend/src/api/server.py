@@ -2,17 +2,26 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from starlette.middleware.cors import CORSMiddleware
 
 from src import config
 from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, participants, profile, stats, subscriptions, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging based on environment
+settings = config.get_settings()
+log_level = logging.INFO if settings.DEV_MODE else logging.WARNING
+logging.basicConfig(level=log_level)
 log = logging.getLogger(__name__)
+
+# Rate limiter configuration
+limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -59,6 +68,10 @@ app = FastAPI(
     openapi_tags=tags_metadata,
     lifespan=lifespan,
 )
+
+# Add rate limiter to app state and exception handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configure CORS for mobile and web
 # Production origins only - localhost/dev origins removed for security

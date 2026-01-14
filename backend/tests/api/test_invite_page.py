@@ -52,8 +52,8 @@ def get_test_user_id() -> int:
         # Create a test user if none exists
         result = conn.execute(
             sqlalchemy.text("""
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES ('invite-test@example.com', 'Test', 'User', 25)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES ('invite-test@example.com', 'Test', 'User', 25, 'free')
                 RETURNING id
             """)
         )

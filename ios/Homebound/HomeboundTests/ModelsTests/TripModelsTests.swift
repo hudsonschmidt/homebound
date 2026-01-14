@@ -1,6 +1,7 @@
 import XCTest
 @testable import Homebound
 
+@MainActor
 final class TripModelsTests: XCTestCase {
 
     // MARK: - Trip Decoding Tests

@@ -257,6 +257,21 @@ class AppPreferences: ObservableObject {
         }
     }
 
+    // MARK: - App Store Reviews
+    @Published var reviewPromptDates: [Date] {
+        didSet {
+            if let data = try? JSONEncoder().encode(reviewPromptDates) {
+                UserDefaults.standard.set(data, forKey: "reviewPromptDates")
+            }
+        }
+    }
+
+    @Published var lastReviewPromptTripCount: Int {
+        didSet {
+            UserDefaults.standard.set(lastReviewPromptTripCount, forKey: "lastReviewPromptTripCount")
+        }
+    }
+
     // MARK: - Friends Mini Profile
     @Published var showFriendJoinDate: Bool {
         didSet {
@@ -406,6 +421,15 @@ class AppPreferences: ObservableObject {
         } else {
             self.seenAchievementIds = []
         }
+
+        // App Store Reviews
+        if let data = UserDefaults.standard.data(forKey: "reviewPromptDates"),
+           let dates = try? JSONDecoder().decode([Date].self, from: data) {
+            self.reviewPromptDates = dates
+        } else {
+            self.reviewPromptDates = []
+        }
+        self.lastReviewPromptTripCount = UserDefaults.standard.integer(forKey: "lastReviewPromptTripCount")
 
         // Friends Mini Profile - defaults (join date true, age false, rest true)
         self.showFriendJoinDate = UserDefaults.standard.object(forKey: "showFriendJoinDate") == nil ? true : UserDefaults.standard.bool(forKey: "showFriendJoinDate")
@@ -1666,7 +1690,7 @@ struct PrivacyView: View {
             } header: {
                 Text("Live Location")
             } footer: {
-                Text("When enabled, you can share your real-time location with friends during trips. Requires 'Always Allow' location permission for background updates.")
+                Text("When enabled, friends who are your safety contacts can see your real-time position on a map during active trips. Requires 'Always' location permission to update while the app is in the background.")
             }
 
             // Location Section
@@ -1696,7 +1720,7 @@ struct PrivacyView: View {
             } header: {
                 Text("Location")
             } footer: {
-                Text("Homebound uses your location to set trip locations and show nearby places. Your location is never tracked in the background.")
+                Text("Used to search for places and set trip locations. 'While Using' is sufficient for basic features. 'Always' is required for live location sharing with friends.")
             }
 
             // Your Data Section
@@ -1997,6 +2021,10 @@ struct AboutView: View {
         (
             "Why we built Homebound",
             "Most trips are uneventful, until they aren’t. When something goes wrong, the hardest part is often the first few hours: figuring out where to start. Homebound exists to make that starting point clearer, faster, and less stressful for everyone involved."
+        ),
+        (
+            "What can you use Homebound for?",
+            "Anything you want! The idea for this app originally was to encourage more people to explore our beautiful Earth, staying safe while doing so. But throughout development, this app has turned into something bigger. Homebound can be used in any situation where you want someone to know where you're going and when you expect to be back/there. For example, college students walking back to their dorms at night, parents tracking kids on field trips, going out to bars with friends, or college students going out to frats/parties. Even just letting a roommate know when you'll be back from grocery shopping. The idea of Homebound is to help you come up with a plan and share it with someone you trust, so that if something goes wrong, they have the information they need to help you."
         ),
         (
             "What Homebound does",

@@ -103,8 +103,8 @@ def create_test_user(email: str, first_name: str = "Test", last_name: str = "Use
         result = connection.execute(
             sqlalchemy.text(
                 """
-                INSERT INTO users (email, first_name, last_name, age)
-                VALUES (:email, :first_name, :last_name, 25)
+                INSERT INTO users (email, first_name, last_name, age, subscription_tier)
+                VALUES (:email, :first_name, :last_name, 25, 'free')
                 RETURNING id
                 """
             ),

@@ -60,9 +60,9 @@ FREE_LIMITS = FeatureLimits(
     contacts_per_trip=2,
     saved_trips=0,
     history_days=30,
-    extensions=[30],  # 30 min only
+    extensions=[30, 60, 120, 180, 240],  # All extension options
     visible_stats=2,
-    widgets=False,
+    widgets=True,
     live_activity=False,
     custom_intervals=False,
     trip_map=False,
@@ -70,7 +70,7 @@ FREE_LIMITS = FeatureLimits(
     group_trips=False,
     contact_groups=False,
     custom_messages=False,
-    export=False,
+    export=True,
     family_sharing=False,
 )
 

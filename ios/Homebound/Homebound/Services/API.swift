@@ -133,6 +133,21 @@ struct API {
         return try decoder.decode(T.self, from: data)
     }
 
+    /// Simple GET request that returns the HTTP status code without decoding
+    /// Used for tokenized endpoints like check-in/check-out that don't require auth or JSON response
+    func fetch(_ url: URL) async throws -> Int {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.badResponse }
+        debugLog("[API] GET \(url.path) → \(http.statusCode)")
+        if http.statusCode >= 400 {
+            let msg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw APIError.httpError(statusCode: http.statusCode, message: msg)
+        }
+        return http.statusCode
+    }
+
     private func check(resp: URLResponse, data: Data) throws {
         guard let http = resp as? HTTPURLResponse else { throw APIError.badResponse }
         if (200..<300).contains(http.statusCode) { return }

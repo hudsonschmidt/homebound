@@ -97,9 +97,9 @@ final class SubscriptionModelsTests: XCTestCase {
         XCTAssertEqual(free.contactsPerTrip, 2)
         XCTAssertEqual(free.savedTripsLimit, 0)
         XCTAssertEqual(free.historyDays, 30)
-        XCTAssertEqual(free.extensions, [30])
+        XCTAssertEqual(free.extensions, [30, 60, 120, 180, 240])
         XCTAssertEqual(free.visibleStats, 2)
-        XCTAssertFalse(free.widgetsEnabled)
+        XCTAssertTrue(free.widgetsEnabled)
         XCTAssertFalse(free.liveActivityEnabled)
         XCTAssertFalse(free.customIntervalsEnabled)
         XCTAssertFalse(free.tripMapEnabled)
@@ -107,7 +107,7 @@ final class SubscriptionModelsTests: XCTestCase {
         XCTAssertFalse(free.groupTripsEnabled)
         XCTAssertFalse(free.contactGroupsEnabled)
         XCTAssertFalse(free.customMessagesEnabled)
-        XCTAssertFalse(free.exportEnabled)
+        XCTAssertTrue(free.exportEnabled)
         XCTAssertFalse(free.familySharingEnabled)
     }
 
@@ -133,13 +133,14 @@ final class SubscriptionModelsTests: XCTestCase {
         XCTAssertTrue(plus.familySharingEnabled)
     }
 
-    func testFeatureLimits_FreeTierHasRestrictedExtensions() {
+    func testFeatureLimits_FreeTierHasExtensions() {
         let free = FeatureLimits.free
         let plus = FeatureLimits.plus
 
-        XCTAssertEqual(free.extensions.count, 1)
-        XCTAssertEqual(free.extensions, [30])
-        XCTAssertGreaterThan(plus.extensions.count, 1)
+        // Free tier now has full extension options
+        XCTAssertEqual(free.extensions.count, 5)
+        XCTAssertEqual(free.extensions, [30, 60, 120, 180, 240])
+        XCTAssertEqual(plus.extensions.count, 5)
         XCTAssertTrue(plus.extensions.contains(30))
         XCTAssertTrue(plus.extensions.contains(60))
         XCTAssertTrue(plus.extensions.contains(120))
@@ -275,7 +276,9 @@ final class SubscriptionModelsTests: XCTestCase {
             environment: "sandbox",
             isFamilyShared: false,
             autoRenew: true,
-            isTrial: false
+            isTrial: false,
+            gracePeriodExpiresDate: nil,
+            isInGracePeriod: false
         )
 
         let encoder = JSONEncoder()
@@ -303,7 +306,9 @@ final class SubscriptionModelsTests: XCTestCase {
             environment: "sandbox",
             isFamilyShared: false,
             autoRenew: true,
-            isTrial: true
+            isTrial: true,
+            gracePeriodExpiresDate: nil,
+            isInGracePeriod: false
         )
 
         let encoder = JSONEncoder()
@@ -323,7 +328,9 @@ final class SubscriptionModelsTests: XCTestCase {
             environment: "production",
             isFamilyShared: false,
             autoRenew: true,
-            isTrial: false
+            isTrial: false,
+            gracePeriodExpiresDate: nil,
+            isInGracePeriod: false
         )
 
         let encoder = JSONEncoder()
