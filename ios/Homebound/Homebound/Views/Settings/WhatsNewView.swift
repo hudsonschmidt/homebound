@@ -30,7 +30,7 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 1.0.0",
+        title: "Update 1.0.1",
         features: [
             WhatsNewFeature(
                 icon: "custom.fireworks",
