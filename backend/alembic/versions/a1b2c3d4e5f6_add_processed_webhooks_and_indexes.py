@@ -42,12 +42,12 @@ def upgrade() -> None:
 
     # Performance indexes on frequently queried tables
     # trips table
-    op.create_index('ix_trips_owner_id', 'trips', ['owner_id'])
+    op.create_index('ix_trips_user_id', 'trips', ['user_id'])
     op.create_index('ix_trips_status', 'trips', ['status'])
     op.create_index('ix_trips_created_at', 'trips', ['created_at'])
 
     # contacts table
-    op.create_index('ix_contacts_owner_id', 'contacts', ['owner_id'])
+    op.create_index('ix_contacts_user_id', 'contacts', ['user_id'])
 
     # login_tokens table
     op.create_index('ix_login_tokens_user_id', 'login_tokens', ['user_id'])
@@ -60,10 +60,10 @@ def downgrade() -> None:
     # Drop performance indexes
     op.drop_index('ix_login_tokens_email', 'login_tokens')
     op.drop_index('ix_login_tokens_user_id', 'login_tokens')
-    op.drop_index('ix_contacts_owner_id', 'contacts')
+    op.drop_index('ix_contacts_user_id', 'contacts')
     op.drop_index('ix_trips_created_at', 'trips')
     op.drop_index('ix_trips_status', 'trips')
-    op.drop_index('ix_trips_owner_id', 'trips')
+    op.drop_index('ix_trips_user_id', 'trips')
 
     # Drop processed_webhooks table
     op.drop_table('processed_webhooks')
