@@ -78,12 +78,18 @@ struct FriendTripMapView: View {
             }
         }
 
-        // Check-in location markers (numbered, most recent first)
+        // Check-in location markers (numbered chronologically: #1 = first check-in)
         if let checkins = currentTrip.checkin_locations {
-            ForEach(Array(checkins.enumerated()), id: \.element.id) { index, checkin in
+            // Sort chronologically (oldest first) for correct numbering
+            let sortedCheckins = checkins.sorted { c1, c2 in
+                guard let d1 = c1.timestampDate, let d2 = c2.timestampDate else { return false }
+                return d1 < d2
+            }
+            let latestIndex = sortedCheckins.count - 1
+            ForEach(Array(sortedCheckins.enumerated()), id: \.element.id) { index, checkin in
                 if let coord = checkin.coordinate {
                     Annotation(checkin.location_name ?? "Check-in \(index + 1)", coordinate: coord) {
-                        CheckinPin(number: index + 1, isLatest: index == 0)
+                        CheckinPin(number: index + 1, isLatest: index == latestIndex)
                     }
                 }
             }
@@ -96,10 +102,15 @@ struct FriendTripMapView: View {
             }
         }
 
-        // Draw polyline connecting check-ins if there are multiple
+        // Draw polyline connecting check-ins in chronological order
         if let checkins = currentTrip.checkin_locations,
            checkins.count > 1 {
-            let coordinates = checkins.compactMap { $0.coordinate }
+            // Sort chronologically for proper path
+            let sortedCheckins = checkins.sorted { c1, c2 in
+                guard let d1 = c1.timestampDate, let d2 = c2.timestampDate else { return false }
+                return d1 < d2
+            }
+            let coordinates = sortedCheckins.compactMap { $0.coordinate }
             if coordinates.count > 1 {
                 MapPolyline(coordinates: coordinates)
                     .stroke(.blue.opacity(0.5), lineWidth: 2)

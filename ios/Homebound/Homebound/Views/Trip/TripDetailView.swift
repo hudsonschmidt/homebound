@@ -51,7 +51,8 @@ struct TripDetailView: View {
                         if trip.is_group_trip {
                             TripDetailParticipantsSection(
                                 participants: participants,
-                                isLoading: isLoadingParticipants
+                                isLoading: isLoadingParticipants,
+                                showLocationSharing: trip.group_settings?.share_locations_between_participants ?? false
                             )
                         }
 
@@ -115,12 +116,19 @@ struct TripDetailView: View {
     }
 
     private func loadParticipantsIfGroupTrip() async {
-        guard let trip = trip, trip.is_group_trip else { return }
+        guard let trip = trip, trip.is_group_trip else {
+            debugLog("[TripDetail] Not loading participants: trip=\(trip != nil), isGroupTrip=\(trip?.is_group_trip ?? false)")
+            return
+        }
+        debugLog("[TripDetail] Loading participants for group trip \(tripId)")
         await MainActor.run { isLoadingParticipants = true }
         if let response = await session.getParticipants(tripId: tripId) {
+            debugLog("[TripDetail] Loaded \(response.participants.count) participants")
             await MainActor.run {
                 participants = response.participants
             }
+        } else {
+            debugLog("[TripDetail] Failed to load participants - API returned nil")
         }
         await MainActor.run { isLoadingParticipants = false }
     }
@@ -130,7 +138,9 @@ struct TripDetailView: View {
         async let timelineTask: Void = loadTimelineEvents()
         async let contactsTask: [Contact] = session.loadContacts()
         async let friendsTask: [Friend] = session.loadFriends()
-        _ = await (timelineTask, contactsTask, friendsTask)
+        async let participantsTask: Void = loadParticipantsIfGroupTrip()
+        async let myContactsTask: Void = loadMyContactsIfGroupTrip()
+        _ = await (timelineTask, contactsTask, friendsTask, participantsTask, myContactsTask)
     }
 
     private func ensureContactsLoaded() async {
@@ -202,15 +212,39 @@ private struct TripDetailMapSection: View {
     let trip: Trip
     let events: [TimelineEvent]
     let participants: [TripParticipant]
+    @EnvironmentObject var session: Session
+    @ObservedObject private var locationManager = LocationManager.shared
     @State private var mapPosition: MapCameraPosition = .automatic
 
+    // Check-in events sorted chronologically (oldest first for correct numbering)
     private var checkinEvents: [TimelineEvent] {
         events.filter { $0.kind == "checkin" && $0.lat != nil && $0.lon != nil }
+            .sorted { e1, e2 in
+                guard let d1 = e1.atDate, let d2 = e2.atDate else { return false }
+                return d1 < d2
+            }
     }
 
-    // Participants with valid locations
+    // Check if location sharing is enabled for this group trip
+    private var shouldShowParticipantLocations: Bool {
+        guard trip.is_group_trip else { return false }
+        return trip.group_settings?.share_locations_between_participants ?? false
+    }
+
+    // Participants with valid locations (excluding current user to avoid duplicate pins)
     private var participantsWithLocations: [TripParticipant] {
-        participants.filter { $0.last_lat != nil && $0.last_lon != nil && $0.status == "accepted" }
+        guard shouldShowParticipantLocations else { return [] }
+        return participants.filter { participant in
+            // Must have valid location and be accepted
+            guard participant.last_lat != nil && participant.last_lon != nil && participant.status == "accepted" else {
+                return false
+            }
+            // Exclude current user (they see their own location separately)
+            if let currentUserId = session.userId, participant.user_id == currentUserId {
+                return false
+            }
+            return true
+        }
     }
 
     // Colors for participant pins (cycle through these)
@@ -225,6 +259,11 @@ private struct TripDetailMapSection: View {
     private var allCoordinates: [CLLocationCoordinate2D] {
         var coords: [CLLocationCoordinate2D] = []
 
+        // User's current location (always included for group trips)
+        if trip.is_group_trip, locationManager.isAuthorized, let userLocation = locationManager.currentLocation {
+            coords.append(userLocation)
+        }
+
         // Start location
         if trip.has_separate_locations, let lat = trip.start_lat, let lng = trip.start_lng {
             coords.append(CLLocationCoordinate2D(latitude: lat, longitude: lng))
@@ -237,7 +276,7 @@ private struct TripDetailMapSection: View {
             }
         }
 
-        // Participant locations (for group trips)
+        // Participant locations (only if sharing is enabled)
         for participant in participantsWithLocations {
             if let lat = participant.last_lat, let lon = participant.last_lon {
                 coords.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
@@ -253,7 +292,8 @@ private struct TripDetailMapSection: View {
     }
 
     private var hasMapData: Bool {
-        trip.location_lat != nil || trip.start_lat != nil || !checkinEvents.isEmpty || !participantsWithLocations.isEmpty
+        let hasUserLocation = trip.is_group_trip && locationManager.isAuthorized && locationManager.currentLocation != nil
+        return trip.location_lat != nil || trip.start_lat != nil || !checkinEvents.isEmpty || !participantsWithLocations.isEmpty || hasUserLocation
     }
 
     private func calculateRegion() -> MKCoordinateRegion {
@@ -299,7 +339,14 @@ private struct TripDetailMapSection: View {
                     }
                 }
 
-                // Participant location pins (for group trips)
+                // User's current location (always shown for group trips)
+                if trip.is_group_trip, locationManager.isAuthorized, let userLocation = locationManager.currentLocation {
+                    Annotation("My Location", coordinate: userLocation) {
+                        UserLocationPin()
+                    }
+                }
+
+                // Participant location pins (only shown if sharing is enabled by group leader)
                 ForEach(Array(participantsWithLocations.enumerated()), id: \.element.id) { index, participant in
                     if let lat = participant.last_lat, let lon = participant.last_lon {
                         Annotation(participant.displayName, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon)) {
@@ -335,6 +382,51 @@ private struct TripDetailMapSection: View {
             .onChange(of: events.count) {
                 mapPosition = .region(calculateRegion())
             }
+            .task {
+                // Send location updates for group trips with sharing enabled
+                await sendGroupTripLocationUpdates()
+            }
+        }
+    }
+
+    /// Send periodic location updates for group trips (less frequent than live location)
+    private func sendGroupTripLocationUpdates() async {
+        // Only for active group trips with location sharing enabled
+        guard trip.is_group_trip,
+              trip.status == "active",
+              trip.group_settings?.share_locations_between_participants == true,
+              locationManager.isAuthorized else {
+            return
+        }
+
+        let updateInterval: UInt64 = 60_000_000_000 // 60 seconds (less frequent than live location)
+
+        // Send initial location update
+        await sendLocationUpdate()
+
+        // Poll for location updates while map is visible
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: updateInterval)
+            guard !Task.isCancelled else { break }
+            await sendLocationUpdate()
+        }
+    }
+
+    /// Send current location to server for group trip
+    private func sendLocationUpdate() async {
+        guard let userLocation = locationManager.currentLocation else { return }
+        do {
+            _ = try await session.updateLiveLocation(
+                tripId: trip.id,
+                latitude: userLocation.latitude,
+                longitude: userLocation.longitude,
+                altitude: nil,
+                horizontalAccuracy: nil,
+                speed: nil
+            )
+            debugLog("[GroupTripMap] Sent location update for trip \(trip.id)")
+        } catch {
+            debugLog("[GroupTripMap] Failed to send location: \(error.localizedDescription)")
         }
     }
 }
@@ -763,6 +855,7 @@ private struct TripContactRow: View {
 private struct TripDetailParticipantsSection: View {
     let participants: [TripParticipant]
     let isLoading: Bool
+    let showLocationSharing: Bool
 
     var acceptedParticipants: [TripParticipant] {
         participants.filter { $0.status == "accepted" }
@@ -792,6 +885,17 @@ private struct TripDetailParticipantsSection: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Location sharing indicator
+            if showLocationSharing {
+                HStack(spacing: 4) {
+                    Image(systemName: "location.fill")
+                        .font(.caption2)
+                    Text("Location sharing enabled")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.blue)
+            }
+
             if isLoading {
                 HStack {
                     Spacer()
@@ -809,7 +913,7 @@ private struct TripDetailParticipantsSection: View {
                 VStack(spacing: 8) {
                     // Accepted participants
                     ForEach(acceptedParticipants, id: \.id) { participant in
-                        ParticipantRow(participant: participant)
+                        ParticipantRow(participant: participant, showLocation: showLocationSharing)
                     }
 
                     // Left participants
@@ -822,7 +926,7 @@ private struct TripDetailParticipantsSection: View {
                             .foregroundStyle(.secondary)
 
                         ForEach(leftParticipants, id: \.id) { participant in
-                            ParticipantRow(participant: participant)
+                            ParticipantRow(participant: participant, showLocation: false)
                         }
                     }
 
@@ -836,7 +940,7 @@ private struct TripDetailParticipantsSection: View {
                             .foregroundStyle(.secondary)
 
                         ForEach(pendingParticipants, id: \.id) { participant in
-                            ParticipantRow(participant: participant)
+                            ParticipantRow(participant: participant, showLocation: false)
                         }
                     }
                 }
@@ -850,6 +954,7 @@ private struct TripDetailParticipantsSection: View {
 
 private struct ParticipantRow: View {
     let participant: TripParticipant
+    let showLocation: Bool
 
     private var statusColor: Color {
         switch participant.status {
@@ -868,6 +973,10 @@ private struct ParticipantRow: View {
         case "left": return "arrow.right.circle"
         default: return "circle"
         }
+    }
+
+    private var hasLocation: Bool {
+        participant.last_lat != nil && participant.last_lon != nil
     }
 
     var body: some View {
@@ -908,6 +1017,15 @@ private struct ParticipantRow: View {
                     Text("Left on \(leftAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                } else if showLocation && hasLocation, let lastCheckin = participant.lastCheckinAtDate {
+                    // Show location timestamp when sharing is enabled
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                            .font(.caption2)
+                        Text("Updated \(lastCheckin, style: .relative) ago")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
                 } else if let lastCheckin = participant.lastCheckinAtDate {
                     Text("Last check-in: \(lastCheckin.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption2)
@@ -916,6 +1034,13 @@ private struct ParticipantRow: View {
             }
 
             Spacer()
+
+            // Location indicator (when sharing enabled and has location)
+            if showLocation && hasLocation {
+                Image(systemName: "location.fill")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
 
             // Status indicator
             Image(systemName: statusIcon)
@@ -1139,6 +1264,20 @@ private struct DetailCheckinPin: View {
                 .rotationEffect(.degrees(180))
                 .offset(y: -3)
         }
+    }
+}
+
+/// User's current location pin (always shown on group trip maps)
+private struct UserLocationPin: View {
+    var body: some View {
+        Circle()
+            .fill(Color.blue)
+            .frame(width: 20, height: 20)
+            .overlay(
+                Circle()
+                    .stroke(Color.white, lineWidth: 3)
+            )
+            .shadow(radius: 3)
     }
 }
 

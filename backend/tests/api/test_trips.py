@@ -4181,6 +4181,52 @@ def test_share_live_location_defaults_to_false():
     cleanup_test_data(user_id)
 
 
+def test_update_live_location_rate_limited():
+    """Test that rapid live location updates are rate limited."""
+    user_id, contact_id = setup_test_user_and_contact()
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Rate Limit Test",
+        activity="Hiking",
+        start=now - timedelta(minutes=30),
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        share_live_location=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+    trip = create_trip(trip_data, background_tasks, user_id=user_id)
+    trip_id = trip.id
+
+    try:
+        # First update should succeed
+        location_update = LiveLocationUpdate(
+            latitude=37.7749,
+            longitude=-122.4194
+        )
+        result = update_live_location(trip_id, location_update, user_id=user_id)
+        assert result.ok is True
+
+        # Second immediate update should be rate limited (within 10 seconds)
+        location_update2 = LiveLocationUpdate(
+            latitude=37.7750,
+            longitude=-122.4195
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            update_live_location(trip_id, location_update2, user_id=user_id)
+
+        assert exc_info.value.status_code == 429  # Too Many Requests
+        assert "rate limit" in exc_info.value.detail.lower() or "wait" in exc_info.value.detail.lower()
+
+    finally:
+        cleanup_test_data(user_id)
+
+
 # ==================== My Contacts Tests ====================
 
 def test_get_my_contacts_owner():

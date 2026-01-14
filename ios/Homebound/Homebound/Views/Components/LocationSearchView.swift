@@ -422,7 +422,7 @@ struct LocationSearchView: View {
         } else {
             await MainActor.run {
                 isSelectingResult = false
-                selectionErrorMessage = "Could not get location details. Please check your connection and try again."
+                selectionErrorMessage = "This location couldn't be found in Apple Maps. Try searching for a more specific address or place name."
                 showSelectionError = true
             }
         }
@@ -667,6 +667,7 @@ class LocationSearchCompleter: NSObject, ObservableObject {
         }
 
         var lastError: Error?
+        var emptyResultCount = 0
 
         for attempt in 0..<maxRetries {
             // Exponential backoff: 0ms, 500ms, 1500ms
@@ -685,6 +686,12 @@ class LocationSearchCompleter: NSObject, ObservableObject {
                 let response = try await search.start()
                 if let mapItem = response.mapItems.first {
                     let coordinate = mapItem.placemark.coordinate
+                    // Validate coordinates are not invalid (0,0)
+                    guard coordinate.latitude != 0 || coordinate.longitude != 0 else {
+                        debugLog("[LocationSearch] Attempt \(attempt + 1): Got invalid (0,0) coordinates for '\(result.title)'")
+                        emptyResultCount += 1
+                        continue
+                    }
                     // Cache the result
                     await MainActor.run {
                         self.coordinateCache[key] = coordinate
@@ -694,6 +701,10 @@ class LocationSearchCompleter: NSObject, ObservableObject {
                         }
                     }
                     return coordinate
+                } else {
+                    // MapKit returned no results for this completion - this is a known limitation
+                    debugLog("[LocationSearch] Attempt \(attempt + 1): No mapItems returned for '\(result.title)' (Apple MapKit limitation)")
+                    emptyResultCount += 1
                 }
             } catch {
                 lastError = error
@@ -701,7 +712,10 @@ class LocationSearchCompleter: NSObject, ObservableObject {
             }
         }
 
-        if let error = lastError {
+        // Log final failure reason
+        if emptyResultCount == maxRetries {
+            debugLog("[LocationSearch] Location '\(result.title)' has no coordinate data in Apple Maps - try a more specific search")
+        } else if let error = lastError {
             debugLog("[LocationSearch] All \(maxRetries) attempts failed for '\(result.title)': \(error.localizedDescription)")
         }
         return nil

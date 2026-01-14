@@ -1096,27 +1096,56 @@ async def clean_stale_live_activity_tokens():
 
 
 async def clean_old_live_locations():
-    """Clean up old live location records older than 7 days.
+    """Clean up old live location records.
 
     The live_locations table can grow indefinitely from active trips sharing
     their location. This job prevents unbounded table growth by removing
     stale location data that's no longer useful for monitoring.
+
+    Cleanup rules:
+    1. Delete ALL location records older than 7 days (hard limit)
+    2. Delete location records for completed trips after 24 hours
+       (provides privacy while allowing brief post-trip review)
     """
     try:
-        cutoff = datetime.utcnow() - timedelta(days=7)
+        now = datetime.utcnow()
+        hard_cutoff = now - timedelta(days=7)
+        completed_trip_cutoff = now - timedelta(hours=24)
 
         with db.engine.begin() as conn:
-            result = conn.execute(
+            # Rule 1: Delete records older than 7 days (regardless of trip status)
+            result1 = conn.execute(
                 sqlalchemy.text("""
                     DELETE FROM live_locations
                     WHERE timestamp < :cutoff
                 """),
-                {"cutoff": cutoff}
+                {"cutoff": hard_cutoff}
             )
-            deleted = result.rowcount
+            deleted_old = result1.rowcount
 
-            if deleted > 0:
-                log.info(f"[Scheduler] Cleaned {deleted} old live location records (older than 7 days)")
+            # Rule 2: Delete records for completed trips older than 24 hours
+            # This ensures location data is cleaned up promptly after trip completion
+            result2 = conn.execute(
+                sqlalchemy.text("""
+                    DELETE FROM live_locations
+                    WHERE trip_id IN (
+                        SELECT id FROM trips
+                        WHERE status IN ('completed', 'cancelled')
+                        AND completed_at IS NOT NULL
+                        AND completed_at < :completed_cutoff
+                    )
+                """),
+                {"completed_cutoff": completed_trip_cutoff}
+            )
+            deleted_completed = result2.rowcount
+
+            total_deleted = deleted_old + deleted_completed
+            if total_deleted > 0:
+                log.info(
+                    f"[Scheduler] Cleaned live location records: "
+                    f"{deleted_old} older than 7 days, "
+                    f"{deleted_completed} from completed trips (>24h old)"
+                )
 
     except Exception as e:
         log.error(f"Error cleaning old live locations: {e}", exc_info=True)

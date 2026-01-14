@@ -2651,6 +2651,40 @@ def update_live_location(
 
         now = datetime.now(UTC)
 
+        # Rate limiting: Check if user has updated within the last 10 seconds
+        RATE_LIMIT_SECONDS = 10
+        last_update = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT timestamp FROM live_locations
+                WHERE trip_id = :trip_id AND user_id = :user_id
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """
+            ),
+            {"trip_id": trip_id, "user_id": user_id}
+        ).fetchone()
+
+        if last_update:
+            # Parse the timestamp (may be string or datetime)
+            last_ts = last_update.timestamp
+            if isinstance(last_ts, str):
+                from datetime import timezone
+                from dateutil import parser as dateutil_parser
+                last_ts = dateutil_parser.parse(last_ts)
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=timezone.utc)
+            elif last_ts.tzinfo is None:
+                from datetime import timezone
+                last_ts = last_ts.replace(tzinfo=timezone.utc)
+
+            seconds_since_last = (now - last_ts).total_seconds()
+            if seconds_since_last < RATE_LIMIT_SECONDS:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Rate limited. Please wait {int(RATE_LIMIT_SECONDS - seconds_since_last)} seconds before updating again."
+                )
+
         # Insert the new location
         connection.execute(
             sqlalchemy.text(
