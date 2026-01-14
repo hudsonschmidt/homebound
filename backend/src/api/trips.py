@@ -551,7 +551,8 @@ def create_trip(
     from src.services.subscription_check import (
         check_contact_limit,
         check_custom_intervals_allowed,
-        check_custom_messages_allowed
+        check_custom_messages_allowed,
+        check_group_trips_allowed
     )
     check_contact_limit(user_id, contact_count)
 
@@ -561,6 +562,10 @@ def create_trip(
     # Check if user can set custom messages (premium feature)
     if body.custom_start_message or body.custom_overdue_message:
         check_custom_messages_allowed(user_id)
+
+    # Check if user can create group trips (premium feature)
+    if body.is_group_trip:
+        check_group_trips_allowed(user_id)
 
     with db.engine.begin() as connection:
         # Verify activity exists and get its ID

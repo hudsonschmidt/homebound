@@ -4227,6 +4227,68 @@ def test_update_live_location_rate_limited():
         cleanup_test_data(user_id)
 
 
+def test_create_group_trip_requires_plus_subscription():
+    """Test that free tier users cannot create group trips."""
+    # Create a free tier user (no premium subscription)
+    user_id, contact_id = setup_test_user_and_contact(premium=False)
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Group Trip Subscription Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        is_group_trip=True,  # Attempting to create group trip
+        gen_lat=37.7749,
+        gen_lon=-122.4194
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            create_trip(trip_data, background_tasks, user_id=user_id)
+
+        assert exc_info.value.status_code == 403
+        assert "group trips" in exc_info.value.detail.lower() or "homebound+" in exc_info.value.detail.lower()
+
+    finally:
+        cleanup_test_data(user_id)
+
+
+def test_create_group_trip_allowed_for_plus_user():
+    """Test that Plus tier users can create group trips."""
+    # Create a plus tier user
+    user_id, contact_id = setup_test_user_and_contact(premium=True)
+
+    now = datetime.now(UTC)
+    trip_data = TripCreate(
+        title="Group Trip Plus Test",
+        activity="Hiking",
+        start=now,
+        eta=now + timedelta(hours=2),
+        grace_min=30,
+        location_text="Mountain Trail",
+        contact1=contact_id,
+        is_group_trip=True,
+        gen_lat=37.7749,
+        gen_lon=-122.4194
+    )
+
+    background_tasks = MagicMock(spec=BackgroundTasks)
+
+    try:
+        trip = create_trip(trip_data, background_tasks, user_id=user_id)
+        assert trip.is_group_trip is True
+        assert trip.id is not None
+
+    finally:
+        cleanup_test_data(user_id)
+
+
 # ==================== My Contacts Tests ====================
 
 def test_get_my_contacts_owner():
