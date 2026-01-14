@@ -1,6 +1,7 @@
 import Foundation
 import CoreLocation
 import Combine
+import UIKit
 
 /// Manages live location sharing for active trips.
 /// When enabled for a trip, sends location updates to the server every 30 seconds.
@@ -40,6 +41,20 @@ final class LiveLocationManager: NSObject, ObservableObject {
         // Note: allowsBackgroundLocationUpdates is set when starting updates
         // to avoid crash when background mode isn't properly configured
         locationManager.pausesLocationUpdatesAutomatically = false
+
+        // Resume location updates when app returns to foreground
+        // This handles the case where iOS suspends updates with "When In Use" permission
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, self.isSharing else { return }
+                self.locationManager.startUpdatingLocation()
+                debugLog("[LiveLocation] Resumed location updates on foreground")
+            }
+        }
     }
 
     // MARK: - Public Methods
@@ -77,15 +92,17 @@ final class LiveLocationManager: NSObject, ObservableObject {
         // Start location updates
         locationManager.startUpdatingLocation()
 
-        // Start periodic update timer
-        updateTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
+        // Start periodic update timer with explicit RunLoop for robust background behavior
+        updateTimer = Timer(timeInterval: updateInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.sendLocationUpdate()
             }
         }
+        RunLoop.main.add(updateTimer!, forMode: .common)
 
-        // Send initial update immediately
+        // Send initial update with brief delay to allow CLLocationManager to get first fix
         Task {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             await sendLocationUpdate()
         }
     }

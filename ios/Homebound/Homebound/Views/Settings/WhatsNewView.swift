@@ -8,6 +8,15 @@ struct WhatsNewFeature: Identifiable {
     let iconColor: Color
     let title: String
     let description: String
+    let isCustomSymbol: Bool
+
+    init(icon: String, iconColor: Color, title: String, description: String, isCustomSymbol: Bool = false) {
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = title
+        self.description = description
+        self.isCustomSymbol = isCustomSymbol
+    }
 }
 
 struct WhatsNewRelease {
@@ -21,39 +30,30 @@ struct WhatsNewRelease {
 enum WhatsNewContent {
     static let currentRelease = WhatsNewRelease(
         version: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
-        title: "Update 0.6.3",
+        title: "Update 1.0.0",
         features: [
+            WhatsNewFeature(
+                icon: "custom.fireworks",
+                iconColor: Color.hbBrand,
+                title: "Public Launch!",
+                description: "Homebound is now available to everyone on the App Store. Thank you for being part of this journey!",
+                isCustomSymbol: true
+            ),
+            WhatsNewFeature(
+                icon: "heart",
+                iconColor: .red,
+                title: "Thank you so much!",
+                description: "I am so appreciative to each and every one of you for helping me make this. I could not have done this without you."
+            ),
             WhatsNewFeature(
                 icon: "ladybug",
                 iconColor: .primary,
                 title: "Bug Fixes",
-                description: "Tweaked wording/UI for location selection. Added new features to and improved friend maps. Live location is not considered if a last known location is needed (only if toggled). Clicking on notifications take you to the correct place in the app. Widgets, all extensions, and export data is free."
+                description: "Final bug and security fixes."
             )
         ]
     )
 }
-
-// title: "Update 1.0",
-//         features: [
-//             WhatsNewFeature(
-//                 icon: "fireworks",
-//                 iconColor: .primary,
-//                 title: "Public Launch!",
-//                 description: "Homebound is now available to everyone on the App Store. Thank you for being part of this journey!"
-//             ),
-//             WhatsNewFeature(
-//                 icon: "heart",
-//                 iconColor: .primary,
-//                 title: "Thank you so much!",
-//                 description: "I am so appreciative to each and every one of you for helping me make this. I could not have done this without you."
-//             ),
-//             WhatsNewFeature(
-//                 icon: "ladybug",
-//                 iconColor: .primary,
-//                 title: "Bug Fixes",
-//                 description: "Final bug and security fixes."
-//             )
-//         ]
 
 // MARK: - View
 
@@ -162,9 +162,20 @@ struct FeatureRowView: View {
                 .fill(feature.iconColor.opacity(0.15))
                 .frame(width: 50, height: 50)
                 .overlay(
-                    Image(systemName: feature.icon)
-                        .font(.system(size: 22))
-                        .foregroundStyle(feature.iconColor)
+                    Group {
+                        if feature.isCustomSymbol {
+                            // Custom symbol from asset catalog
+                            Image(feature.icon)
+                                .font(.system(size: 22))
+                                .symbolRenderingMode(.multicolor)
+                                .symbolEffect(.breathe.pulse.byLayer, options: .repeat(.continuous))
+                        } else {
+                            // System SF Symbol
+                            Image(systemName: feature.icon)
+                                .font(.system(size: 22))
+                                .foregroundStyle(feature.iconColor)
+                        }
+                    }
                 )
 
             VStack(alignment: .leading, spacing: 4) {
