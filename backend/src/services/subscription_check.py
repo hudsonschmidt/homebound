@@ -103,6 +103,9 @@ def get_user_tier(user_id: int) -> str:
     - User not found
 
     Returns 'plus' if user has active Homebound+ subscription.
+
+    Note: If a subscription is found to be expired, this function also
+    updates the database to reflect the correct tier for data consistency.
     """
     with db.engine.begin() as conn:
         result = conn.execute(
@@ -127,6 +130,30 @@ def get_user_tier(user_id: int) -> str:
             # Handle timezone-aware comparison properly
             exp = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
             if exp < datetime.now(UTC):
+                # Subscription expired - update DB for consistency
+                conn.execute(
+                    sqlalchemy.text(
+                        """
+                        UPDATE users
+                        SET subscription_tier = 'free'
+                        WHERE id = :user_id AND subscription_tier = 'plus'
+                        """
+                    ),
+                    {"user_id": user_id}
+                )
+                # Also update subscriptions table status
+                conn.execute(
+                    sqlalchemy.text(
+                        """
+                        UPDATE subscriptions
+                        SET status = 'expired', updated_at = :now
+                        WHERE user_id = :user_id
+                        AND status IN ('active', 'cancelled', 'grace_period')
+                        AND expires_date < :now
+                        """
+                    ),
+                    {"user_id": user_id, "now": datetime.now(UTC)}
+                )
                 return "free"
 
         return tier or "free"

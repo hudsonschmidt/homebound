@@ -13,6 +13,7 @@ from starlette.middleware.cors import CORSMiddleware
 from src import config
 from src.api import activities, auth_endpoints, checkin, contacts, devices, friends, invite_page, live_activity_tokens, participants, profile, stats, subscriptions, trips
 from src.services.scheduler import start_scheduler, stop_scheduler
+from src.services.app_store import app_store_service
 
 # Configure logging based on environment
 settings = config.get_settings()
@@ -30,6 +31,24 @@ async def lifespan(app: FastAPI):
     # Startup
     log.info("Starting background scheduler...")
     start_scheduler()
+
+    # SECURITY WARNING: Check Apple App Store Server API configuration
+    if not app_store_service.is_configured:
+        if settings.DEV_MODE:
+            log.warning(
+                "⚠️  Apple App Store Server API not configured. "
+                "Purchase verification will trust client-provided data. "
+                "This is acceptable for development but MUST be configured for production."
+            )
+        else:
+            log.error(
+                "🚨 SECURITY WARNING: Apple App Store Server API not configured in PRODUCTION! "
+                "Set APP_STORE_KEY_ID, APP_STORE_ISSUER_ID, and APP_STORE_PRIVATE_KEY. "
+                "Without these, malicious clients could claim false purchases."
+            )
+    else:
+        log.info("✅ Apple App Store Server API configured for purchase verification")
+
     yield
     # Shutdown
     log.info("Stopping background scheduler...")

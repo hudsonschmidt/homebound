@@ -35,6 +35,9 @@ VALID_PRODUCT_IDS = {
 # Webhook deduplication TTL (7 days)
 WEBHOOK_DEDUP_TTL_DAYS = 7
 
+# Pending webhook TTL (1 hour - if verify-purchase doesn't arrive, webhook is stale)
+PENDING_WEBHOOK_TTL_MINUTES = 60
+
 router = APIRouter(
     prefix="/api/v1/subscriptions",
     tags=["subscriptions"],
@@ -415,6 +418,50 @@ async def verify_purchase(body: VerifyPurchaseRequest, user_id: int = Depends(au
                 "expires_at": effective_expires_at
             }
         )
+
+        # Check for and process any pending webhooks for this subscription
+        # This handles the race condition where Apple webhook arrived before verify-purchase
+        pending = conn.execute(
+            sqlalchemy.text(
+                """
+                SELECT notification_type, subtype, signed_transaction_info, signed_renewal_info
+                FROM pending_webhooks
+                WHERE original_transaction_id = :original_transaction_id
+                AND expires_at > :now
+                """
+            ),
+            {"original_transaction_id": body.original_transaction_id, "now": datetime.now(UTC)}
+        ).fetchone()
+
+        if pending:
+            logger.info(
+                f"Found pending webhook for {body.original_transaction_id}: "
+                f"type={pending.notification_type}, processing now"
+            )
+            # Delete the pending webhook first
+            conn.execute(
+                sqlalchemy.text(
+                    """
+                    DELETE FROM pending_webhooks
+                    WHERE original_transaction_id = :original_transaction_id
+                    """
+                ),
+                {"original_transaction_id": body.original_transaction_id}
+            )
+            # Process the pending webhook in a separate call after this transaction commits
+
+        # Clean up expired pending webhooks periodically (1% chance)
+        if random.random() < 0.01:
+            conn.execute(
+                sqlalchemy.text(
+                    """
+                    DELETE FROM pending_webhooks
+                    WHERE expires_at < :now
+                    """
+                ),
+                {"now": datetime.now(UTC)}
+            )
+            logger.info("Cleaned up expired pending webhooks")
 
         return VerifyPurchaseResponse(
             ok=True,
@@ -833,8 +880,42 @@ def handle_notification(notification_type: str, subtype: str | None, data: dict)
         ).fetchone()
 
         if not subscription:
-            logger.info(f"No subscription found for original_transaction_id: {original_transaction_id}")
-            return {"processed": False, "reason": "Subscription not found"}
+            # Race condition: webhook arrived before iOS verify-purchase
+            # Store as pending webhook for processing when subscription is created
+            logger.info(
+                f"No subscription found for original_transaction_id: {original_transaction_id}. "
+                "Storing as pending webhook for later processing."
+            )
+            expires_at = datetime.now(UTC) + timedelta(minutes=PENDING_WEBHOOK_TTL_MINUTES)
+            conn.execute(
+                sqlalchemy.text(
+                    """
+                    INSERT INTO pending_webhooks (
+                        original_transaction_id, notification_type, subtype,
+                        signed_transaction_info, signed_renewal_info, expires_at
+                    ) VALUES (
+                        :original_transaction_id, :notification_type, :subtype,
+                        :signed_transaction_info, :signed_renewal_info, :expires_at
+                    )
+                    ON CONFLICT (original_transaction_id) DO UPDATE SET
+                        notification_type = EXCLUDED.notification_type,
+                        subtype = EXCLUDED.subtype,
+                        signed_transaction_info = EXCLUDED.signed_transaction_info,
+                        signed_renewal_info = EXCLUDED.signed_renewal_info,
+                        expires_at = EXCLUDED.expires_at,
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "original_transaction_id": original_transaction_id,
+                    "notification_type": notification_type,
+                    "subtype": subtype,
+                    "signed_transaction_info": data.get("signedTransactionInfo"),
+                    "signed_renewal_info": data.get("signedRenewalInfo"),
+                    "expires_at": expires_at
+                }
+            )
+            return {"processed": False, "reason": "Subscription not found - stored as pending webhook"}
 
         user_id = subscription.user_id
         subscription_id = subscription.subscription_id
@@ -1008,8 +1089,15 @@ async def apple_webhook(request: Request):
 
     See: https://developer.apple.com/documentation/appstoreservernotifications
     """
+    # Initialize variables for dead-letter queue in case of early failure
+    notification_type = None
+    subtype = None
+    notification_uuid = None
+    raw_body = None
+
     try:
-        body = await request.json()
+        raw_body = await request.body()
+        body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
         signed_payload = body.get("signedPayload")
 
         if not signed_payload:
@@ -1098,6 +1186,34 @@ async def apple_webhook(request: Request):
         raise
     except Exception as e:
         logger.exception(f"Apple webhook error: {e}")
+
+        # Store in dead-letter queue for later retry/investigation
+        try:
+            payload_str = raw_body.decode("utf-8") if raw_body else "{}"
+            with db.engine.begin() as conn:
+                conn.execute(
+                    sqlalchemy.text(
+                        """
+                        INSERT INTO failed_webhooks (
+                            notification_uuid, notification_type, subtype,
+                            payload, error_message
+                        ) VALUES (
+                            :notification_uuid, :notification_type, :subtype,
+                            :payload, :error_message
+                        )
+                        """
+                    ),
+                    {
+                        "notification_uuid": notification_uuid,
+                        "notification_type": notification_type,
+                        "subtype": subtype,
+                        "payload": payload_str,
+                        "error_message": str(e)
+                    }
+                )
+            logger.info(f"Stored failed webhook in dead-letter queue: {e}")
+        except Exception as dlq_error:
+            logger.error(f"Failed to store webhook in dead-letter queue: {dlq_error}")
+
         # Return 200 to Apple even on errors to prevent retries
-        # We log the error for investigation
         return {"ok": False, "error": str(e)}
