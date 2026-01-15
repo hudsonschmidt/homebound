@@ -873,6 +873,14 @@ class LiveLocationData(BaseModel):
     speed: float | None
 
 
+class MonitoredParticipant(BaseModel):
+    """Info about a participant being monitored in a group trip."""
+    user_id: int
+    first_name: str
+    last_name: str
+    profile_photo_url: str | None
+
+
 class FriendActiveTrip(BaseModel):
     id: int
     owner: FriendActiveTripOwner
@@ -897,6 +905,9 @@ class FriendActiveTrip(BaseModel):
     start_lat: float | None = None
     start_lon: float | None = None
     has_pending_update_request: bool = False
+    # Group trip fields
+    is_group_trip: bool = False
+    monitored_participant: MonitoredParticipant | None = None
 
 
 @router.get("/active-trips", response_model=list[FriendActiveTrip])
@@ -908,6 +919,10 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
     - Check-in locations on a map
     - Live location (if owner has enabled it)
     - Trip coordinates for map display
+
+    For group trips, also returns trips where the user is a safety contact for
+    a participant (via participant_trip_contacts). In this case, the check-in
+    and live location data shown is for the monitored participant, not the owner.
     """
     import json
     import logging
@@ -916,18 +931,23 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
     log.info(f"[Friends] get_friend_active_trips called for user_id={user_id}")
 
     with db.engine.begin() as connection:
-        # Get trips with owner visibility settings and coordinates
-        trips = connection.execute(
+        # Query 1: Solo trips where user is owner's friend safety contact
+        solo_trips = connection.execute(
             sqlalchemy.text(
                 """
                 SELECT t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
                        t.location_text, t.start_location_text, t.notes, t.status, t.timezone,
                        t.gen_lat, t.gen_lon, t.start_lat, t.start_lon, t.share_live_location,
+                       t.is_group_trip,
                        a.name as activity_name, a.icon as activity_icon, a.colors as activity_colors,
                        u.first_name, u.last_name, u.profile_photo_url,
                        u.friend_share_checkin_locations, u.friend_share_live_location,
                        u.friend_share_notes, u.friend_allow_update_requests,
-                       e.timestamp as last_checkin_at
+                       e.timestamp as last_checkin_at,
+                       NULL::integer as monitored_user_id,
+                       NULL::text as monitored_first_name,
+                       NULL::text as monitored_last_name,
+                       NULL::text as monitored_profile_photo_url
                 FROM trips t
                 JOIN trip_safety_contacts tsc ON tsc.trip_id = t.id
                 JOIN activities a ON t.activity = a.id
@@ -935,23 +955,69 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
                 LEFT JOIN events e ON t.last_checkin = e.id
                 WHERE tsc.friend_user_id = :current_user_id
                 AND t.status IN ('active', 'overdue', 'overdue_notified', 'planned')
-                ORDER BY t.start ASC
                 """
             ),
             {"current_user_id": user_id}
         ).mappings().fetchall()
 
-        if not trips:
+        # Query 2: Group trips where user is a participant's friend safety contact
+        group_trips = connection.execute(
+            sqlalchemy.text(
+                """
+                SELECT DISTINCT ON (t.id)
+                       t.id, t.user_id, t.title, t.start, t.eta, t.grace_min,
+                       t.location_text, t.start_location_text, t.notes, t.status, t.timezone,
+                       t.gen_lat, t.gen_lon, t.start_lat, t.start_lon,
+                       COALESCE(tp.share_location, false) as share_live_location,
+                       t.is_group_trip,
+                       a.name as activity_name, a.icon as activity_icon, a.colors as activity_colors,
+                       owner.first_name, owner.last_name, owner.profile_photo_url,
+                       participant.friend_share_checkin_locations,
+                       participant.friend_share_live_location,
+                       participant.friend_share_notes,
+                       participant.friend_allow_update_requests,
+                       tp.last_checkin_at,
+                       ptc.participant_user_id as monitored_user_id,
+                       participant.first_name as monitored_first_name,
+                       participant.last_name as monitored_last_name,
+                       participant.profile_photo_url as monitored_profile_photo_url
+                FROM trips t
+                JOIN participant_trip_contacts ptc ON ptc.trip_id = t.id
+                JOIN trip_participants tp ON tp.trip_id = t.id AND tp.user_id = ptc.participant_user_id
+                JOIN activities a ON t.activity = a.id
+                JOIN users owner ON t.user_id = owner.id
+                JOIN users participant ON ptc.participant_user_id = participant.id
+                WHERE ptc.friend_user_id = :current_user_id
+                AND t.status IN ('active', 'overdue', 'overdue_notified', 'planned')
+                AND tp.status = 'accepted'
+                ORDER BY t.id, t.start ASC
+                """
+            ),
+            {"current_user_id": user_id}
+        ).mappings().fetchall()
+
+        # Combine trips, avoiding duplicates (solo trips take precedence)
+        solo_trip_ids = {trip["id"] for trip in solo_trips}
+        all_trips = list(solo_trips) + [t for t in group_trips if t["id"] not in solo_trip_ids]
+
+        if not all_trips:
             return []
 
         # Extract trip IDs for batch queries
-        trip_ids = [trip["id"] for trip in trips]
+        trip_ids = [trip["id"] for trip in all_trips]
 
-        # Batch load check-in events for all trips (reduces N+1 queries)
+        # Build map of trip_id -> monitored_user_id for group trips
+        monitored_user_map = {
+            trip["id"]: trip["monitored_user_id"]
+            for trip in all_trips if trip["monitored_user_id"]
+        }
+
+        # Batch load check-in events for all trips
+        # For group trips with monitored participant, filter by user_id
         checkin_events_raw = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT trip_id, timestamp, lat, lon
+                SELECT trip_id, user_id, timestamp, lat, lon
                 FROM events
                 WHERE trip_id = ANY(:trip_ids) AND what = 'checkin' AND lat IS NOT NULL
                 ORDER BY trip_id, timestamp DESC
@@ -961,25 +1027,32 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
         ).fetchall()
 
         # Group check-in events by trip_id (limit 10 per trip)
+        # Show all check-ins for the trip (not filtered by user)
         checkin_map: dict[int, list] = {tid: [] for tid in trip_ids}
         for event in checkin_events_raw:
             if len(checkin_map[event.trip_id]) < 10:
                 checkin_map[event.trip_id].append(event)
 
         # Batch load live locations for all trips
+        # For group trips, we need to get participant's live location
         live_locations_raw = connection.execute(
             sqlalchemy.text(
                 """
-                SELECT DISTINCT ON (trip_id) trip_id, latitude, longitude, speed, timestamp
+                SELECT DISTINCT ON (trip_id, user_id) trip_id, user_id, latitude, longitude, speed, timestamp
                 FROM live_locations
                 WHERE trip_id = ANY(:trip_ids)
-                ORDER BY trip_id, timestamp DESC
+                ORDER BY trip_id, user_id, timestamp DESC
                 """
             ),
             {"trip_ids": trip_ids}
         ).fetchall()
 
-        live_loc_map = {row.trip_id: row for row in live_locations_raw}
+        # Map: trip_id -> (user_id -> live_location)
+        live_loc_by_trip_user: dict[int, dict[int, object]] = {}
+        for row in live_locations_raw:
+            if row.trip_id not in live_loc_by_trip_user:
+                live_loc_by_trip_user[row.trip_id] = {}
+            live_loc_by_trip_user[row.trip_id][row.user_id] = row
 
         # Batch load pending update requests for all trips
         pending_requests_raw = connection.execute(
@@ -997,7 +1070,7 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
         pending_map = {row.trip_id for row in pending_requests_raw}
 
         result = []
-        for trip in trips:
+        for trip in all_trips:
             # Parse activity colors (may be JSON string or dict)
             colors = trip["activity_colors"]
             if isinstance(colors, str):
@@ -1014,7 +1087,7 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             if last_checkin_str is not None and hasattr(last_checkin_str, 'isoformat'):
                 last_checkin_str = last_checkin_str.isoformat()
 
-            # Get owner's visibility settings (with defaults for backwards compatibility)
+            # Get visibility settings (from owner for solo, from participant for group)
             share_checkin_locations = trip.get("friend_share_checkin_locations", True)
             share_live_location = trip.get("friend_share_live_location", False)
             share_notes = trip.get("friend_share_notes", True)
@@ -1048,7 +1121,12 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             live_location = None
             trip_has_live_location = trip.get("share_live_location", False)
             if share_live_location and trip_has_live_location:
-                live_loc = live_loc_map.get(trip["id"])
+                trip_live_locs = live_loc_by_trip_user.get(trip["id"], {})
+                monitored_user = trip.get("monitored_user_id")
+                # For group trips, get the monitored participant's live location
+                # For solo trips, get the owner's live location
+                target_user = monitored_user if monitored_user else trip["user_id"]
+                live_loc = trip_live_locs.get(target_user)
                 if live_loc:
                     ts = live_loc.timestamp
                     if hasattr(ts, 'isoformat'):
@@ -1064,6 +1142,17 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
             has_pending_update = False
             if allow_update_requests:
                 has_pending_update = trip["id"] in pending_map
+
+            # Build monitored participant info for group trips
+            monitored_participant = None
+            is_group_trip = trip.get("is_group_trip", False) or trip.get("monitored_user_id") is not None
+            if trip.get("monitored_user_id"):
+                monitored_participant = MonitoredParticipant(
+                    user_id=trip["monitored_user_id"],
+                    first_name=trip["monitored_first_name"] or "",
+                    last_name=trip["monitored_last_name"] or "",
+                    profile_photo_url=trip["monitored_profile_photo_url"]
+                )
 
             result.append(FriendActiveTrip(
                 id=trip["id"],
@@ -1093,9 +1182,14 @@ def get_friend_active_trips(user_id: int = Depends(auth.get_current_user_id)):
                 destination_lon=trip["gen_lon"],
                 start_lat=trip.get("start_lat"),
                 start_lon=trip.get("start_lon"),
-                has_pending_update_request=has_pending_update
+                has_pending_update_request=has_pending_update,
+                # Group trip fields
+                is_group_trip=is_group_trip,
+                monitored_participant=monitored_participant
             ))
 
+        # Sort by start time
+        result.sort(key=lambda t: t.start)
         return result
 
 

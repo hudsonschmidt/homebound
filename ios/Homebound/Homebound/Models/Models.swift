@@ -216,6 +216,19 @@ struct FriendActiveTripOwner: Codable {
     }
 }
 
+/// Info about a participant being monitored in a group trip
+struct MonitoredParticipant: Codable {
+    let user_id: Int
+    let first_name: String
+    let last_name: String
+    let profile_photo_url: String?
+
+    var fullName: String {
+        if last_name.isEmpty { return first_name }
+        return "\(first_name) \(last_name)"
+    }
+}
+
 /// A check-in event with location data for friends to see on a map
 struct CheckinLocation: Codable, Identifiable {
     let timestamp: String
@@ -277,6 +290,9 @@ struct FriendActiveTrip: Codable, Identifiable {
     let start_lat: Double?
     let start_lon: Double?
     let has_pending_update_request: Bool?
+    // Group trip fields
+    let is_group_trip: Bool?
+    let monitored_participant: MonitoredParticipant?
 
     var startDate: Date? { DateUtils.parseISO8601(start) }
     var etaDate: Date? { DateUtils.parseISO8601(eta) }
@@ -322,6 +338,21 @@ struct FriendActiveTrip: Codable, Identifiable {
         destinationCoordinate != nil || startCoordinate != nil ||
         (checkin_locations?.contains { $0.coordinate != nil } ?? false) ||
         live_location != nil
+    }
+
+    /// True if this is a group trip
+    var isGroupTrip: Bool {
+        is_group_trip == true
+    }
+
+    /// Name of the person being monitored (participant for group trips, owner for solo trips)
+    var monitoredName: String {
+        monitored_participant?.fullName ?? owner.fullName
+    }
+
+    /// First name of the person being monitored
+    var monitoredFirstName: String {
+        monitored_participant?.first_name ?? owner.first_name
     }
 }
 

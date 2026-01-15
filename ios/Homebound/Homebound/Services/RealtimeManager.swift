@@ -14,6 +14,7 @@ final class RealtimeManager: ObservableObject {
     private var eventsChannel: RealtimeChannelV2?
     private var votesChannel: RealtimeChannelV2?
     private var usersChannel: RealtimeChannelV2?
+    private var liveLocationsChannel: RealtimeChannelV2?
 
     private var currentUserId: Int?
     private var isRunning = false
@@ -51,6 +52,7 @@ final class RealtimeManager: ObservableObject {
         await subscribeToEvents()
         await subscribeToVotes()
         await subscribeToUserChanges()
+        await subscribeToLiveLocations()
 
         debugLog("[Realtime] All subscriptions started")
     }
@@ -75,6 +77,7 @@ final class RealtimeManager: ObservableObject {
         await eventsChannel?.unsubscribe()
         await votesChannel?.unsubscribe()
         await usersChannel?.unsubscribe()
+        await liveLocationsChannel?.unsubscribe()
 
         friendshipsChannel = nil
         tripsChannel = nil
@@ -82,6 +85,7 @@ final class RealtimeManager: ObservableObject {
         eventsChannel = nil
         votesChannel = nil
         usersChannel = nil
+        liveLocationsChannel = nil
         currentUserId = nil
         isRunning = false
         hasConnectionIssue = false
@@ -106,6 +110,7 @@ final class RealtimeManager: ObservableObject {
         await subscribeToEvents()
         await subscribeToVotes()
         await subscribeToUserChanges()
+        await subscribeToLiveLocations()
 
         debugLog("[Realtime] Reconnection attempt complete")
     }
@@ -447,6 +452,35 @@ final class RealtimeManager: ObservableObject {
                     debugLog("[Realtime] Subscription change detected: \(oldTier ?? "nil") -> \(newTier ?? "nil")")
                     await Session.shared.handleSubscriptionChange()
                 }
+            }
+        }
+    }
+
+    /// Subscribe to live_locations table for real-time location updates
+    private func subscribeToLiveLocations() async {
+        let channel = supabase.channel("live-locations")
+        liveLocationsChannel = channel
+
+        // Listen for new live location inserts
+        let inserts = channel.postgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "live_locations"
+        )
+
+        let success = await subscribeWithRetry(channel: channel, name: "live-locations")
+        guard success else { return }
+
+        // Handle new live location updates
+        Task { [weak self] in
+            for await insert in inserts {
+                guard self != nil else { break }
+                let record = insert.record
+                let tripId = record["trip_id"]?.intValue
+                debugLog("[Realtime] Live location update: tripId=\(String(describing: tripId))")
+
+                // Refresh friend active trips to pick up new location data
+                _ = await Session.shared.loadFriendActiveTrips()
             }
         }
     }

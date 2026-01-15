@@ -9,7 +9,7 @@ struct FriendTripMapView: View {
     @State private var currentTrip: FriendActiveTrip
     @State private var mapPosition: MapCameraPosition = .automatic
     @Environment(\.dismiss) private var dismiss
-    private let pollingInterval: TimeInterval = 10
+    private let pollingInterval: TimeInterval = 30
 
     init(trip: FriendActiveTrip) {
         self.trip = trip
@@ -97,8 +97,8 @@ struct FriendTripMapView: View {
 
         // Live location pin
         if let liveLocation = currentTrip.live_location {
-            Annotation("\(currentTrip.owner.first_name) (Live)", coordinate: liveLocation.coordinate) {
-                LiveLocationPin(ownerName: currentTrip.owner.first_name)
+            Annotation("\(currentTrip.monitoredFirstName) (Live)", coordinate: liveLocation.coordinate) {
+                LiveLocationPin(ownerName: currentTrip.monitoredFirstName)
             }
         }
 
@@ -124,7 +124,7 @@ struct FriendTripMapView: View {
                 mapContent
             }
             .mapStyle(.standard)
-            .navigationTitle("\(currentTrip.owner.first_name)'s Trip")
+            .navigationTitle(currentTrip.isGroupTrip ? "Monitoring \(currentTrip.monitoredFirstName)" : "\(currentTrip.owner.first_name)'s Trip")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -306,14 +306,34 @@ private struct TripInfoCard: View {
         VStack(alignment: .leading, spacing: 8) {
             // Header
             HStack {
-                Text(trip.activity_icon)
-                    .font(.title2)
+                // Activity icon with optional group badge
+                ZStack(alignment: .bottomTrailing) {
+                    Text(trip.activity_icon)
+                        .font(.title2)
+
+                    if trip.isGroupTrip {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 7))
+                            .foregroundStyle(.white)
+                            .padding(2)
+                            .background(Color.hbBrand.opacity(0.8))
+                            .clipShape(Circle())
+                            .offset(x: 3, y: 2)
+                    }
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(trip.title)
                         .font(.headline)
-                    Text("\(trip.owner.fullName)'s trip")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // For group trips, show who we're monitoring
+                    if trip.isGroupTrip {
+                        Text("Monitoring \(trip.monitoredName)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(trip.owner.fullName)'s trip")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 StatusBadge(status: trip.status)

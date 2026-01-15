@@ -2673,22 +2673,26 @@ def update_live_location(
         if last_update:
             # Parse the timestamp (may be string or datetime)
             last_ts = last_update.timestamp
-            if isinstance(last_ts, str):
-                from datetime import timezone
-                from dateutil import parser as dateutil_parser
-                last_ts = dateutil_parser.parse(last_ts)
-                if last_ts.tzinfo is None:
+            try:
+                if isinstance(last_ts, str):
+                    from datetime import timezone
+                    from dateutil import parser as dateutil_parser
+                    last_ts = dateutil_parser.parse(last_ts)
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts.replace(tzinfo=timezone.utc)
+                elif last_ts.tzinfo is None:
+                    from datetime import timezone
                     last_ts = last_ts.replace(tzinfo=timezone.utc)
-            elif last_ts.tzinfo is None:
-                from datetime import timezone
-                last_ts = last_ts.replace(tzinfo=timezone.utc)
 
-            seconds_since_last = (now - last_ts).total_seconds()
-            if seconds_since_last < RATE_LIMIT_SECONDS:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=f"Rate limited. Please wait {int(RATE_LIMIT_SECONDS - seconds_since_last)} seconds before updating again."
-                )
+                seconds_since_last = (now - last_ts).total_seconds()
+                if seconds_since_last < RATE_LIMIT_SECONDS:
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=f"Rate limited. Please wait {int(RATE_LIMIT_SECONDS - seconds_since_last)} seconds before updating again."
+                    )
+            except (ValueError, TypeError) as e:
+                # If timestamp parsing fails, log warning and allow the update
+                log.warning(f"[LiveLocation] Failed to parse timestamp for rate limit check: {e}")
 
         # Insert the new location
         connection.execute(

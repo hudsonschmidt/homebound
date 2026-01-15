@@ -581,33 +581,45 @@ struct JoinTripContactSelectionView: View {
                                         }
                                     }
                                 } else {
-                                    // Master toggle is OFF - show disabled state with link to Privacy
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "location.slash.fill")
-                                            .foregroundStyle(.secondary)
+                                    // Master toggle is OFF - show requirement to enable before joining
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .foregroundStyle(.orange)
+                                                .font(.title2)
 
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("Location Sharing")
-                                                .font(.subheadline)
-                                            Text("Enable in Settings > Privacy to share your location")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Live Location Required")
+                                                    .font(.subheadline)
+                                                    .fontWeight(.semibold)
+                                                Text("This group trip requires location sharing. Enable live location in your privacy settings to join.")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
-
-                                        Spacer()
 
                                         NavigationLink(destination: PrivacyView()) {
-                                            Text("Enable")
-                                                .font(.caption)
-                                                .foregroundStyle(Color.hbBrand)
+                                            HStack {
+                                                Image(systemName: "gear")
+                                                Text("Open Privacy Settings")
+                                                    .fontWeight(.medium)
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(Color.hbBrand)
+                                            .foregroundStyle(.white)
+                                            .cornerRadius(8)
                                         }
                                     }
-                                    .opacity(0.7)
                                 }
                             } header: {
                                 Text("Location Sharing")
                             } footer: {
-                                Text("The trip owner has enabled location sharing between participants. You can choose whether to share your location with the group.")
+                                if session.friendVisibilitySettings.friend_share_live_location {
+                                    Text("The trip owner has enabled location sharing between participants. You can choose whether to share your location with the group.")
+                                } else {
+                                    Text("You must enable live location sharing in your privacy settings before you can join this group trip.")
+                                }
                             }
                         }
                     }
@@ -626,6 +638,12 @@ struct JoinTripContactSelectionView: View {
 
                 // Join button
                 VStack(spacing: 12) {
+                    // Check if location sharing is required but not enabled
+                    let requiresLocationSharing = invitation.group_settings?.share_locations_between_participants == true
+                    let hasLocationEnabled = session.friendVisibilitySettings.friend_share_live_location
+                    let isLocationBlocked = requiresLocationSharing && !hasLocationEnabled
+                    let canJoin = totalSelectedCount > 0 && !isLocationBlocked
+
                     Button(action: {
                         Task {
                             isJoining = true
@@ -648,17 +666,17 @@ struct JoinTripContactSelectionView: View {
                                     .scaleEffect(0.9)
                             } else {
                                 Image(systemName: "person.badge.plus")
-                                Text("Join Trip")
+                                Text(isLocationBlocked ? "Enable Location to Join" : "Join Trip")
                                     .fontWeight(.semibold)
                             }
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: 56)
-                        .background(totalSelectedCount == 0 ? Color.gray : Color.hbBrand)
+                        .background(canJoin ? Color.hbBrand : Color.gray)
                         .foregroundStyle(.white)
                         .cornerRadius(16)
                     }
-                    .disabled(totalSelectedCount == 0 || isJoining)
+                    .disabled(!canJoin || isJoining)
                 }
                 .padding()
             }

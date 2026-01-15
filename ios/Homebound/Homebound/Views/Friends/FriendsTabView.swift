@@ -678,17 +678,38 @@ struct FriendActiveTripCardExpanded: View {
         VStack(alignment: .leading, spacing: 10) {
             // Header: Icon + Title + Status + Timer
             HStack {
-                Text(trip.activity_icon)
-                    .font(.title2)
+                // Activity icon with optional group badge
+                ZStack(alignment: .bottomTrailing) {
+                    Text(trip.activity_icon)
+                        .font(.title2)
+
+                    // Subtle group indicator badge
+                    if trip.isGroupTrip {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.white)
+                            .padding(2)
+                            .background(Color.hbBrand.opacity(0.8))
+                            .clipShape(Circle())
+                            .offset(x: 4, y: 2)
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(trip.title)
                         .font(.subheadline)
                         .fontWeight(.semibold)
 
-                    Text(trip.activity_name)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // For group trips, show who we're monitoring; for solo trips show activity
+                    if trip.isGroupTrip {
+                        Text("Monitoring \(trip.monitoredFirstName)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(trip.activity_name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()
