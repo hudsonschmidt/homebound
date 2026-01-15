@@ -342,8 +342,9 @@ struct PaywallView: View {
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 16) {
-                Link("Terms of Service", destination: URL(string: "https://homeboundapp.com/terms")!)
-                Link("Privacy Policy", destination: URL(string: "https://homeboundapp.com/privacy")!)
+                Link("Terms of Service", destination: URL(string: "https://www.homeboundapp.com/termsofservice/")!)
+                Link("Privacy Policy", destination: URL(string: "https://www.homeboundapp.com/privacypolicy/")!)
+                Link("EULA", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
             }
             .font(.caption2)
         }

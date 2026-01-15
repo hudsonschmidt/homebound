@@ -838,7 +838,7 @@ struct SettingsView: View {
 
                 // Legal Section
                 Section("Legal") {
-                    Link(destination: URL(string: "https://www.homeboundapp.com/privacypolicy")!) {
+                    Link(destination: URL(string: "https://www.homeboundapp.com/privacypolicy/")!) {
                         Label {
                             HStack {
                                 Text("Privacy Policy")
@@ -853,7 +853,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    Link(destination: URL(string: "https://www.homeboundapp.com/termsofservice")!) {
+                    Link(destination: URL(string: "https://www.homeboundapp.com/termsofservice/")!) {
                         Label {
                             HStack {
                                 Text("Terms of Service")

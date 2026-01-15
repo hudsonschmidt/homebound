@@ -224,13 +224,13 @@ struct AuthenticationView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         HStack(spacing: 4) {
-                            Link("Terms of Service", destination: URL(string: "https://www.homeboundapp.com/termsofservice")!)
+                            Link("Terms of Service", destination: URL(string: "https://www.homeboundapp.com/termsofservice/")!)
                                 .font(.caption)
                                 .foregroundStyle(Color.hbBrand)
                             Text("and")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Link("Privacy Policy", destination: URL(string: "https://www.homeboundapp.com/privacypolicy")!)
+                            Link("Privacy Policy", destination: URL(string: "https://www.homeboundapp.com/privacypolicy/")!)
                                 .font(.caption)
                                 .foregroundStyle(Color.hbBrand)
                         }
